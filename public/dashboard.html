@@ -339,42 +339,6 @@ body, main, .main-content, .dashboard-main {
 
 
 <link rel="stylesheet" href="/css/zelimu-approved-dashboard.css?v=approved-picture-20261029">
-
-<style id="zelimu-account-controls-fix">
-#signOut {
-    display: inline-flex !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    background: #b91c1c !important;
-    color: #ffffff !important;
-    border-radius: 8px;
-    padding: 9px 15px;
-    font-weight: 700;
-}
-#who {
-    display: inline-block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-}
-#zelimuAccountControls {
-    position: fixed;
-    top: 12px;
-    right: 12px;
-    z-index: 99999;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 14px;
-    background: white;
-    border: 1px solid #d1d5db;
-    border-radius: 10px;
-    box-shadow: 0 3px 12px rgba(0,0,0,.15);
-}
-</style>
-
 </head>
 <body><main class="page">
 <header><div class="brand-lockup"><div class="pm-brand"><img src="/assets/zelimu-cbc-logo.svg" alt="ZELIMU CBC logo"><div><strong>ZELIMU CBC</strong><div class="muted small">School Management Portal</div></div></div><div><div class="muted small" id="schoolTitle">School workspace</div><div class="small role-caption" id="roleCaption">Secure school portal</div></div></div><div class="header-actions"><select id="ownerSchoolSwitch" class="owner-school-switch" style="display:none"></select><span id="who"></span><button class="btn secondary" id="signOut">Sign out</button></div></header><section class="portal-hero card"><div><span class="eyebrow">SCHOOL MANAGEMENT PLATFORM</span><h1 id="portalHeading">School workspace</h1><p id="portalSubtitle">Manage academic operations with a clear, role-aware workspace.</p></div><div><div class="hero-badge" id="roleBadge">LOADING ROLE…</div><div class="user-greeting" id="userGreeting"></div></div></section><div id="announcementBanner" class="notice" style="display:none;margin-top:12px"></div><section id="passwordPanel" class="card password-panel"><div class="section-title"><h2>My Password</h2><span class="pill">Secure account</span></div><p class="muted small">Change your password at any time. ZELIMU CBC never displays existing passwords because they are securely stored as one-way hashes.</p><form id="passwordForm"><label>Current password<input id="currentPassword" type="password" autocomplete="current-password" required></label><label>New password<input id="newPassword" type="password" minlength="10" autocomplete="new-password" required></label><label>Confirm new password<input id="confirmPassword" type="password" minlength="10" autocomplete="new-password" required></label><button class="btn primary" type="submit">Change password</button></form><div id="passwordMessage" class="notice" style="display:none"></div></section><section id="teacherMarking" class="nav-managed-section card teacher-only">
@@ -1033,282 +997,7 @@ async function fetchProtectedPdfBlob(url){
 async function openProtectedPdf(url,existingPopup=null){
  const popup=existingPopup||window.open('about:blank','_blank');
  if(!popup)throw new Error('Your browser blocked the PDF window. Please allow pop-ups for ZELIMU CBC and try again.');
- try{popup.document.open();popup.document.write('<!doctype html><html><head><title>ZELIMU CBC PDF</title></head><body style="font-family:Arial,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f8fafc;color:#17365D"><div style="text-align:center"><div style="font-size:28px;font-weight:700">ZELIMU CBC</div><div style="margin-top:10px">Preparing PDF…</div><div style="margin:14px auto;width:220px;height:6px;background:#e5e7eb;border-radius:99px;overflow:hidden"><div style="width:45%;height:100%;background:#17365D"></div></div></div>\n
-<script>
-(function(){
-  const groups={
-    transport:[
-      'transport_routes','transport_allocations',
-      'transport_trips','transport_maintenance',
-      'transport_incidents'
-    ],
-    boarding:[
-      'boarding_rooms','boarding_allocations',
-      'boarding_rollcalls','boarding_welfare',
-      'boarding_supplies'
-    ],
-    hr:[
-      'hr_leave','hr_training','hr_recruitment',
-      'hr_appraisals','hr_documents'
-    ]
-  };
-
-  function refreshTabs(){
-    const container=document.getElementById(
-      'zelimuOperationsFunctionTabs'
-    );
-    const frame=document.getElementById('operationsFrame');
-
-    if(!container||!frame)return;
-
-    const current=frame.dataset.type||'';
-    const group=Object.values(groups).find(
-      entries=>entries.includes(current)
-    );
-
-    container.replaceChildren();
-    if(!group)return;
-
-    for(const type of group){
-      const original=document.querySelector(
-        '#navTabs button[data-operations="'+type+'"]'
-      );
-      if(!original)continue;
-
-      const button=document.createElement('button');
-      button.type='button';
-      button.className='btn secondary';
-      button.textContent=original.textContent.trim();
-      button.style.fontSize='13px';
-      button.style.padding='9px 12px';
-
-      if(type===current){
-        button.classList.add('active');
-        button.setAttribute('aria-current','page');
-      }
-
-      button.addEventListener('click',()=>{
-        if(original.disabled ||
-           original.classList.contains('role-hidden')){
-          return;
-        }
-        original.click();
-        refreshTabs();
-      });
-
-      container.appendChild(button);
-    }
-  }
-
-  document.addEventListener('click',event=>{
-    if(event.target.closest('#navTabs [data-operations]')){
-      queueMicrotask(refreshTabs);
-      requestAnimationFrame(refreshTabs);
-    }
-  });
-
-  window.zelimuRefreshOperationsTabs=refreshTabs;
-})();
-</script>
-
-
-<script>
-(function(){
-  'use strict';
-
-  const $link = id => document.getElementById(id);
-  const teacherRoles = [
-    'TEACHER','CLASS_TEACHER','SENIOR_TEACHER',
-    'HEADTEACHER','DEPUTY_HEADTEACHER'
-  ];
-
-  function currentUser(){
-    try {
-      return typeof user !== 'undefined' ? user :
-        JSON.parse(localStorage.getItem('user') || '{}');
-    } catch { return {}; }
-  }
-
-  function schoolId(){
-    return typeof sid !== 'undefined' ? sid :
-      (currentUser().school_id || new URLSearchParams(location.search).get('school_id'));
-  }
-
-  function adminAccess(){
-    return ['SCHOOL_ADMIN','ADMIN','PLATFORM_OWNER']
-      .includes(currentUser().role);
-  }
-
-  function teacherAccess(){
-    return teacherRoles.includes(currentUser().role);
-  }
-
-  async function requestApi(path, options={}){
-    const response=await fetch(path,{
-      method:options.method||'GET',
-      headers:{
-        'Authorization':'Bearer '+(localStorage.getItem('token')||''),
-        'Content-Type':'application/json'
-      },
-      ...(options.body ? {body:JSON.stringify(options.body)} : {})
-    });
-    const data=await response.json();
-    if(!response.ok)throw new Error(data.error||'Request failed.');
-    return data;
-  }
-
-  function showMessage(id,message){
-    const box=$link(id);
-    if(!box)return;
-    box.textContent=message;
-    box.style.display='block';
-  }
-
-  async function loadTeacherLinkOptions(){
-    const select=$link('teacherLinkTeacher');
-    if(!select||!adminAccess()||!schoolId())return;
-
-    try{
-      const teachers=await requestApi(
-        `/api/people/${schoolId()}/teachers`
-      );
-
-      select.replaceChildren(new Option('Select teacher',''));
-
-      teachers.filter(t=>t.is_active&&!t.user_id).forEach(t=>{
-        select.add(new Option(
-          `${t.staff_no||''} - ${t.first_name||''} ${t.last_name||''}`,
-          t.id
-        ));
-      });
-    }catch(e){
-      showMessage('teacherLinkAdminMessage',e.message);
-    }
-  }
-
-  async function loadMyTeacherLinkRequests(){
-    const box=$link('teacherLinkPendingList');
-    if(!box||!teacherAccess()||!schoolId())return;
-
-    try{
-      const requests=await requestApi(
-        `/api/people/${schoolId()}/teacher-accounts/my-link-requests`
-      );
-
-      box.replaceChildren();
-
-      if(!requests.length){
-        box.textContent='No pending teacher-account linking requests.';
-        return;
-      }
-
-      requests.forEach(r=>{
-        const item=document.createElement('div');
-        item.className='item';
-
-        const title=document.createElement('p');
-        title.textContent=
-          `${r.first_name||''} ${r.last_name||''} — ${r.staff_no||''}`;
-
-        const button=document.createElement('button');
-        button.type='button';
-        button.className='btn';
-        button.textContent='Confirm My Teacher Account';
-
-        button.addEventListener('click',async()=>{
-          if(!confirm(
-            'Confirm that this teacher record belongs to you?'
-          ))return;
-
-          button.disabled=true;
-
-          try{
-            await requestApi(
-              `/api/people/${schoolId()}/teacher-accounts/link-requests/${encodeURIComponent(r.id)}/confirm`,
-              {method:'POST'}
-            );
-
-            alert('Teacher account linked successfully.');
-            await loadMyTeacherLinkRequests();
-          }catch(e){
-            alert(e.message);
-            button.disabled=false;
-          }
-        });
-
-        item.append(title,button);
-        box.append(item);
-      });
-    }catch(e){
-      box.textContent=e.message;
-    }
-  }
-
-  function initializeTeacherLinking(){
-    const adminPanel=$link('teacherLinkAdminPanel');
-    const teacherPanel=$link('teacherLinkConfirmation');
-
-    if(adminPanel){
-      adminPanel.style.display=adminAccess()?'block':'none';
-    }
-
-    if(teacherPanel){
-      teacherPanel.style.display=teacherAccess()?'block':'none';
-    }
-
-    if(adminAccess()){
-      loadTeacherLinkOptions();
-    }
-
-    if(teacherAccess()){
-      loadMyTeacherLinkRequests();
-    }
-
-    const form=$link('teacherLinkRequestForm');
-
-    if(form&&!form.dataset.wired){
-      form.dataset.wired='true';
-
-      form.addEventListener('submit',async e=>{
-        e.preventDefault();
-        if(!adminAccess())return;
-
-        const button=form.querySelector('button[type="submit"]');
-        button.disabled=true;
-
-        try{
-          const values=Object.fromEntries(new FormData(form));
-
-          await requestApi(
-            `/api/people/${schoolId()}/teacher-accounts/link-existing`,
-            {method:'POST',body:values}
-          );
-
-          showMessage(
-            'teacherLinkAdminMessage',
-            'Link request created. Ask the teacher to sign in and confirm.'
-          );
-
-          form.reset();
-          await loadTeacherLinkOptions();
-        }catch(e){
-          showMessage('teacherLinkAdminMessage',e.message);
-        }finally{
-          button.disabled=false;
-        }
-      });
-    }
-  }
-
-  if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded',initializeTeacherLinking);
-  }else{
-    initializeTeacherLinking();
-  }
-})();
-</script>
-
-</body></html>');popup.document.close();}catch{}
+ try{popup.document.open();popup.document.write('<!doctype html><html><head><title>ZELIMU CBC PDF</title></head><body style="font-family:Arial,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f8fafc;color:#17365D"><div style="text-align:center"><div style="font-size:28px;font-weight:700">ZELIMU CBC</div><div style="margin-top:10px">Preparing PDF…</div><div style="margin:14px auto;width:220px;height:6px;background:#e5e7eb;border-radius:99px;overflow:hidden"><div style="width:45%;height:100%;background:#17365D"></div></div></div>\n</body></html>');popup.document.close();}catch{}
  try{const blob=await fetchProtectedPdfBlob(url);const u=URL.createObjectURL(blob);popup.location.href=u;setTimeout(()=>URL.revokeObjectURL(u),5*60*1000);return true;}catch(e){try{popup.close();}catch{}throw new Error(e.message||'Unable to prepare PDF.');}
 }
 async function loadGradings(){const el=$('gradingList');if(!el)return;try{const r=await api(`/api/grading/${sid}/systems`);window.pmGradingSystems=r||[];el.innerHTML=(r||[]).map(x=>`<div class="item"><b>${esc(x.name)}</b> · ${esc(x.code)} <button type="button" class="btn secondary mini edit-grading" data-grading-id="${esc(x.id)}">Edit</button><br><span class="muted small">${esc(x.description||'')} · ${Array.isArray(x.bands)?x.bands.length:0} grading levels</span></div>`).join('')||'<div class="notice">No grading systems created yet.</div>';}catch(e){el.innerHTML=`<div class="notice">${esc(e.message)}</div>`;}}
@@ -1944,7 +1633,7 @@ async // ZELIMU module navigation bridge.
 // Reuse the existing section controller and its role checks.
 window.showSection = showSection;
 
-function openPM24(n){
+async function openPM24(n){
  const m=PM24[n];if(!m)return;
  const panel=$('pm24_workspace'),navCard=$('navTabs')?.closest('.pm-workflow-intro');
  // Keep the module workspace in the central display, never inside the sidebar.
@@ -2325,35 +2014,277 @@ body main.page > .portal-hero {
 
 <script src="/js/zelimu-approved-dashboard.js?v=20261029-final"></script>
 
-<script id="zelimu-account-controls-script">
-(function () {
-    function restoreControls() {
-        const who = document.getElementById("who");
-        const signOut = document.getElementById("signOut");
+<script>
+(function(){
+  const groups={
+    transport:[
+      'transport_routes','transport_allocations',
+      'transport_trips','transport_maintenance',
+      'transport_incidents'
+    ],
+    boarding:[
+      'boarding_rooms','boarding_allocations',
+      'boarding_rollcalls','boarding_welfare',
+      'boarding_supplies'
+    ],
+    hr:[
+      'hr_leave','hr_training','hr_recruitment',
+      'hr_appraisals','hr_documents'
+    ]
+  };
 
-        if (!who || !signOut) return;
+  function refreshTabs(){
+    const container=document.getElementById(
+      'zelimuOperationsFunctionTabs'
+    );
+    const frame=document.getElementById('operationsFrame');
 
-        let panel = document.getElementById("zelimuAccountControls");
+    if(!container||!frame)return;
 
-        if (!panel) {
-            panel = document.createElement("div");
-            panel.id = "zelimuAccountControls";
-            document.body.appendChild(panel);
+    const current=frame.dataset.type||'';
+    const group=Object.values(groups).find(
+      entries=>entries.includes(current)
+    );
+
+    container.replaceChildren();
+    if(!group)return;
+
+    for(const type of group){
+      const original=document.querySelector(
+        '#navTabs button[data-operations="'+type+'"]'
+      );
+      if(!original)continue;
+
+      const button=document.createElement('button');
+      button.type='button';
+      button.className='btn secondary';
+      button.textContent=original.textContent.trim();
+      button.style.fontSize='13px';
+      button.style.padding='9px 12px';
+
+      if(type===current){
+        button.classList.add('active');
+        button.setAttribute('aria-current','page');
+      }
+
+      button.addEventListener('click',()=>{
+        if(original.disabled ||
+           original.classList.contains('role-hidden')){
+          return;
         }
+        original.click();
+        refreshTabs();
+      });
 
-        panel.appendChild(who);
-        panel.appendChild(signOut);
+      container.appendChild(button);
+    }
+  }
 
-        signOut.hidden = false;
-        signOut.style.display = "inline-flex";
-        who.hidden = false;
+  document.addEventListener('click',event=>{
+    if(event.target.closest('#navTabs [data-operations]')){
+      queueMicrotask(refreshTabs);
+      requestAnimationFrame(refreshTabs);
+    }
+  });
+
+  window.zelimuRefreshOperationsTabs=refreshTabs;
+})();
+</script>
+
+
+<script>
+(function(){
+  'use strict';
+
+  const $link = id => document.getElementById(id);
+  const teacherRoles = [
+    'TEACHER','CLASS_TEACHER','SENIOR_TEACHER',
+    'HEADTEACHER','DEPUTY_HEADTEACHER'
+  ];
+
+  function currentUser(){
+    try {
+      return typeof user !== 'undefined' ? user :
+        JSON.parse(localStorage.getItem('user') || '{}');
+    } catch { return {}; }
+  }
+
+  function schoolId(){
+    return typeof sid !== 'undefined' ? sid :
+      (currentUser().school_id || new URLSearchParams(location.search).get('school_id'));
+  }
+
+  function adminAccess(){
+    return ['SCHOOL_ADMIN','ADMIN','PLATFORM_OWNER']
+      .includes(currentUser().role);
+  }
+
+  function teacherAccess(){
+    return teacherRoles.includes(currentUser().role);
+  }
+
+  async function requestApi(path, options={}){
+    const response=await fetch(path,{
+      method:options.method||'GET',
+      headers:{
+        'Authorization':'Bearer '+(localStorage.getItem('token')||''),
+        'Content-Type':'application/json'
+      },
+      ...(options.body ? {body:JSON.stringify(options.body)} : {})
+    });
+    const data=await response.json();
+    if(!response.ok)throw new Error(data.error||'Request failed.');
+    return data;
+  }
+
+  function showMessage(id,message){
+    const box=$link(id);
+    if(!box)return;
+    box.textContent=message;
+    box.style.display='block';
+  }
+
+  async function loadTeacherLinkOptions(){
+    const select=$link('teacherLinkTeacher');
+    if(!select||!adminAccess()||!schoolId())return;
+
+    try{
+      const teachers=await requestApi(
+        `/api/people/${schoolId()}/teachers`
+      );
+
+      select.replaceChildren(new Option('Select teacher',''));
+
+      teachers.filter(t=>t.is_active&&!t.user_id).forEach(t=>{
+        select.add(new Option(
+          `${t.staff_no||''} - ${t.first_name||''} ${t.last_name||''}`,
+          t.id
+        ));
+      });
+    }catch(e){
+      showMessage('teacherLinkAdminMessage',e.message);
+    }
+  }
+
+  async function loadMyTeacherLinkRequests(){
+    const box=$link('teacherLinkPendingList');
+    if(!box||!teacherAccess()||!schoolId())return;
+
+    try{
+      const requests=await requestApi(
+        `/api/people/${schoolId()}/teacher-accounts/my-link-requests`
+      );
+
+      box.replaceChildren();
+
+      if(!requests.length){
+        box.textContent='No pending teacher-account linking requests.';
+        return;
+      }
+
+      requests.forEach(r=>{
+        const item=document.createElement('div');
+        item.className='item';
+
+        const title=document.createElement('p');
+        title.textContent=
+          `${r.first_name||''} ${r.last_name||''} — ${r.staff_no||''}`;
+
+        const button=document.createElement('button');
+        button.type='button';
+        button.className='btn';
+        button.textContent='Confirm My Teacher Account';
+
+        button.addEventListener('click',async()=>{
+          if(!confirm(
+            'Confirm that this teacher record belongs to you?'
+          ))return;
+
+          button.disabled=true;
+
+          try{
+            await requestApi(
+              `/api/people/${schoolId()}/teacher-accounts/link-requests/${encodeURIComponent(r.id)}/confirm`,
+              {method:'POST'}
+            );
+
+            alert('Teacher account linked successfully.');
+            await loadMyTeacherLinkRequests();
+          }catch(e){
+            alert(e.message);
+            button.disabled=false;
+          }
+        });
+
+        item.append(title,button);
+        box.append(item);
+      });
+    }catch(e){
+      box.textContent=e.message;
+    }
+  }
+
+  function initializeTeacherLinking(){
+    const adminPanel=$link('teacherLinkAdminPanel');
+    const teacherPanel=$link('teacherLinkConfirmation');
+
+    if(adminPanel){
+      adminPanel.style.display=adminAccess()?'block':'none';
     }
 
-    if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", restoreControls);
-    } else {
-        restoreControls();
+    if(teacherPanel){
+      teacherPanel.style.display=teacherAccess()?'block':'none';
     }
+
+    if(adminAccess()){
+      loadTeacherLinkOptions();
+    }
+
+    if(teacherAccess()){
+      loadMyTeacherLinkRequests();
+    }
+
+    const form=$link('teacherLinkRequestForm');
+
+    if(form&&!form.dataset.wired){
+      form.dataset.wired='true';
+
+      form.addEventListener('submit',async e=>{
+        e.preventDefault();
+        if(!adminAccess())return;
+
+        const button=form.querySelector('button[type="submit"]');
+        button.disabled=true;
+
+        try{
+          const values=Object.fromEntries(new FormData(form));
+
+          await requestApi(
+            `/api/people/${schoolId()}/teacher-accounts/link-existing`,
+            {method:'POST',body:values}
+          );
+
+          showMessage(
+            'teacherLinkAdminMessage',
+            'Link request created. Ask the teacher to sign in and confirm.'
+          );
+
+          form.reset();
+          await loadTeacherLinkOptions();
+        }catch(e){
+          showMessage('teacherLinkAdminMessage',e.message);
+        }finally{
+          button.disabled=false;
+        }
+      });
+    }
+  }
+
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',initializeTeacherLinking);
+  }else{
+    initializeTeacherLinking();
+  }
 })();
 </script>
 
