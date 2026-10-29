@@ -998,75 +998,277 @@ async function openProtectedPdf(url,existingPopup=null){
  const popup=existingPopup||window.open('about:blank','_blank');
  if(!popup)throw new Error('Your browser blocked the PDF window. Please allow pop-ups for ZELIMU CBC and try again.');
  try{popup.document.open();popup.document.write('<!doctype html><html><head><title>ZELIMU CBC PDF</title></head><body style="font-family:Arial,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f8fafc;color:#17365D"><div style="text-align:center"><div style="font-size:28px;font-weight:700">ZELIMU CBC</div><div style="margin-top:10px">Preparing PDF…</div><div style="margin:14px auto;width:220px;height:6px;background:#e5e7eb;border-radius:99px;overflow:hidden"><div style="width:45%;height:100%;background:#17365D"></div></div></div>\n
-<style>
-#zelimuAccountPanel {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 99999;
-  background: #ffffff;
-  color: #17365d;
-  padding: 12px 16px;
-  border: 1px solid #d1d5db;
-  border-radius: 12px;
-  box-shadow: 0 4px 20px rgba(0,0,0,.16);
-  font-family: Arial, sans-serif;
-  min-width: 190px;
-}
-#zelimuAccountPanel button {
-  background: #b91c1c;
-  color: white;
-  border: 0;
-  padding: 9px 14px;
-  border-radius: 7px;
-  cursor: pointer;
-  margin-top: 8px;
-  width: 100%;
-}
-</style>
-
-<div id="zelimuAccountPanel">
-  <strong>Signed-in account</strong>
-  <div id="zelimuAccountName">Loading account...</div>
-  <div id="zelimuAccountRole"></div>
-  <button type="button" id="zelimuVisibleSignOut">
-    Sign Out
-  </button>
-</div>
-
 <script>
-(function () {
-  function updateAccount() {
-    var who = document.getElementById("who");
-    var name = document.getElementById("zelimuAccountName");
-    var role = document.getElementById("zelimuAccountRole");
+(function(){
+  const groups={
+    transport:[
+      'transport_routes','transport_allocations',
+      'transport_trips','transport_maintenance',
+      'transport_incidents'
+    ],
+    boarding:[
+      'boarding_rooms','boarding_allocations',
+      'boarding_rollcalls','boarding_welfare',
+      'boarding_supplies'
+    ],
+    hr:[
+      'hr_leave','hr_training','hr_recruitment',
+      'hr_appraisals','hr_documents'
+    ]
+  };
 
-    if (who && name) {
-      name.textContent = who.textContent.trim() || "Signed-in user";
-    }
+  function refreshTabs(){
+    const container=document.getElementById(
+      'zelimuOperationsFunctionTabs'
+    );
+    const frame=document.getElementById('operationsFrame');
 
-    var existingRole = document.querySelector(
-      ".user-role, #userRole, #whoRole"
+    if(!container||!frame)return;
+
+    const current=frame.dataset.type||'';
+    const group=Object.values(groups).find(
+      entries=>entries.includes(current)
     );
 
-    if (existingRole && role) {
-      role.textContent = existingRole.textContent.trim();
+    container.replaceChildren();
+    if(!group)return;
+
+    for(const type of group){
+      const original=document.querySelector(
+        '#navTabs button[data-operations="'+type+'"]'
+      );
+      if(!original)continue;
+
+      const button=document.createElement('button');
+      button.type='button';
+      button.className='btn secondary';
+      button.textContent=original.textContent.trim();
+      button.style.fontSize='13px';
+      button.style.padding='9px 12px';
+
+      if(type===current){
+        button.classList.add('active');
+        button.setAttribute('aria-current','page');
+      }
+
+      button.addEventListener('click',()=>{
+        if(original.disabled ||
+           original.classList.contains('role-hidden')){
+          return;
+        }
+        original.click();
+        refreshTabs();
+      });
+
+      container.appendChild(button);
     }
   }
 
-  document.getElementById("zelimuVisibleSignOut")
-    .addEventListener("click", function () {
-      var existing = document.getElementById("signOut");
+  document.addEventListener('click',event=>{
+    if(event.target.closest('#navTabs [data-operations]')){
+      queueMicrotask(refreshTabs);
+      requestAnimationFrame(refreshTabs);
+    }
+  });
 
-      if (existing) {
-        existing.click();
-      } else {
-        alert("The original sign-out control is unavailable.");
-      }
+  window.zelimuRefreshOperationsTabs=refreshTabs;
+})();
+</script>
+
+
+<script>
+(function(){
+  'use strict';
+
+  const $link = id => document.getElementById(id);
+  const teacherRoles = [
+    'TEACHER','CLASS_TEACHER','SENIOR_TEACHER',
+    'HEADTEACHER','DEPUTY_HEADTEACHER'
+  ];
+
+  function currentUser(){
+    try {
+      return typeof user !== 'undefined' ? user :
+        JSON.parse(localStorage.getItem('user') || '{}');
+    } catch { return {}; }
+  }
+
+  function schoolId(){
+    return typeof sid !== 'undefined' ? sid :
+      (currentUser().school_id || new URLSearchParams(location.search).get('school_id'));
+  }
+
+  function adminAccess(){
+    return ['SCHOOL_ADMIN','ADMIN','PLATFORM_OWNER']
+      .includes(currentUser().role);
+  }
+
+  function teacherAccess(){
+    return teacherRoles.includes(currentUser().role);
+  }
+
+  async function requestApi(path, options={}){
+    const response=await fetch(path,{
+      method:options.method||'GET',
+      headers:{
+        'Authorization':'Bearer '+(localStorage.getItem('token')||''),
+        'Content-Type':'application/json'
+      },
+      ...(options.body ? {body:JSON.stringify(options.body)} : {})
     });
+    const data=await response.json();
+    if(!response.ok)throw new Error(data.error||'Request failed.');
+    return data;
+  }
 
-  updateAccount();
-  setTimeout(updateAccount, 1000);
+  function showMessage(id,message){
+    const box=$link(id);
+    if(!box)return;
+    box.textContent=message;
+    box.style.display='block';
+  }
+
+  async function loadTeacherLinkOptions(){
+    const select=$link('teacherLinkTeacher');
+    if(!select||!adminAccess()||!schoolId())return;
+
+    try{
+      const teachers=await requestApi(
+        `/api/people/${schoolId()}/teachers`
+      );
+
+      select.replaceChildren(new Option('Select teacher',''));
+
+      teachers.filter(t=>t.is_active&&!t.user_id).forEach(t=>{
+        select.add(new Option(
+          `${t.staff_no||''} - ${t.first_name||''} ${t.last_name||''}`,
+          t.id
+        ));
+      });
+    }catch(e){
+      showMessage('teacherLinkAdminMessage',e.message);
+    }
+  }
+
+  async function loadMyTeacherLinkRequests(){
+    const box=$link('teacherLinkPendingList');
+    if(!box||!teacherAccess()||!schoolId())return;
+
+    try{
+      const requests=await requestApi(
+        `/api/people/${schoolId()}/teacher-accounts/my-link-requests`
+      );
+
+      box.replaceChildren();
+
+      if(!requests.length){
+        box.textContent='No pending teacher-account linking requests.';
+        return;
+      }
+
+      requests.forEach(r=>{
+        const item=document.createElement('div');
+        item.className='item';
+
+        const title=document.createElement('p');
+        title.textContent=
+          `${r.first_name||''} ${r.last_name||''} — ${r.staff_no||''}`;
+
+        const button=document.createElement('button');
+        button.type='button';
+        button.className='btn';
+        button.textContent='Confirm My Teacher Account';
+
+        button.addEventListener('click',async()=>{
+          if(!confirm(
+            'Confirm that this teacher record belongs to you?'
+          ))return;
+
+          button.disabled=true;
+
+          try{
+            await requestApi(
+              `/api/people/${schoolId()}/teacher-accounts/link-requests/${encodeURIComponent(r.id)}/confirm`,
+              {method:'POST'}
+            );
+
+            alert('Teacher account linked successfully.');
+            await loadMyTeacherLinkRequests();
+          }catch(e){
+            alert(e.message);
+            button.disabled=false;
+          }
+        });
+
+        item.append(title,button);
+        box.append(item);
+      });
+    }catch(e){
+      box.textContent=e.message;
+    }
+  }
+
+  function initializeTeacherLinking(){
+    const adminPanel=$link('teacherLinkAdminPanel');
+    const teacherPanel=$link('teacherLinkConfirmation');
+
+    if(adminPanel){
+      adminPanel.style.display=adminAccess()?'block':'none';
+    }
+
+    if(teacherPanel){
+      teacherPanel.style.display=teacherAccess()?'block':'none';
+    }
+
+    if(adminAccess()){
+      loadTeacherLinkOptions();
+    }
+
+    if(teacherAccess()){
+      loadMyTeacherLinkRequests();
+    }
+
+    const form=$link('teacherLinkRequestForm');
+
+    if(form&&!form.dataset.wired){
+      form.dataset.wired='true';
+
+      form.addEventListener('submit',async e=>{
+        e.preventDefault();
+        if(!adminAccess())return;
+
+        const button=form.querySelector('button[type="submit"]');
+        button.disabled=true;
+
+        try{
+          const values=Object.fromEntries(new FormData(form));
+
+          await requestApi(
+            `/api/people/${schoolId()}/teacher-accounts/link-existing`,
+            {method:'POST',body:values}
+          );
+
+          showMessage(
+            'teacherLinkAdminMessage',
+            'Link request created. Ask the teacher to sign in and confirm.'
+          );
+
+          form.reset();
+          await loadTeacherLinkOptions();
+        }catch(e){
+          showMessage('teacherLinkAdminMessage',e.message);
+        }finally{
+          button.disabled=false;
+        }
+      });
+    }
+  }
+
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',initializeTeacherLinking);
+  }else{
+    initializeTeacherLinking();
+  }
 })();
 </script>
 
@@ -1702,11 +1904,11 @@ async function renderSchoolFinanceModule(){
  $('sfRefresh').onclick=reload;await reload();
 }
 
-// ZELIMU module navigation bridge.
+async // ZELIMU module navigation bridge.
 // Reuse the existing section controller and its role checks.
 window.showSection = showSection;
 
-async function openPM24(n){
+function openPM24(n){
  const m=PM24[n];if(!m)return;
  const panel=$('pm24_workspace'),navCard=$('navTabs')?.closest('.pm-workflow-intro');
  // Keep the module workspace in the central display, never inside the sidebar.
@@ -2086,279 +2288,4 @@ body main.page > .portal-hero {
 </script>
 
 <script src="/js/zelimu-approved-dashboard.js?v=20261029-final"></script>
-
-<script>
-(function(){
-  const groups={
-    transport:[
-      'transport_routes','transport_allocations',
-      'transport_trips','transport_maintenance',
-      'transport_incidents'
-    ],
-    boarding:[
-      'boarding_rooms','boarding_allocations',
-      'boarding_rollcalls','boarding_welfare',
-      'boarding_supplies'
-    ],
-    hr:[
-      'hr_leave','hr_training','hr_recruitment',
-      'hr_appraisals','hr_documents'
-    ]
-  };
-
-  function refreshTabs(){
-    const container=document.getElementById(
-      'zelimuOperationsFunctionTabs'
-    );
-    const frame=document.getElementById('operationsFrame');
-
-    if(!container||!frame)return;
-
-    const current=frame.dataset.type||'';
-    const group=Object.values(groups).find(
-      entries=>entries.includes(current)
-    );
-
-    container.replaceChildren();
-    if(!group)return;
-
-    for(const type of group){
-      const original=document.querySelector(
-        '#navTabs button[data-operations="'+type+'"]'
-      );
-      if(!original)continue;
-
-      const button=document.createElement('button');
-      button.type='button';
-      button.className='btn secondary';
-      button.textContent=original.textContent.trim();
-      button.style.fontSize='13px';
-      button.style.padding='9px 12px';
-
-      if(type===current){
-        button.classList.add('active');
-        button.setAttribute('aria-current','page');
-      }
-
-      button.addEventListener('click',()=>{
-        if(original.disabled ||
-           original.classList.contains('role-hidden')){
-          return;
-        }
-        original.click();
-        refreshTabs();
-      });
-
-      container.appendChild(button);
-    }
-  }
-
-  document.addEventListener('click',event=>{
-    if(event.target.closest('#navTabs [data-operations]')){
-      queueMicrotask(refreshTabs);
-      requestAnimationFrame(refreshTabs);
-    }
-  });
-
-  window.zelimuRefreshOperationsTabs=refreshTabs;
-})();
-</script>
-
-
-<script>
-(function(){
-  'use strict';
-
-  const $link = id => document.getElementById(id);
-  const teacherRoles = [
-    'TEACHER','CLASS_TEACHER','SENIOR_TEACHER',
-    'HEADTEACHER','DEPUTY_HEADTEACHER'
-  ];
-
-  function currentUser(){
-    try {
-      return typeof user !== 'undefined' ? user :
-        JSON.parse(localStorage.getItem('user') || '{}');
-    } catch { return {}; }
-  }
-
-  function schoolId(){
-    return typeof sid !== 'undefined' ? sid :
-      (currentUser().school_id || new URLSearchParams(location.search).get('school_id'));
-  }
-
-  function adminAccess(){
-    return ['SCHOOL_ADMIN','ADMIN','PLATFORM_OWNER']
-      .includes(currentUser().role);
-  }
-
-  function teacherAccess(){
-    return teacherRoles.includes(currentUser().role);
-  }
-
-  async function requestApi(path, options={}){
-    const response=await fetch(path,{
-      method:options.method||'GET',
-      headers:{
-        'Authorization':'Bearer '+(localStorage.getItem('token')||''),
-        'Content-Type':'application/json'
-      },
-      ...(options.body ? {body:JSON.stringify(options.body)} : {})
-    });
-    const data=await response.json();
-    if(!response.ok)throw new Error(data.error||'Request failed.');
-    return data;
-  }
-
-  function showMessage(id,message){
-    const box=$link(id);
-    if(!box)return;
-    box.textContent=message;
-    box.style.display='block';
-  }
-
-  async function loadTeacherLinkOptions(){
-    const select=$link('teacherLinkTeacher');
-    if(!select||!adminAccess()||!schoolId())return;
-
-    try{
-      const teachers=await requestApi(
-        `/api/people/${schoolId()}/teachers`
-      );
-
-      select.replaceChildren(new Option('Select teacher',''));
-
-      teachers.filter(t=>t.is_active&&!t.user_id).forEach(t=>{
-        select.add(new Option(
-          `${t.staff_no||''} - ${t.first_name||''} ${t.last_name||''}`,
-          t.id
-        ));
-      });
-    }catch(e){
-      showMessage('teacherLinkAdminMessage',e.message);
-    }
-  }
-
-  async function loadMyTeacherLinkRequests(){
-    const box=$link('teacherLinkPendingList');
-    if(!box||!teacherAccess()||!schoolId())return;
-
-    try{
-      const requests=await requestApi(
-        `/api/people/${schoolId()}/teacher-accounts/my-link-requests`
-      );
-
-      box.replaceChildren();
-
-      if(!requests.length){
-        box.textContent='No pending teacher-account linking requests.';
-        return;
-      }
-
-      requests.forEach(r=>{
-        const item=document.createElement('div');
-        item.className='item';
-
-        const title=document.createElement('p');
-        title.textContent=
-          `${r.first_name||''} ${r.last_name||''} — ${r.staff_no||''}`;
-
-        const button=document.createElement('button');
-        button.type='button';
-        button.className='btn';
-        button.textContent='Confirm My Teacher Account';
-
-        button.addEventListener('click',async()=>{
-          if(!confirm(
-            'Confirm that this teacher record belongs to you?'
-          ))return;
-
-          button.disabled=true;
-
-          try{
-            await requestApi(
-              `/api/people/${schoolId()}/teacher-accounts/link-requests/${encodeURIComponent(r.id)}/confirm`,
-              {method:'POST'}
-            );
-
-            alert('Teacher account linked successfully.');
-            await loadMyTeacherLinkRequests();
-          }catch(e){
-            alert(e.message);
-            button.disabled=false;
-          }
-        });
-
-        item.append(title,button);
-        box.append(item);
-      });
-    }catch(e){
-      box.textContent=e.message;
-    }
-  }
-
-  function initializeTeacherLinking(){
-    const adminPanel=$link('teacherLinkAdminPanel');
-    const teacherPanel=$link('teacherLinkConfirmation');
-
-    if(adminPanel){
-      adminPanel.style.display=adminAccess()?'block':'none';
-    }
-
-    if(teacherPanel){
-      teacherPanel.style.display=teacherAccess()?'block':'none';
-    }
-
-    if(adminAccess()){
-      loadTeacherLinkOptions();
-    }
-
-    if(teacherAccess()){
-      loadMyTeacherLinkRequests();
-    }
-
-    const form=$link('teacherLinkRequestForm');
-
-    if(form&&!form.dataset.wired){
-      form.dataset.wired='true';
-
-      form.addEventListener('submit',async e=>{
-        e.preventDefault();
-        if(!adminAccess())return;
-
-        const button=form.querySelector('button[type="submit"]');
-        button.disabled=true;
-
-        try{
-          const values=Object.fromEntries(new FormData(form));
-
-          await requestApi(
-            `/api/people/${schoolId()}/teacher-accounts/link-existing`,
-            {method:'POST',body:values}
-          );
-
-          showMessage(
-            'teacherLinkAdminMessage',
-            'Link request created. Ask the teacher to sign in and confirm.'
-          );
-
-          form.reset();
-          await loadTeacherLinkOptions();
-        }catch(e){
-          showMessage('teacherLinkAdminMessage',e.message);
-        }finally{
-          button.disabled=false;
-        }
-      });
-    }
-  }
-
-  if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded',initializeTeacherLinking);
-  }else{
-    initializeTeacherLinking();
-  }
-})();
-</script>
-
 </body></html>
