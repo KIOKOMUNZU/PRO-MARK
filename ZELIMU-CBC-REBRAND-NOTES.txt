@@ -1,0 +1,5 @@
+ZELIMU CBC rebrand based on the supplied PRO-MARK 4.0.9 source ZIP.
+
+This package changes product branding in the active application UI, login/dashboard/owner pages, report output, logo, package metadata, and local Windows launcher.
+Application logic, database schema, migrations, and dependencies were otherwise left unchanged. Historical release notes and the embedded backup ZIP are retained as supplied.
+Existing X-Pro-Mark-* response headers are intentionally unchanged because the frontend reads them.
