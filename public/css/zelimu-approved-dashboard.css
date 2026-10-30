@@ -612,3 +612,132 @@ body .z7-shortcut:nth-child(4n+4) {
     grid-template-columns: repeat(2,minmax(0,1fr)) !important;
   }
 }
+
+/* ZELIMU_HEADER_CONTROLS_REPAIR_20261030 */
+body .z7-toolbar .z7-pick[hidden],body .z7-toolbar .z7-school-label[hidden]{display:none!important}
+body .z7-toolbar select.z7-pick{cursor:pointer;max-width:190px;min-width:125px;font-family:inherit;appearance:auto}
+body .z7-toolbar .z7-school-label{max-width:210px;overflow:hidden;text-overflow:ellipsis}
+body .z7-toolbar .z7-user{min-width:0;max-width:210px;white-space:normal}
+body .z7-toolbar #z7User{display:block;overflow-wrap:anywhere;line-height:1.25}
+body .z7-toolbar .z7-signout{border:1px solid #a51d29;background:#fff;color:#a51d29;border-radius:7px;padding:9px 12px;font-weight:700;cursor:pointer;white-space:nowrap}
+body .z7-toolbar .z7-signout:hover{background:#fff1f2}
+body .z7-toolbar{height:auto;min-height:70px;flex-wrap:wrap}
+body .z7-toolbar-right{flex-wrap:wrap}
+
+
+/* ZELIMU SAFE RESPONSIVE LAYOUT V2 START */
+/* CSS only: preserve the HTML, scripts, routes, and existing staff management. */
+body:has(.z7) main.page { min-width:0!important; }
+body .z7,body .z7 * { min-width:0; }
+body .z7-toolbar {
+  box-sizing:border-box!important;
+  min-height:70px!important;
+  height:auto!important;
+  display:flex!important;
+  flex-wrap:wrap!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  gap:10px 14px!important;
+  padding:10px 18px!important;
+}
+body .z7-toolbar-right {display:flex!important;flex-wrap:wrap!important;gap:9px!important;min-width:0!important;}
+body .z7-toolbar .z7-school-label {max-width:clamp(125px,18vw,260px)!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+body .z7-toolbar .z7-pick {max-width:190px!important;min-width:100px!important;flex:0 1 auto!important;}
+body .z7-toolbar .z7-search {width:clamp(145px,20vw,300px)!important;max-width:100%!important;box-sizing:border-box!important;}
+body .z7-toolbar .z7-user {min-width:0!important;max-width:200px!important;}
+body .z7-grid {grid-template-columns:minmax(0,1.36fr) minmax(0,.84fr) minmax(0,.78fr)!important;}
+body .z7-grid > * {min-width:0!important;}
+body .z7-panel {min-width:0!important;}
+@media (max-width:1250px) and (min-width:751px) {
+ body .z7-toolbar {gap:8px!important;padding:9px 12px!important;}
+ body .z7-toolbar .z7-search {width:180px!important;}
+ body .z7-grid {grid-template-columns:repeat(2,minmax(0,1fr))!important;}
+ body .z7-grid > .z7-panel:first-child {grid-column:1/-1!important;}
+}
+@media (max-width:750px) {
+ body main.page {padding-left:0!important;width:100%!important;min-width:0!important;}
+ body .z7-toolbar {position:relative!important;left:auto!important;right:auto!important;top:auto!important;width:100%!important;height:auto!important;min-height:0!important;flex-wrap:wrap!important;padding:12px!important;gap:10px!important;}
+ body .z7-toolbar-right {width:100%!important;justify-content:flex-start!important;}
+ body .z7-toolbar .z7-search {display:block!important;width:100%!important;flex:1 1 100%!important;}
+ body .z7-toolbar .z7-school-label {max-width:calc(100vw - 100px)!important;}
+ body .z7-toolbar .z7-pick {max-width:calc(50vw - 24px)!important;min-width:0!important;}
+ body .z7-grid {grid-template-columns:minmax(0,1fr)!important;}
+ body .z7-grid > .z7-panel:first-child {grid-column:auto!important;}
+ body .z7-panel {max-width:100%!important;overflow-wrap:anywhere;}
+}
+/* ZELIMU SAFE RESPONSIVE LAYOUT V2 END */
+
+
+/* ZELIMU PREMIUM TYPOGRAPHY V3 START */
+/* Scoped, CSS-only: no changes to dashboard HTML, JS, database or handlers. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
+body .z7,body .z7-toolbar,body .z7-side,body .z7-workspace{
+ font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif!important;
+ -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+}
+body .z7 h1,body .z7 h2,body .z7 h3,body .z7-heading h1,
+body .z7-panelhead strong,body .z7-brand strong{
+ font-family:'Plus Jakarta Sans','Inter',system-ui,sans-serif!important;
+ letter-spacing:-.025em!important;
+}
+body .z7-toolbar{
+ background:#f9fcfa!important;border-bottom:1px solid #d7e7dd!important;
+ box-shadow:0 3px 14px rgba(5,65,47,.055)!important;
+ gap:12px!important;align-items:center!important;
+}
+body .z7-pickers{display:flex!important;flex-wrap:wrap!important;gap:9px!important;min-width:0!important;align-items:center!important}
+body .z7-toolbar .z7-school-label{
+ max-width:none!important;min-width:180px!important;width:auto!important;
+ display:flex!important;align-items:center!important;
+ background:#eaf5ee!important;border:1px solid #badcc8!important;
+ border-left:4px solid #087c55!important;
+ padding:8px 12px!important;white-space:normal!important;
+ color:#064e3b!important;overflow:visible!important;
+ font-size:13px!important;line-height:1.35!important;
+ font-weight:800!important;box-sizing:border-box!important;
+}
+body .z7-toolbar .z7-school-label #z7School{
+ display:block!important;white-space:normal!important;overflow-wrap:anywhere!important;
+ max-width:250px!important;
+}
+body .z7-toolbar select.z7-pick{
+ font-family:'Inter',system-ui,sans-serif!important;font-size:13px!important;
+ font-weight:700!important;min-height:42px!important;
+ border:1px solid #d2e2d8!important;background:#fff!important;
+ border-radius:9px!important;color:#163e31!important;
+}
+body .z7-toolbar-right{display:flex!important;align-items:center!important;flex-wrap:wrap!important;gap:10px!important;min-width:0!important}
+body .z7-search{
+ font-family:'Inter',system-ui,sans-serif!important;
+ font-size:13px!important;border:1px solid #d8e5dc!important;
+ border-radius:9px!important;background:#fff!important;
+ min-height:42px!important;
+}
+body .z7-user{color:#103d2e!important;font-size:13px!important;font-weight:700!important;white-space:normal!important}
+body .z7-user small{font-size:11px!important;color:#60796d!important}
+body .z7-avatar{background:#e1f1e7!important;color:#08734e!important;border:2px solid #b8d9c5!important}
+body .z7-signout{font-family:'Inter',system-ui,sans-serif!important;border-radius:9px!important;font-weight:700!important}
+body .z7-workspace{background:#f7faf7!important;min-width:0!important}
+body .z7-heading h1{color:#133e30!important;font-size:clamp(24px,2.5vw,34px)!important;line-height:1.2!important}
+body .z7-panel{border-color:#dce9df!important;border-radius:12px!important}
+body .z7-kpi{border-radius:11px!important}
+body .z7-side{background:#053c30!important}
+body .z7-nav button{font-family:'Inter',system-ui,sans-serif!important;line-height:1.35!important}
+body .z7-navhead{letter-spacing:.075em!important}
+@media(max-width:1250px){
+ body .z7-toolbar .z7-school-label{min-width:140px!important}
+ body .z7-toolbar .z7-school-label #z7School{max-width:180px!important}
+}
+@media(max-width:750px){
+ body .z7-toolbar{height:auto!important;min-height:0!important;padding:10px 12px!important}
+ body .z7-pickers{width:100%!important;display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important}
+ body .z7-toolbar .z7-school-label{grid-column:1/-1!important;min-width:0!important}
+ body .z7-toolbar .z7-school-label #z7School{max-width:none!important}
+ body .z7-toolbar select.z7-pick{min-width:0!important;width:100%!important;max-width:none!important}
+ body .z7-toolbar-right{width:100%!important}
+ body .z7-search{width:100%!important;flex:1 1 100%!important}
+ body .z7-user{flex:1 1 auto!important}
+ body .z7-heading h1{font-size:25px!important}
+}
+@media(prefers-reduced-motion:reduce){body .z7 *{scroll-behavior:auto!important}}
+/* ZELIMU PREMIUM TYPOGRAPHY V3 END */

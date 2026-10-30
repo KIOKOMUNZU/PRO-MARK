@@ -33,8 +33,7 @@ function clearMeritCache(){
 }
 function drawTextWatermark(doc,name,motto,cx,cy,width,opacity=.035){const title=String(name||'').trim();if(!title)return false;try{doc.save().opacity(opacity).fillColor('#334155').font('Helvetica-Bold').fontSize(34).text(title,cx-width/2,cy-20,{width,align:'center',lineBreak:false,ellipsis:true});if(motto)doc.font('Helvetica').fontSize(13).text(String(motto),cx-width/2,cy+22,{width,align:'center',lineBreak:false,ellipsis:true});doc.restore();return true;}catch{try{doc.restore();}catch{}return false;}}
 function fmt(v){const n=Number(v);return Number.isFinite(n)?(Math.abs(n-Math.round(n))<0.00001?String(Math.round(n)):n.toFixed(2).replace(/0+$/,'').replace(/\.$/,'')):'—';}
-const {subjectScore,competitionRanks}=require('../services/strict-merit');
-function calc(values,expectedAssessments=null){return subjectScore(values,expectedAssessments);}
+function calc(values){const usable=values.filter(x=>Number.isFinite(x.percent));return usable.length?usable.reduce((s,x)=>s+x.percent,0)/usable.length:null;}
 async function compute(sid,yearId,termId,classId=null,assessmentId=null){
  const cacheKey=meritCacheKey(sid,yearId,termId,classId,assessmentId);
  const cached=getMeritCache(cacheKey);
@@ -63,9 +62,10 @@ LEFT JOIN classes mc ON mc.id=COALESCE(m.class_id,le.class_id,l.class_id) AND mc
 WHERE m.school_id=$1 AND m.academic_year_id=$2 AND m.term_id=$3
   AND ($4::uuid IS NULL OR COALESCE(le.class_id,l.class_id)= $4 OR m.class_id=$4 OR ($6::uuid IS NOT NULL AND mc.school_level_id=$6))
   AND (COALESCE(le.status,'ACTIVE') IN ('ACTIVE','COMPLETED') OR m.class_id=$4 OR l.is_active=true)
- AND ($5::uuid IS NULL OR a.id=$5)
- ORDER BY l.last_name,l.first_name,s.name,a.assessment_order`,[sid,yearId,termId,classId,assessmentId,meritLevelId])).rows;
- const byLearner=new Map();const seenAssessments=new Set();for(const r of marks){const at=String(r.assessment_type||'').toUpperCase();const aid=String(r.assessment_id||'');const keySeen=`${r.learner_id}|${r.subject_id}|${aid}`;if(!aid||seenAssessments.has(keySeen)||r.include_in_merit===false||r.mark===null)continue;seenAssessments.add(keySeen);const key=r.learner_id;if(!byLearner.has(key))byLearner.set(key,{learner_id:key,admission_no:r.admission_no,assessment_no:r.assessment_no,first_name:r.first_name,last_name:r.last_name,class_id:r.merit_class_id,class_name:r.merit_class_name,class_stream:r.merit_class_stream,school_level_id:r.merit_school_level_id,subjects:new Map()});const L=byLearner.get(key);if(!L.subjects.has(r.subject_id))L.subjects.set(r.subject_id,{subject_id:r.subject_id,subject_code:r.subject_code,subject_name:r.subject_name,items:[]});L.subjects.get(r.subject_id).items.push({percent:Number(r.mark)/Number(r.max_mark||100)*100,display_percent:Math.round(Number(r.mark)/Number(r.max_mark||100)*100),weight:Number(r.weight??0),grading_system_id:r.grading_system_id,assessment_id:r.assessment_id,assessment_name:r.assessment_name,assessment_type:at,assessment_order:r.assessment_order});}
+ AND a.include_in_final=true AND a.assessment_type IN ('OPENER','MID_TERM','END_TERM')
+  AND ($5::text IS NULL OR a.assessment_type=$5)
+ ORDER BY l.last_name,l.first_name,s.name,a.assessment_order`,[sid,yearId,termId,classId,assessmentType,meritLevelId])).rows;
+ const byLearner=new Map();const seenAssessments=new Set();for(const r of marks){const at=String(r.assessment_type||'').toUpperCase();const aid=String(r.assessment_id||'');const keySeen=`${r.learner_id}|${r.subject_id}|${aid}`;if(!['OPENER','MID_TERM','END_TERM'].includes(at)||!aid||seenAssessments.has(keySeen)||r.include_in_merit===false||r.mark===null)continue;seenAssessments.add(keySeen);const key=r.learner_id;if(!byLearner.has(key))byLearner.set(key,{learner_id:key,admission_no:r.admission_no,assessment_no:r.assessment_no,first_name:r.first_name,last_name:r.last_name,class_id:r.merit_class_id,class_name:r.merit_class_name,class_stream:r.merit_class_stream,school_level_id:r.merit_school_level_id,subjects:new Map()});const L=byLearner.get(key);if(!L.subjects.has(r.subject_id))L.subjects.set(r.subject_id,{subject_id:r.subject_id,subject_code:r.subject_code,subject_name:r.subject_name,items:[]});L.subjects.get(r.subject_id).items.push({percent:Number(r.mark)/Number(r.max_mark||100)*100,display_percent:Math.round(Number(r.mark)/Number(r.max_mark||100)*100),weight:Number(r.weight||0),grading_system_id:r.grading_system_id,assessment_id:r.assessment_id,assessment_name:r.assessment_name,assessment_type:at,assessment_order:r.assessment_order});}
  const gradingRows=(await db.query(`SELECT gs.id system_id,gs.name system_name,gs.code system_code,gb.label,gb.min_mark,gb.max_mark,gb.points FROM grading_systems gs JOIN grading_bands gb ON gb.grading_system_id=gs.id WHERE gs.school_id=$1`,[sid])).rows;
  const gradeFor=(value,systemId)=>{
    if(value===null)return null;
@@ -79,30 +79,60 @@ WHERE m.school_id=$1 AND m.academic_year_id=$2 AND m.term_id=$3
    return bands.find(x=>n>=Number(x.min_mark)&&n<=Number(x.max_mark))||null;
  };
  const overallSystemId=classId?(await db.query(`SELECT ac.grading_system_id FROM assessment_configurations ac JOIN classes c ON c.id=$2 AND c.school_id=$1 WHERE ac.school_id=$1 AND ac.section_id IS NULL AND ac.subject_id IS NULL AND ac.assessment_id IS NULL AND (ac.class_id=$2 OR (ac.class_id IS NULL AND ac.level_id=c.school_level_id)) ORDER BY (ac.class_id IS NOT NULL) DESC,ac.created_at DESC LIMIT 1`,[sid,classId])).rows[0]?.grading_system_id:null;
- // Official combined merit uses the complete set of configured contributing examinations.
- // Individual examination reports use the selected assessment only.
- const requiredAssessments=assessmentId?null:(await db.query(`SELECT id,weight FROM assessments WHERE school_id=$1 AND academic_year_id=$2 AND term_id=$3 AND include_in_final=true`,[sid,yearId,termId])).rows;
- const configuredSubjectRows=classId?(await db.query(`SELECT DISTINCT subject_id FROM teacher_subject_assignments WHERE school_id=$1 AND class_id=$2 AND academic_year_id=$3 AND (term_id=$4 OR term_id IS NULL) AND COALESCE(is_active,true)=true`,[sid,classId,yearId,termId])).rows:[];
- const expectedSubjectIds=new Set(configuredSubjectRows.map(r=>String(r.subject_id)));
- const allRows=[...byLearner.values()].map(L=>{const subjects=[...L.subjects.values()].map(s=>{const average=calc(s.items,requiredAssessments);const systemId=s.items.find(i=>i.grading_system_id)?.grading_system_id||null;const g=gradeFor(average,systemId);const assessments_used=[...new Map(s.items.map(i=>[String(i.assessment_id),{id:i.assessment_id,name:i.assessment_name,type:i.assessment_type,order:i.assessment_order||0}])).values()].sort((a,b)=>Number(a.order)-Number(b.order));return {...s,average,display_average:average===null?null:Math.round(average),grade:g?.label||'',points:g?.points??'',grading_system_id:systemId,assessments_used};}).sort((a,b)=>(b.average??-Infinity)-(a.average??-Infinity)||a.subject_name.localeCompare(b.subject_name));const total=subjects.reduce((s,x)=>s+Number(x.average||0),0);const complete=subjects.length>0 && subjects.every(s=>s.average!==null) && (!classId || (expectedSubjectIds.size>0 && expectedSubjectIds.size===subjects.length && subjects.every(s=>expectedSubjectIds.has(String(s.subject_id)))));const average=complete?total/subjects.length:null;const overallGrade=gradeFor(average,overallSystemId||subjects.find(s=>s.grading_system_id)?.grading_system_id||null);const assessments_used=[...new Map(subjects.flatMap(s=>s.assessments_used||[]).map(a=>[String(a.id),a])).values()].sort((a,b)=>Number(a.order)-Number(b.order));return {...L,subjects,complete,status:complete?'COMPLETE':'INCOMPLETE',average_mark:average,total_mark:complete?total:null,overall_grade:overallGrade?.label||'',overall_points:overallGrade?.points??'',assessments_used};}).sort((a,b)=>(b.average_mark??-Infinity)-(a.average_mark??-Infinity)||a.last_name.localeCompare(b.last_name));
+ const allRows=[...byLearner.values()].map(L=>{const subjects=[...L.subjects.values()].map(s=>{const average=calc(s.items);const systemId=s.items.find(i=>i.grading_system_id)?.grading_system_id||null;const g=gradeFor(average,systemId);const assessments_used=[...new Map(s.items.map(i=>[String(i.assessment_id),{id:i.assessment_id,name:i.assessment_name,type:i.assessment_type,order:i.assessment_order||0}])).values()].sort((a,b)=>Number(a.order)-Number(b.order));return {...s,average,display_average:average===null?null:Math.round(average),grade:g?.label||'',points:g?.points??'',grading_system_id:systemId,assessments_used};}).filter(s=>s.average!==null).sort((a,b)=>b.average-a.average||a.subject_name.localeCompare(b.subject_name));const total=subjects.reduce((s,x)=>s+Number(x.average||0),0);const average=subjects.length?total/subjects.length:null;const overallGrade=gradeFor(average,overallSystemId||subjects.find(s=>s.grading_system_id)?.grading_system_id||null);const assessments_used=[...new Map(subjects.flatMap(s=>s.assessments_used||[]).map(a=>[String(a.id),a])).values()].sort((a,b)=>Number(a.order)-Number(b.order));return {...L,subjects,average_mark:average,total_mark:total,overall_grade:overallGrade?.label||'',overall_points:overallGrade?.points??'',assessments_used};}).filter(x=>x.subjects.length).sort((a,b)=>b.total_mark-a.total_mark||b.average_mark-a.average_mark||a.last_name.localeCompare(b.last_name));
  const rows=classId
    ? allRows.filter(x=>String(x.class_id)===String(classId))
    : allRows;
 
-// Rank only complete results, using full-precision average percentage.
+// TOTAL MARKS determine ranking.
+// Competition ranking: 1, 2, 2, 4.
 if(rows.length){
- const classRanking=competitionRanks(rows);
- const overallPool=classId && meritLevelId
-  ? allRows.filter(x=>String(x.school_level_id)===String(meritLevelId)) : rows;
- const overallRanking=competitionRanks(overallPool);
- rows.forEach(x=>{
-  x.class_rank=classRanking.ranks.get(String(x.learner_id))??null;
-  x.class_rank_total=classRanking.sorted.length;
-  x.stream_rank=x.class_rank;
-  x.stream_rank_total=x.class_rank_total;
-  x.overall_rank=overallRanking.ranks.get(String(x.learner_id))??null;
-  x.overall_rank_total=overallRanking.sorted.length;
- });
+  const competitionRanks=(items)=>{
+    const sorted=[...items].sort((a,b)=>{
+      const aa=Number(a.total_mark??-Infinity);
+      const bb=Number(b.total_mark??-Infinity);
+      if(bb!==aa)return bb-aa;
+      return String(a.learner_id).localeCompare(String(b.learner_id));
+    });
+
+    const ranks=new Map();
+    let previousTotal=null;
+    let previousRank=0;
+
+    sorted.forEach((x,index)=>{
+      const total=Number(x.total_mark);
+
+      if(previousTotal===null || Math.abs(total-previousTotal)>0.000001){
+        previousRank=index+1;
+        previousTotal=total;
+      }
+
+      ranks.set(String(x.learner_id),previousRank);
+    });
+
+    return {sorted,ranks};
+  };
+
+  const classRanking=competitionRanks(rows);
+
+  // Overall position covers all streams belonging to the same grade/level.
+  const overallPool=classId && meritLevelId
+    ? allRows.filter(x=>String(x.school_level_id)===String(meritLevelId))
+    : rows;
+
+  const overallRanking=competitionRanks(overallPool);
+
+  rows.forEach(x=>{
+    x.class_rank=classRanking.ranks.get(String(x.learner_id))??null;
+    x.class_rank_total=classRanking.sorted.length;
+
+    x.overall_rank=overallRanking.ranks.get(String(x.learner_id))??null;
+    x.overall_rank_total=overallRanking.sorted.length;
+
+    // Compatibility with existing frontend code.
+    x.stream_rank=x.overall_rank;
+    x.stream_rank_total=x.overall_rank_total;
+  });
 }
 
 // FIX: an empty merit list used to give no clue why — the admin only saw "no
@@ -167,7 +197,7 @@ if(rows.length){
    const result={rows,subject_rankings:[],diagnostics};
    return setMeritCache(cacheKey,result);
  }
- const subjectMap=new Map();for(const r of rows.filter(x=>x.complete))for(const s of r.subjects){if(s.average===null)continue;if(!subjectMap.has(s.subject_id))subjectMap.set(s.subject_id,{subject_id:s.subject_id,subject_code:s.subject_code,subject_name:s.subject_name,values:[]});subjectMap.get(s.subject_id).values.push(s.average);}
+ const subjectMap=new Map();for(const r of rows)for(const s of r.subjects){if(!subjectMap.has(s.subject_id))subjectMap.set(s.subject_id,{subject_id:s.subject_id,subject_code:s.subject_code,subject_name:s.subject_name,values:[]});subjectMap.get(s.subject_id).values.push(s.average);}
  const teacherRows=classId?(await db.query(`SELECT DISTINCT ON (tsa.subject_id) tsa.subject_id,th.id teacher_id,th.first_name,th.last_name,th.staff_no FROM teacher_subject_assignments tsa JOIN teachers th ON th.id=tsa.teacher_id AND COALESCE(th.is_active,true)=true WHERE tsa.school_id=$1 AND tsa.class_id=$2 AND tsa.academic_year_id=$3 AND COALESCE(tsa.is_active,true)=true AND NOT (upper(trim(coalesce(th.first_name,''))) IN ('TEACHER','ADMIN') OR upper(trim(coalesce(th.last_name,''))) IN ('TEACHER','ADMIN') OR upper(trim(coalesce(th.staff_no,''))) IN ('TEACHER','ADMIN','MR.TEACHER','MR. TEACHER')) ORDER BY tsa.subject_id,CASE WHEN tsa.term_id=$4 THEN 0 WHEN tsa.term_id IS NULL THEN 1 ELSE 2 END,tsa.created_at DESC,tsa.id DESC`,[sid,classId,yearId,termId])).rows:[];
  const teacherBySubject=new Map(teacherRows.map(x=>[x.subject_id, x]));
  const isPlaceholderTeacher=x=>{const f=String(x?.first_name||'').trim().toUpperCase(),l=String(x?.last_name||'').trim().toUpperCase(),s=String(x?.staff_no||'').trim().toUpperCase();return !f&&!l || f==='TEACHER'||l==='TEACHER'||f==='ADMIN'||l==='ADMIN'||s==='TEACHER'||s==='ADMIN';};
@@ -238,7 +268,7 @@ router.get('/:schoolId/pdf',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEA
    doc.fillColor(ink).font('Helvetica-Bold').fontSize(8).text('MERIT / MARK SHEET',x0,y);
    const assessmentLabel=(usedAssessmentTypes||[]).length?usedAssessmentTypes.join(' • '):'ALL CONFIGURED MAIN ASSESSMENTS';
    doc.fillColor(muted).font('Helvetica-Bold').fontSize(5.8).text(`TERM: ${meta.term_name||'—'}  •  TYPE OF ASSESSMENT: ${assessmentLabel}`,x0+100,y+1,{width:tableW-100,lineBreak:false,ellipsis:true});
-   doc.fillColor(muted).font('Helvetica').fontSize(6.1).text('Ranked by average percentage • Incomplete results are unranked • Grade uses the rounded whole-number average.',x0,y+11,{width:tableW,lineBreak:false,ellipsis:true});
+   doc.fillColor(muted).font('Helvetica').fontSize(6.1).text('Highest total marks first • Average = total marks ÷ subjects assessed • Grade uses the rounded whole-number average.',x0,y+11,{width:tableW,lineBreak:false,ellipsis:true});
    y+=24;
    let xx=x0;doc.fillColor(navy).rect(x0,y,tableW,headerH).fill();
    const heads=['ADM. NO.','ASSES. NO.','STUDENT NAME','CLASS / STREAM',...subjects.map(s=>(s.subject_code||s.subject_name||'').toUpperCase()),'TOTAL','AVERAGE','CLASS POS.','OVERALL POS.','GRADE'];
