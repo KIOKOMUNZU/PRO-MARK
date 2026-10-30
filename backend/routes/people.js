@@ -444,6 +444,42 @@ router.patch('/:schoolId/learners/:learnerId/identifiers',schoolBoundary,roles('
   res.json(q.rows[0]);
  }catch(e){res.status(e.status||400).json({error:e.code==='23505'?'That admission number already exists in this school.':e.message});}
 });
+// Return JSON for the academic-year promotion roster. A missing route previously
+// fell through to the dashboard HTML fallback, producing invalid JSON (HTTP 200).
+router.get('/:schoolId/enrollments/:yearId',schoolBoundary,
+  roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER'),
+  async(req,res)=>{
+    const sid=req.params.schoolId, yearId=req.params.yearId;
+    try{
+      await assertBelongs('academic_years',yearId,sid);
+      const params=[sid,yearId];
+      let scope='';
+      if(req.user.role==='CLASS_TEACHER'){
+        params.push(req.user.user_id);
+        scope=` AND EXISTS (
+          SELECT 1 FROM class_teacher_assignments cta
+          JOIN teachers t ON t.id=cta.teacher_id AND t.school_id=cta.school_id
+          WHERE cta.school_id=e.school_id AND cta.class_id=e.class_id
+            AND cta.academic_year_id=e.academic_year_id AND t.user_id=$3
+        )`;
+      }
+      const q=await db.query(`
+        SELECT e.learner_id,e.academic_year_id,e.class_id,e.status,
+               l.first_name,l.middle_name,l.last_name,l.admission_no,
+               c.name AS class_name,c.stream
+        FROM learner_enrollments e
+        JOIN learners l ON l.id=e.learner_id AND l.school_id=e.school_id
+        JOIN classes c ON c.id=e.class_id AND c.school_id=e.school_id
+        WHERE e.school_id=$1 AND e.academic_year_id=$2
+          AND COALESCE(e.status,'ACTIVE')='ACTIVE'${scope}
+        ORDER BY c.name,c.stream,l.last_name,l.first_name,l.id`,params);
+      res.json(q.rows);
+    }catch(e){
+      console.error('Promotion roster load failed:',e);
+      res.status(e.status||500).json({error:e.message||'Unable to load promotion learners.'});
+    }
+  });
+
 // Bulk learner promotion / progression engine. Historical enrolments and marks remain untouched.
 router.post('/:schoolId/promote',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','CLASS_TEACHER'),async(req,res)=>{
  const sid=req.params.schoolId,b=req.body||{}; const c=await db.pool.connect();
