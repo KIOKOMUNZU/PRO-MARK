@@ -2031,22 +2031,34 @@ async function fees(){const id=state.schoolId,el=$('feeStructureList');el.textCo
 async function certificates(){const id=state.schoolId,el=$('lcList');el.textContent='Loading…';try{const d=await api(`/api/school-documents/${id}/leaving-certificates`);const fin={learners:state.learners||[]};zelimuLCFilter();el.innerHTML='<table><thead><tr><th>Certificate</th><th>Learner</th><th>Leaving date</th><th>PDF</th></tr></thead><tbody>'+d.map(r=>`<tr><td>${esc(r.data.certificate_number)}</td><td>${esc([r.first_name,r.middle_name,r.last_name].filter(Boolean).join(' '))}</td><td>${esc(r.data.leaving_date)}</td><td><button class="btn secondary" data-certificate="${esc(r.id)}">Open PDF</button></td></tr>`).join('')+'</tbody></table>';if(!d.length)el.textContent='No certificates issued yet.'}catch(e){el.textContent=e.message}}
 function zelimuLCFilter(){
  const cl=$('lcClass'),q=$('lcSearch'),sel=$('lcLearner'),msg=$('lcSearchStatus');
- const classes=Array.isArray(state.classes)?state.classes:[],learners=Array.isArray(state.learners)?state.learners:[];
- const previousClass=cl.value,previousLearner=sel.value;
- const names=new Map(classes.filter(c=>c.id).map(c=>[String(c.id),[c.name||c.class_name||c.level_name||'Class',c.stream||''].filter(Boolean).join(' ')]));
- learners.forEach(l=>{if(l.class_id&&!names.has(String(l.class_id)))names.set(String(l.class_id),l.class_name||'Class');});
- cl.replaceChildren(new Option('Select grade / class',''),...[...names].sort((a,b)=>a[1].localeCompare(b[1],undefined,{numeric:true})).map(([id,name])=>new Option(name,id)));
- if(names.has(previousClass))cl.value=previousClass;
+ if(!cl||!q||!sel||!msg)return;
+ const classes=Array.isArray(state.classes)?state.classes:[];
+ const learners=Array.isArray(state.learners)?state.learners:[];
+ const classKey=l=>String(l.enrollment_class_id||l.class_id||'');
+ const selected=cl.value;
+ const classNames=new Map(classes.filter(c=>c.id).map(c=>[String(c.id),[c.name||c.class_name||c.level_name||'Class',c.stream||''].filter(Boolean).join(' ')]));
+ learners.forEach(l=>{const k=classKey(l);if(k&&!classNames.has(k))classNames.set(k,l.class_name||'Class');});
+ const signature=[...classNames].map(([id,name])=>id+':'+name).join('|');
+ if(cl.dataset.classSignature!==signature){
+   cl.replaceChildren(new Option('Select grade / class',''),...[...classNames].sort((a,b)=>a[1].localeCompare(b[1],undefined,{numeric:true})).map(([id,name])=>new Option(name,id)));
+   cl.dataset.classSignature=signature;
+   if(classNames.has(selected))cl.value=selected;
+ }
  q.disabled=!cl.value;sel.disabled=!cl.value;
- if(!cl.value){sel.replaceChildren(new Option('Select class first',''));msg.textContent='Select a class first.';return;}
- const term=q.value.trim().toLowerCase();
- const matches=learners.filter(l=>String(l.class_id||'')===cl.value).filter(l=>!term||[l.first_name,l.middle_name,l.last_name,l.admission_no,l.assessment_no].some(v=>String(v||'').toLowerCase().includes(term)));
- sel.replaceChildren(new Option('Select learner',''),...matches.slice(0,100).map(l=>new Option([l.first_name,l.middle_name,l.last_name].filter(Boolean).join(' ')+' ('+(l.admission_no||'—')+')',l.id)));
- if(matches.some(l=>String(l.id)===previousLearner))sel.value=previousLearner;
- msg.textContent=matches.length>100?matches.length+' matches; type more to narrow results.':matches.length+' learner(s) found.';
+ if(!cl.value){sel.replaceChildren(new Option('Select class first',''));msg.textContent=classNames.size?'Select a class first.':'No configured classes loaded. Refresh school data.';return;}
+ const term=q.value.trim().toLocaleLowerCase();
+ const matched=learners.filter(l=>classKey(l)===cl.value).filter(l=>!term||[l.first_name,l.middle_name,l.last_name,l.admission_no,l.assessment_no].some(v=>String(v||'').toLocaleLowerCase().includes(term)));
+ const previous=sel.value;
+ sel.replaceChildren(new Option('Select learner',''),...matched.slice(0,100).map(l=>new Option([l.first_name,l.middle_name,l.last_name].filter(Boolean).join(' ')+' ('+(l.admission_no||'—')+')',l.id)));
+ if(matched.some(l=>String(l.id)===previous))sel.value=previous;
+ if(!matched.length){
+   const unassigned=learners.filter(l=>!classKey(l)).length;
+   msg.textContent=unassigned?`No learners matched this class. ${unassigned} learner(s) have no class assignment in the loaded records; check enrollment records.`:'No learners matched this class or search.';
+ }else msg.textContent=matched.length>100?`${matched.length} matches; type a name or admission number to narrow results.`:`${matched.length} learner(s) found.`;
 }
 $('lcClass')?.addEventListener('change',()=>{$('lcSearch').value='';zelimuLCFilter();});
-$('lcSearch')?.addEventListener('input',zelimuLCFilter);
+let zelimuLCSearchTimer;
+$('lcSearch')?.addEventListener('input',()=>{clearTimeout(zelimuLCSearchTimer);zelimuLCSearchTimer=setTimeout(zelimuLCFilter,160);});
 $('feeStructureReload')?.addEventListener('click',fees);$('lcRefresh')?.addEventListener('click',certificates);
 $('feeStructureList')?.addEventListener('click',e=>{const b=e.target.closest('[data-fee]');if(b)openPdf(`/api/school-documents/${state.schoolId}/fee-structures/${b.dataset.fee}/pdf`)});
 $('lcList')?.addEventListener('click',e=>{const b=e.target.closest('[data-certificate]');if(b)openPdf(`/api/school-documents/${state.schoolId}/leaving-certificates/${b.dataset.certificate}/pdf`)});
