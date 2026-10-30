@@ -1038,7 +1038,49 @@ async function fetchProtectedPdfBlob(url){
 async function openProtectedPdf(url,existingPopup=null){
  const popup=existingPopup||window.open('about:blank','_blank');
  if(!popup)throw new Error('Your browser blocked the PDF window. Please allow pop-ups for ZELIMU CBC and try again.');
- try{popup.document.open();popup.document.write('<!doctype html><html><head><title>ZELIMU CBC PDF</title></head><body style="font-family:Arial,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f8fafc;color:#17365D"><div style="text-align:center"><div style="font-size:28px;font-weight:700">ZELIMU CBC</div><div style="margin-top:10px">Preparing PDF…</div><div style="margin:14px auto;width:220px;height:6px;background:#e5e7eb;border-radius:99px;overflow:hidden"><div style="width:45%;height:100%;background:#17365D"></div></div></div>\n</body></html>');popup.document.close();}catch{}
+ try{popup.document.open();popup.document.write('<!doctype html><html><head><title>ZELIMU CBC PDF</title></head><body style="font-family:Arial,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f8fafc;color:#17365D"><div style="text-align:center"><div style="font-size:28px;font-weight:700">ZELIMU CBC</div><div style="margin-top:10px">Preparing PDF…</div><div style="margin:14px auto;width:220px;height:6px;background:#e5e7eb;border-radius:99px;overflow:hidden"><div style="width:45%;height:100%;background:#17365D"></div></div></div>\n
+<style>
+#assess .za-hub{margin:14px 0 20px}#assess .za-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:12px;margin-top:15px}#assess .za-tile{display:flex;align-items:flex-start;gap:12px;text-align:left;padding:17px;background:#fff;border:1px solid #d5e6df;border-radius:13px;color:#083c30;cursor:pointer;min-height:112px;box-shadow:0 2px 8px #073e2b0a}#assess .za-tile:hover,#assess .za-tile:focus-visible{border-color:#178653;background:#f0faf4}#assess .za-tile strong{display:block;font-size:15px;margin-bottom:6px}#assess .za-tile small{display:block;color:#536a62;font-size:12px;line-height:1.5}#assess .za-number{display:inline-grid;place-items:center;min-width:29px;height:29px;border-radius:9px;background:#e0f2e8;color:#096a3b;font-weight:800}#assess .za-header{background:#edf6f1;border-left:4px solid #178653;padding:17px;border-radius:10px}#assess .za-header h3{margin:0 0 5px}#assess .za-back{margin:10px 0 18px}#assess .za-pane[hidden],#assess .za-hub[hidden]{display:none!important}@media(max-width:620px){#assess .za-grid{grid-template-columns:1fr}#assess .za-tile{min-height:88px}}
+</style>
+<script>
+(function(){
+function initializeAssessmentHub(){
+ const root=document.getElementById('assess');if(!root||root.dataset.zaHub)return;root.dataset.zaHub='1';
+ const heading=root.querySelector(':scope > .section-title');
+ const gradingHeading=Array.from(root.children).find(n=>n.tagName==='H3'&&n.textContent.trim()==='Grading system setup');
+ if(!heading||!gradingHeading)return;
+ const setup=document.createElement('div');setup.className='za-pane';setup.id='zaAssessmentSetup';
+ const grading=document.createElement('div');grading.className='za-pane';grading.id='zaAssessmentGrading';
+ let gradingStarted=false;
+ Array.from(root.children).forEach(n=>{if(n===heading)return;if(n===gradingHeading)gradingStarted=true;(gradingStarted?grading:setup).appendChild(n)});
+ const hub=document.createElement('div');hub.className='za-hub';hub.id='zaAssessmentHub';
+ hub.innerHTML='<div class="za-header"><h3>Assessment Control Centre</h3><p class="muted small">Manage examinations, class subjects, mark entry, grading, approvals, performance and historical results in connected workspaces.</p></div><div class="za-grid"></div>';
+ root.append(hub,setup,grading);
+ const cards=[
+ ['Examination Setup','Configure main examinations and optional CATs for every assigned class subject.','setup'],
+ ['Class Subjects & Allocation','Open existing academic subjects and teacher/class assignments.','assign'],
+ ['Teacher Mark Entry','Open the existing teacher mark-entry workspace (subject to your role).','teacherMarking'],
+ ['Marks Management','Review saved marks and assessment results.','results'],
+ ['Examination Control & Approval','Manage deadlines, close mark entry and publish authorised results.','markControl'],
+ ['Grading Systems','Set CBC grading bands, descriptors and target classes.','grading'],
+ ['Performance Analytics & Merit','Run academic analysis and generate merit lists.','analytics'],
+ ['Report Cards & Results','Generate individual and class report cards.','reports'],
+ ['Assessment History','Review saved results by academic year, term and class.','results']
+ ];
+ const grid=hub.querySelector('.za-grid');
+ cards.forEach(([name,desc,target],i)=>{const b=document.createElement('button');b.type='button';b.className='za-tile';b.innerHTML='<span class="za-number">'+(i+1)+'</span><span><strong></strong><small></small></span>';b.querySelector('strong').textContent=name;b.querySelector('small').textContent=desc;b.addEventListener('click',()=>{
+  if(target==='setup'||target==='grading'){openPane(target);return;}
+  if(target==='teacherMarking' && document.getElementById('teacherMarking')?.classList.contains('teacher-only') && !document.getElementById('teacherMarking')?.offsetParent){alert('Teacher Mark Entry is available to authorised teachers. Administrators can manage marks and assignments in the other workspaces.');return;}
+  if(typeof showSection==='function'){showSection(target);document.getElementById(target)?.scrollIntoView({block:'start'});}else{alert('Workspace navigation is not ready. Please refresh.');}
+ });grid.appendChild(b)});
+ function openPane(target){hub.hidden=!!target;setup.hidden=target!=='setup';grading.hidden=target!=='grading';if(target){const pane=target==='setup'?setup:grading;if(!pane.querySelector('.za-back')){const back=document.createElement('button');back.type='button';back.className='btn secondary za-back';back.textContent='← Assessment Control Centre';back.addEventListener('click',()=>openPane(null));pane.prepend(back);}pane.scrollIntoView({block:'start'});}else root.scrollIntoView({block:'start'});}
+ openPane(null);
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initializeAssessmentHub);else initializeAssessmentHub();
+})();
+</script>
+
+</body></html>');popup.document.close();}catch{}
  try{const blob=await fetchProtectedPdfBlob(url);const u=URL.createObjectURL(blob);popup.location.href=u;setTimeout(()=>URL.revokeObjectURL(u),5*60*1000);return true;}catch(e){try{popup.close();}catch{}throw new Error(e.message||'Unable to prepare PDF.');}
 }
 async function loadGradings(){const el=$('gradingList');if(!el)return;try{const r=await api(`/api/grading/${sid}/systems`);window.pmGradingSystems=r||[];el.innerHTML=(r||[]).map(x=>`<div class="item"><b>${esc(x.name)}</b> · ${esc(x.code)} <button type="button" class="btn secondary mini edit-grading" data-grading-id="${esc(x.id)}">Edit</button><br><span class="muted small">${esc(x.description||'')} · ${Array.isArray(x.bands)?x.bands.length:0} grading levels</span></div>`).join('')||'<div class="notice">No grading systems created yet.</div>';}catch(e){el.innerHTML=`<div class="notice">${esc(e.message)}</div>`;}}
@@ -1614,35 +1656,11 @@ async function renderQuickResourceWorkspace(){
  $('quickResourceUpload')?.querySelector('form')?.addEventListener('submit',async e=>{e.preventDefault();try{await api(`/api/resources/${sid}`,{method:'POST',body:new FormData(e.target)});e.target.reset();await loadR();alert('Resource uploaded successfully.');}catch(x){alert(x.message);}});
  $('quickResourceList').onclick=e=>{const b=e.target.closest('[data-resource-id]');if(!b)return;openProtectedPdf(`/api/resources/${sid}/${b.dataset.resourceId}/file`).catch(x=>alert(x.message));};await loadR();
 }
-document.addEventListener('change',e=>{if(e.target?.id==='z7YearSelect' && document.getElementById('quickClassCards'))renderQuickClassListWorkspace();});
 async function renderQuickClassListWorkspace(){
- const box=$('pm24Data');
- const yearSelect=document.getElementById('z7YearSelect');
- const yearId=yearSelect?.value||$('anYear')?.value;
- const year=(state.years||[]).find(y=>String(y.id)===String(yearId));
- const yearLabel=year?.year_label||'Select academic year';
- const classes=roleAllowedClasses(state.classes||[]);
- box.innerHTML=`<div class="analytics-panel"><div class="section-title"><div><h3>CLASS LISTS · ${esc(yearLabel)}</h3><p class="muted small">Registers are separated by academic year. Completed enrollments remain in their original year.</p></div><span class="pill">${classes.length} authorised classes</span></div><div id="quickClassCards" class="class-list-grid"></div><div id="quickClassDetail"></div></div>`;
- const cards=$('quickClassCards');
- if(!yearId){cards.innerHTML='<div class="notice">Select an academic year in the top toolbar first.</div>';return;}
- try{
-  const enrollments=await api(`/api/people/${sid}/year-registers/${encodeURIComponent(yearId)}`);
-  if(!document.getElementById('quickClassCards'))return;
-  cards.innerHTML=classes.map(c=>{
-   const rows=enrollments.filter(r=>String(r.class_id)===String(c.id));
-   return `<div class="class-list-tile"><h3>${esc(c.name||'Class')} ${esc(c.stream||'')}</h3><div class="muted small">${esc(c.level_name||'')} · ${esc(yearLabel)}</div><div class="class-count">${rows.length}</div><div class="muted small">learner(s) in ${esc(yearLabel)}</div><div class="actions"><button class="btn" data-qclass="${c.id}">OPEN LIST</button><button class="btn secondary" data-qpdf="${c.id}">PRINT / SAVE PDF</button></div></div>`;
-  }).join('')||'<div class="notice">No authorised classes.</div>';
-  cards.onclick=async e=>{
-   const open=e.target.closest('[data-qclass]'),pdf=e.target.closest('[data-qpdf]');
-   if(pdf){openProtectedPdf(`/api/people/${sid}/classes/${pdf.dataset.qpdf}/pdf?academic_year_id=${encodeURIComponent(yearId)}`).catch(x=>alert(x.message));return;}
-   if(!open)return;
-   const c=classes.find(x=>String(x.id)===String(open.dataset.qclass));
-   const rows=enrollments.filter(r=>String(r.class_id)===String(open.dataset.qclass));
-   $('quickClassDetail').innerHTML=`<div class="card-subsection"><div class="section-title"><h3>${esc(c?.name||'Class')} · ${esc(yearLabel)} register</h3></div><div class="table-wrap"><table><thead><tr><th>#</th><th>ADM. NO.</th><th>ASSES. NO.</th><th>LEARNER</th><th>ENROLLMENT STATUS</th></tr></thead><tbody>${rows.map((r,i)=>`<tr><td>${i+1}</td><td>${esc(r.admission_no||'')}</td><td>${esc(r.assessment_no||'')}</td><td>${esc([r.first_name,r.middle_name,r.last_name].filter(Boolean).join(' '))}</td><td>${esc(r.enrollment_status||'ACTIVE')}</td></tr>`).join('')||'<tr><td colspan="5">No learners enrolled in this class for this year.</td></tr>'}</tbody></table></div></div>`;
-  };
- }catch(e){cards.innerHTML=`<div class="notice">${esc(e.message)}</div>`;}
+ const box=$('pm24Data');const classes=roleAllowedClasses(state.classes||[]);box.innerHTML=`<div class="analytics-panel"><div class="section-title"><div><h3>CLASS LISTS</h3><p class="muted small">Open a class register, add/remove learners where authorised, or print/save the register as PDF.</p></div><span class="pill">${classes.length} authorised class${classes.length===1?'':'es'}</span></div><div id="quickClassCards" class="class-list-grid"></div><div id="quickClassDetail"></div></div>`;
+ const cards=$('quickClassCards');cards.innerHTML=classes.map(c=>`<div class="class-list-tile"><h3>${esc(c.name||'Class')} ${esc(c.stream||'')}</h3><div class="muted small">${esc(c.level_name||'')}</div><div class="class-count">${Number(c.learner_count||0)}</div><div class="muted small">learner(s)</div><div class="actions"><button class="btn" data-qclass="${c.id}">OPEN LIST</button><button class="btn secondary" data-qpdf="${c.id}">PRINT / SAVE PDF</button></div></div>`).join('')||'<div class="notice">No classes are assigned to this account.</div>';
+ cards.onclick=async e=>{const open=e.target.closest('[data-qclass]'),pdf=e.target.closest('[data-qpdf]');if(pdf){openProtectedPdf(`/api/people/${sid}/classes/${pdf.dataset.qpdf}/pdf`).catch(x=>alert(x.message));return;}if(open){try{const rows=(state.learners||[]).filter(r=>String(r.class_id)===String(open.dataset.qclass));$('quickClassDetail').innerHTML=`<div class="card-subsection"><div class="section-title"><h3>CLASS REGISTER</h3></div><div class="table-wrap"><table><thead><tr><th>#</th><th>ADM. NO.</th><th>ASSES. NO.</th><th>LEARNER</th><th>STATUS</th></tr></thead><tbody>${rows.map((r,i)=>`<tr><td>${i+1}</td><td>${esc(r.admission_no||'')}</td><td>${esc(r.assessment_no||'')}</td><td>${esc([r.first_name,r.middle_name,r.last_name].filter(Boolean).join(' '))}</td><td>${esc(r.status||'ACTIVE')}</td></tr>`).join('')||'<tr><td colspan="5">No learners.</td></tr>'}</tbody></table></div></div>`;}catch(x){alert(x.message);}}};
 }
-
 async function renderTeacherControlWorkspace(){
  const box=$('pm24Data');const teachers=state.teachers||[],classes=state.classes||[],subjects=state.subjects||[],years=state.years||[];
  box.innerHTML=`<div class="analytics-panel"><div class="section-title"><div><h3>TEACHER ASSIGNMENT, ACCOUNTS &amp; ROLES</h3><p class="muted small">One teacher record can have one login and can retain subject assignments while serving as Class Teacher.</p></div><span class="pill">Administration</span></div><div class="grid"><form id="qTeacherAccount"><h4>1. Link / create teacher account</h4><label>Teacher<select name="teacher_id" required>${teachers.map(t=>`<option value="${t.id}">${esc((t.staff_no||'')+' · '+t.first_name+' '+t.last_name)}</option>`).join('')}</select></label><label>Login email<input name="email" type="email" required></label><label>Password<input name="password" type="password" minlength="10" required></label><label>Role<select name="role"><option>TEACHER</option><option>CLASS_TEACHER</option><option>SENIOR_TEACHER</option><option>HEADTEACHER</option><option>DEPUTY_HEADTEACHER</option></select></label><button class="btn primary">SAVE ACCOUNT &amp; ROLE</button></form><form id="qTeacherAssignment"><h4>2. Assign subject + class</h4><label>Teacher<select name="teacher_id" required>${teachers.map(t=>`<option value="${t.id}">${esc((t.staff_no||'')+' · '+t.first_name+' '+t.last_name)}</option>`).join('')}</select></label><label>Subject<select name="subject_id" required>${subjects.map(x=>`<option value="${x.id}">${esc(x.code+' · '+x.name)}</option>`).join('')}</select></label><label>Class<select name="class_id" required>${classes.map(x=>`<option value="${x.id}">${esc(x.name+' '+(x.stream||''))}</option>`).join('')}</select></label><label>Academic year<select name="academic_year_id" required>${years.map(x=>`<option value="${x.id}">${esc(x.year_label)}</option>`).join('')}</select></label><button class="btn primary">ASSIGN SUBJECT &amp; CLASS</button></form></div><div class="card-subsection"><h4>3. Assign Class Teacher</h4><form id="qClassTeacher" class="grid"><label>Teacher<select name="teacher_id" required>${teachers.map(t=>`<option value="${t.id}">${esc((t.staff_no||'')+' · '+t.first_name+' '+t.last_name)}</option>`).join('')}</select></label><label>Class<select name="class_id" required>${classes.map(x=>`<option value="${x.id}">${esc(x.name+' '+(x.stream||''))}</option>`).join('')}</select></label><label>Academic year<select name="academic_year_id" required>${years.map(x=>`<option value="${x.id}">${esc(x.year_label)}</option>`).join('')}</select></label><button class="btn primary">MAKE CLASS TEACHER</button></form></div><div id="qTeacherControlList" class="table-wrap"><div class="notice">Loading teacher accounts and assignments…</div></div></div>`;
@@ -1690,6 +1708,48 @@ async function renderSchoolFinanceModule(){
 <link rel="stylesheet" href="/css/zelimu-sidebar-uniform-green.css?v=1">
 <link rel="stylesheet" href="/css/zelimu-header-branding.css?v=2">
 </head><body><h1>${esc($('schoolTitle')?.textContent||'ZELIMU CBC')}</h1><h2>OFFICIAL SCHOOL FEE RECEIPT</h2><p class="muted">Receipt No: <b>${esc(p.receipt_no)}</b></p><table><tbody><tr><th>Payment date</th><td>${esc(String(p.payment_date||'').slice(0,10))}</td></tr><tr><th>Learner</th><td>${esc(learner)}</td></tr><tr><th>Admission number</th><td>${esc(p.admission_no||'')}</td></tr><tr><th>Payment method</th><td>${esc(p.payment_method||'')}</td></tr><tr><th>Reference</th><td>${esc(p.reference||'—')}</td></tr><tr><th>Notes</th><td>${esc(p.notes||'—')}</td></tr></tbody></table><div class="total">Amount received: ${esc(p.currency)} ${fmt(p.amount)}</div><p class="muted">Generated by ZELIMU CBC School Finance</p><button onclick="window.print()">Print receipt</button>
+
+<style>
+#assess .za-hub{margin:14px 0 20px}#assess .za-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:12px;margin-top:15px}#assess .za-tile{display:flex;align-items:flex-start;gap:12px;text-align:left;padding:17px;background:#fff;border:1px solid #d5e6df;border-radius:13px;color:#083c30;cursor:pointer;min-height:112px;box-shadow:0 2px 8px #073e2b0a}#assess .za-tile:hover,#assess .za-tile:focus-visible{border-color:#178653;background:#f0faf4}#assess .za-tile strong{display:block;font-size:15px;margin-bottom:6px}#assess .za-tile small{display:block;color:#536a62;font-size:12px;line-height:1.5}#assess .za-number{display:inline-grid;place-items:center;min-width:29px;height:29px;border-radius:9px;background:#e0f2e8;color:#096a3b;font-weight:800}#assess .za-header{background:#edf6f1;border-left:4px solid #178653;padding:17px;border-radius:10px}#assess .za-header h3{margin:0 0 5px}#assess .za-back{margin:10px 0 18px}#assess .za-pane[hidden],#assess .za-hub[hidden]{display:none!important}@media(max-width:620px){#assess .za-grid{grid-template-columns:1fr}#assess .za-tile{min-height:88px}}
+</style>
+<script>
+(function(){
+function initializeAssessmentHub(){
+ const root=document.getElementById('assess');if(!root||root.dataset.zaHub)return;root.dataset.zaHub='1';
+ const heading=root.querySelector(':scope > .section-title');
+ const gradingHeading=Array.from(root.children).find(n=>n.tagName==='H3'&&n.textContent.trim()==='Grading system setup');
+ if(!heading||!gradingHeading)return;
+ const setup=document.createElement('div');setup.className='za-pane';setup.id='zaAssessmentSetup';
+ const grading=document.createElement('div');grading.className='za-pane';grading.id='zaAssessmentGrading';
+ let gradingStarted=false;
+ Array.from(root.children).forEach(n=>{if(n===heading)return;if(n===gradingHeading)gradingStarted=true;(gradingStarted?grading:setup).appendChild(n)});
+ const hub=document.createElement('div');hub.className='za-hub';hub.id='zaAssessmentHub';
+ hub.innerHTML='<div class="za-header"><h3>Assessment Control Centre</h3><p class="muted small">Manage examinations, class subjects, mark entry, grading, approvals, performance and historical results in connected workspaces.</p></div><div class="za-grid"></div>';
+ root.append(hub,setup,grading);
+ const cards=[
+ ['Examination Setup','Configure main examinations and optional CATs for every assigned class subject.','setup'],
+ ['Class Subjects & Allocation','Open existing academic subjects and teacher/class assignments.','assign'],
+ ['Teacher Mark Entry','Open the existing teacher mark-entry workspace (subject to your role).','teacherMarking'],
+ ['Marks Management','Review saved marks and assessment results.','results'],
+ ['Examination Control & Approval','Manage deadlines, close mark entry and publish authorised results.','markControl'],
+ ['Grading Systems','Set CBC grading bands, descriptors and target classes.','grading'],
+ ['Performance Analytics & Merit','Run academic analysis and generate merit lists.','analytics'],
+ ['Report Cards & Results','Generate individual and class report cards.','reports'],
+ ['Assessment History','Review saved results by academic year, term and class.','results']
+ ];
+ const grid=hub.querySelector('.za-grid');
+ cards.forEach(([name,desc,target],i)=>{const b=document.createElement('button');b.type='button';b.className='za-tile';b.innerHTML='<span class="za-number">'+(i+1)+'</span><span><strong></strong><small></small></span>';b.querySelector('strong').textContent=name;b.querySelector('small').textContent=desc;b.addEventListener('click',()=>{
+  if(target==='setup'||target==='grading'){openPane(target);return;}
+  if(target==='teacherMarking' && document.getElementById('teacherMarking')?.classList.contains('teacher-only') && !document.getElementById('teacherMarking')?.offsetParent){alert('Teacher Mark Entry is available to authorised teachers. Administrators can manage marks and assignments in the other workspaces.');return;}
+  if(typeof showSection==='function'){showSection(target);document.getElementById(target)?.scrollIntoView({block:'start'});}else{alert('Workspace navigation is not ready. Please refresh.');}
+ });grid.appendChild(b)});
+ function openPane(target){hub.hidden=!!target;setup.hidden=target!=='setup';grading.hidden=target!=='grading';if(target){const pane=target==='setup'?setup:grading;if(!pane.querySelector('.za-back')){const back=document.createElement('button');back.type='button';back.className='btn secondary za-back';back.textContent='← Assessment Control Centre';back.addEventListener('click',()=>openPane(null));pane.prepend(back);}pane.scrollIntoView({block:'start'});}else root.scrollIntoView({block:'start'});}
+ openPane(null);
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initializeAssessmentHub);else initializeAssessmentHub();
+})();
+</script>
+
 </body></html>`);receiptWindow.document.close();});
  $('sfRefresh').onclick=reload;await reload();
 }
@@ -2607,6 +2667,48 @@ body main.page > .portal-hero {
   }else{
     initializeTeacherLinking();
   }
+})();
+</script>
+
+
+<style>
+#assess .za-hub{margin:14px 0 20px}#assess .za-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:12px;margin-top:15px}#assess .za-tile{display:flex;align-items:flex-start;gap:12px;text-align:left;padding:17px;background:#fff;border:1px solid #d5e6df;border-radius:13px;color:#083c30;cursor:pointer;min-height:112px;box-shadow:0 2px 8px #073e2b0a}#assess .za-tile:hover,#assess .za-tile:focus-visible{border-color:#178653;background:#f0faf4}#assess .za-tile strong{display:block;font-size:15px;margin-bottom:6px}#assess .za-tile small{display:block;color:#536a62;font-size:12px;line-height:1.5}#assess .za-number{display:inline-grid;place-items:center;min-width:29px;height:29px;border-radius:9px;background:#e0f2e8;color:#096a3b;font-weight:800}#assess .za-header{background:#edf6f1;border-left:4px solid #178653;padding:17px;border-radius:10px}#assess .za-header h3{margin:0 0 5px}#assess .za-back{margin:10px 0 18px}#assess .za-pane[hidden],#assess .za-hub[hidden]{display:none!important}@media(max-width:620px){#assess .za-grid{grid-template-columns:1fr}#assess .za-tile{min-height:88px}}
+</style>
+<script>
+(function(){
+function initializeAssessmentHub(){
+ const root=document.getElementById('assess');if(!root||root.dataset.zaHub)return;root.dataset.zaHub='1';
+ const heading=root.querySelector(':scope > .section-title');
+ const gradingHeading=Array.from(root.children).find(n=>n.tagName==='H3'&&n.textContent.trim()==='Grading system setup');
+ if(!heading||!gradingHeading)return;
+ const setup=document.createElement('div');setup.className='za-pane';setup.id='zaAssessmentSetup';
+ const grading=document.createElement('div');grading.className='za-pane';grading.id='zaAssessmentGrading';
+ let gradingStarted=false;
+ Array.from(root.children).forEach(n=>{if(n===heading)return;if(n===gradingHeading)gradingStarted=true;(gradingStarted?grading:setup).appendChild(n)});
+ const hub=document.createElement('div');hub.className='za-hub';hub.id='zaAssessmentHub';
+ hub.innerHTML='<div class="za-header"><h3>Assessment Control Centre</h3><p class="muted small">Manage examinations, class subjects, mark entry, grading, approvals, performance and historical results in connected workspaces.</p></div><div class="za-grid"></div>';
+ root.append(hub,setup,grading);
+ const cards=[
+ ['Examination Setup','Configure main examinations and optional CATs for every assigned class subject.','setup'],
+ ['Class Subjects & Allocation','Open existing academic subjects and teacher/class assignments.','assign'],
+ ['Teacher Mark Entry','Open the existing teacher mark-entry workspace (subject to your role).','teacherMarking'],
+ ['Marks Management','Review saved marks and assessment results.','results'],
+ ['Examination Control & Approval','Manage deadlines, close mark entry and publish authorised results.','markControl'],
+ ['Grading Systems','Set CBC grading bands, descriptors and target classes.','grading'],
+ ['Performance Analytics & Merit','Run academic analysis and generate merit lists.','analytics'],
+ ['Report Cards & Results','Generate individual and class report cards.','reports'],
+ ['Assessment History','Review saved results by academic year, term and class.','results']
+ ];
+ const grid=hub.querySelector('.za-grid');
+ cards.forEach(([name,desc,target],i)=>{const b=document.createElement('button');b.type='button';b.className='za-tile';b.innerHTML='<span class="za-number">'+(i+1)+'</span><span><strong></strong><small></small></span>';b.querySelector('strong').textContent=name;b.querySelector('small').textContent=desc;b.addEventListener('click',()=>{
+  if(target==='setup'||target==='grading'){openPane(target);return;}
+  if(target==='teacherMarking' && document.getElementById('teacherMarking')?.classList.contains('teacher-only') && !document.getElementById('teacherMarking')?.offsetParent){alert('Teacher Mark Entry is available to authorised teachers. Administrators can manage marks and assignments in the other workspaces.');return;}
+  if(typeof showSection==='function'){showSection(target);document.getElementById(target)?.scrollIntoView({block:'start'});}else{alert('Workspace navigation is not ready. Please refresh.');}
+ });grid.appendChild(b)});
+ function openPane(target){hub.hidden=!!target;setup.hidden=target!=='setup';grading.hidden=target!=='grading';if(target){const pane=target==='setup'?setup:grading;if(!pane.querySelector('.za-back')){const back=document.createElement('button');back.type='button';back.className='btn secondary za-back';back.textContent='← Assessment Control Centre';back.addEventListener('click',()=>openPane(null));pane.prepend(back);}pane.scrollIntoView({block:'start'});}else root.scrollIntoView({block:'start'});}
+ openPane(null);
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initializeAssessmentHub);else initializeAssessmentHub();
 })();
 </script>
 
