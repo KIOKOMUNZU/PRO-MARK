@@ -446,6 +446,25 @@ router.patch('/:schoolId/learners/:learnerId/identifiers',schoolBoundary,roles('
 });
 // Return JSON for the academic-year promotion roster. A missing route previously
 // fell through to the dashboard HTML fallback, producing invalid JSON (HTTP 200).
+// Year-scoped register: historical completed enrollments remain visible in their source year.
+router.get('/:schoolId/year-registers/:yearId',schoolBoundary,
+ roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER'),async(req,res)=>{
+ try{
+  const sid=req.params.schoolId,yearId=req.params.yearId;
+  await assertBelongs('academic_years',yearId,sid);
+  const params=[sid,yearId];let scope='';
+  if(req.user.role==='CLASS_TEACHER'){
+   params.push(req.user.user_id);
+   scope=` AND EXISTS (SELECT 1 FROM class_teacher_assignments a JOIN teachers t ON t.id=a.teacher_id AND t.school_id=a.school_id WHERE a.school_id=e.school_id AND a.class_id=e.class_id AND a.academic_year_id=e.academic_year_id AND t.user_id=$3)`;
+  }
+  const rows=(await db.query(`SELECT e.learner_id AS id,e.class_id,e.academic_year_id,e.status AS enrollment_status,l.first_name,l.middle_name,l.last_name,l.admission_no,l.assessment_no,l.is_active
+    FROM learner_enrollments e JOIN learners l ON l.id=e.learner_id AND l.school_id=e.school_id
+    WHERE e.school_id=$1 AND e.academic_year_id=$2${scope}
+    ORDER BY l.last_name,l.first_name,l.id`,params)).rows;
+  res.setHeader('Cache-Control','no-store');res.json(rows);
+ }catch(e){res.status(e.status||500).json({error:e.message||'Year register unavailable'});}
+});
+
 router.get('/:schoolId/enrollments/:yearId',schoolBoundary,
   roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER'),
   async(req,res)=>{
@@ -782,15 +801,18 @@ router.get('/:schoolId/classes/:classId/pdf',schoolBoundary,roles('SCHOOL_ADMIN'
     FROM classes c JOIN school_levels lv ON lv.id=c.school_level_id JOIN schools sc ON sc.id=c.school_id
     LEFT JOIN school_identity si ON si.school_id=c.school_id WHERE c.id=$1 AND c.school_id=$2`,[cid,sid])).rows[0];
   if(!c)return res.status(404).json({error:'Class not found'});
-  const cachedPdf=getClassListPdf(`${sid}|${cid}`);if(cachedPdf){res.setHeader('Content-Type','application/pdf');res.setHeader('Content-Length',String(cachedPdf.length));res.setHeader('Content-Disposition',`inline; filename="class-list-${String(c.name||'class').replace(/[^a-z0-9]+/gi,'-').toLowerCase()}.pdf"`);return res.end(cachedPdf);}
+  const yearId=req.query.academic_year_id;
+  if(!yearId)return res.status(400).json({error:'Academic year is required for a class register PDF.'});
+  await assertBelongs('academic_years',yearId,sid);
+  const cachedPdf=null;if(cachedPdf){res.setHeader('Content-Type','application/pdf');res.setHeader('Content-Length',String(cachedPdf.length));res.setHeader('Content-Disposition',`inline; filename="class-list-${String(c.name||'class').replace(/[^a-z0-9]+/gi,'-').toLowerCase()}.pdf"`);return res.end(cachedPdf);}
   if(req.user.role==='CLASS_TEACHER'){
    const ok=(await db.query(`SELECT 1 FROM class_teacher_assignments a JOIN teachers t ON t.id=a.teacher_id WHERE a.school_id=$1 AND a.class_id=$2 AND t.user_id=$3 LIMIT 1`,[sid,cid,req.user.user_id])).rows[0];
    if(!ok)return res.status(403).json({error:'You can only print a class list for a class assigned to you.'});
   }
-  const rows=(await db.query(`SELECT l.admission_no,l.assessment_no,l.first_name,l.middle_name,l.last_name,l.gender,COALESCE(le.status,l.status,'ACTIVE') status
-    FROM learners l LEFT JOIN LATERAL (SELECT status FROM learner_enrollments WHERE school_id=$1 AND learner_id=l.id AND class_id=$2 ORDER BY enrolled_at DESC NULLS LAST LIMIT 1) le ON true
-    WHERE l.school_id=$1 AND (l.class_id=$2 OR le.status IN ('ACTIVE','COMPLETED'))
-    ORDER BY lower(trim(coalesce(l.first_name,'') || ' ' || coalesce(l.middle_name,'') || ' ' || coalesce(l.last_name,''))),l.id`,[sid,cid])).rows;
+  const rows=(await db.query(`SELECT l.admission_no,l.assessment_no,l.first_name,l.middle_name,l.last_name,l.gender,e.status
+    FROM learner_enrollments e JOIN learners l ON l.id=e.learner_id AND l.school_id=e.school_id
+    WHERE e.school_id=$1 AND e.class_id=$2 AND e.academic_year_id=$3
+    ORDER BY l.last_name,l.first_name,l.id`,[sid,cid,yearId])).rows;
   const PDFDocument=require('pdfkit');
   const doc=new PDFDocument({size:'A4',layout:'landscape',margin:28});
   const chunks=[];doc.on('data',x=>chunks.push(x));
