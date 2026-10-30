@@ -948,7 +948,7 @@ function wirePeopleForms(){safeOn('teacherForm','submit',async e=>{e.preventDefa
 const guardian=[body.guardian_first_name,body.guardian_last_name,body.guardian_phone].filter(Boolean);
 if(guardian.length>0&&guardian.length<3)throw new Error('Guardian first name, last name and phone must all be supplied.');
 if(!confirm('Confirm admission of '+[body.first_name,body.last_name].filter(Boolean).join(' ')+'? This will create the learner and enroll them in the selected class.'))return;
-body.admission_workflow='CONFIRMED';if(body.guardian_phone&&!body.parent_phone)body.parent_phone=body.guardian_phone;const l=await api(`/api/people/${sid}/learners`,{method:'POST',body});const photo=f.get('passport_photo');if(photo&&photo.size){const pf=new FormData();pf.append('photo',photo);try{await api(`/api/documents/${sid}/learner/${l.id}/photo`,{method:'POST',body:pf});}catch(photoError){alert('Learner was admitted successfully, but the passport photo was not uploaded: '+photoError.message+'. Do NOT register the learner again; add the photo from the existing learner record.');}}e.target.reset();await load();alert('Learner admitted and enrolled successfully.');
+if(zelimuCurrentAdmissionApplication)body.admission_application_id=zelimuCurrentAdmissionApplication;body.admission_workflow='CONFIRMED';if(body.guardian_phone&&!body.parent_phone)body.parent_phone=body.guardian_phone;const l=await api(`/api/people/${sid}/learners`,{method:'POST',body});const photo=f.get('passport_photo');if(photo&&photo.size){const pf=new FormData();pf.append('photo',photo);try{await api(`/api/documents/${sid}/learner/${l.id}/photo`,{method:'POST',body:pf});}catch(photoError){alert('Learner was admitted successfully, but the passport photo was not uploaded: '+photoError.message+'. Do NOT register the learner again; add the photo from the existing learner record.');}}e.target.reset();zelimuCurrentAdmissionApplication=null;await load();await zelimuLoadAdmissionApplications();alert('Learner admitted and enrolled successfully.');
 if(confirm('Print admission confirmation now?')){
  const w=window.open('','_blank');if(w){const escPrint=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));w.document.write('<!doctype html><title>Admission Confirmation</title><style>body{font:16px Arial;margin:40px;line-height:1.7}h1{color:#16683f}hr{border:1px solid #ddd}</style><h1>ZELIMU CBC · Admission Confirmation</h1><hr><p><b>Learner:</b> '+escPrint([body.first_name,body.middle_name,body.last_name].filter(Boolean).join(' '))+'</p><p><b>Admission number:</b> '+escPrint(body.admission_no||'Not provided')+'</p><p><b>Assessment number:</b> '+escPrint(body.assessment_no||'Not provided')+'</p><p><b>Admission date:</b> '+escPrint(body.admission_date||new Date().toISOString().slice(0,10))+'</p><p><b>Record ID:</b> '+escPrint(l.id)+'</p><p>Admission and class enrollment recorded in ZELIMU CBC.</p>');w.document.close();w.print();}
 }}catch(x){alert(x.message);}});safeOn('teacherSearch','input',()=>renderTeachers(state.teachers));safeOn('learnerSearch','input',renderLearners);safeOn('learnerFilterClass','change',renderLearners);safeOn('learnerFilterStatus','change',renderLearners);safeOn('learnerFilterLevel','change',()=>{const level=$('learnerFilterLevel').value;const classes=state.classes.filter(x=>!level||String(x.school_level_id)===String(level));opts($('learnerFilterClass'),classes,x=>`${x.name} ${x.stream||''} · ${x.level_name||''}`,'Select a class');renderLearners();});}
@@ -1838,6 +1838,11 @@ function zelimuEnsureAdmissionsWorkspace(){
  workspace.innerHTML='<div class="section-title"><div><h2>Admissions · New Learner</h2><span class="pill">Register once · existing school classes</span></div></div><p class="muted small">Register a new learner using the school’s existing academic year and class records. Existing learners remain in Learner Enrollment &amp; Promotion.</p><div id="zelimuAdmissionsFormHostV2"></div>';
  people.parentNode.insertBefore(workspace,people.nextSibling);
  workspace.querySelector('#zelimuAdmissionsFormHostV2').appendChild(form);
+ const appPanel=document.createElement('div');appPanel.className='card-subsection';appPanel.innerHTML=`<h3>Admission applications</h3><p class="muted small">Save an unfinished application without enrolling a learner. Submit it for review, then confirm using the existing admission form.</p><div class="actions"><button type="button" class="btn secondary" id="admSaveDraft">SAVE DRAFT</button><button type="button" class="btn secondary" id="admSubmitReview">SUBMIT FOR REVIEW</button><button type="button" class="btn secondary" id="admRefresh">REFRESH APPLICATIONS</button></div><p id="admAppMessage" role="status"></p><div id="admApplications" class="directory"></div>`;workspace.appendChild(appPanel);
+ appPanel.querySelector('#admSaveDraft').onclick=()=>zelimuSaveAdmissionApplication(false);
+ appPanel.querySelector('#admSubmitReview').onclick=()=>zelimuSaveAdmissionApplication(true);
+ appPanel.querySelector('#admRefresh').onclick=zelimuLoadAdmissionApplications;
+
  // Extend the original registration form; its existing submit handler and learner API are retained.
  if(!form.querySelector('#zelimuAdmissionsExtendedV3')){
  const extra=document.createElement('div');extra.id='zelimuAdmissionsExtendedV3';
@@ -1859,6 +1864,23 @@ function zelimuEnsureAdmissionsWorkspace(){
  const heading=form.querySelector('h3');if(heading)heading.textContent='Register new learner · Admissions';
  return workspace;
 }
+let zelimuCurrentAdmissionApplication=null;
+async function zelimuSaveAdmissionApplication(review){
+ const form=document.getElementById('learnerForm'),msg=document.getElementById('admAppMessage');if(!form)return;
+ const data=Object.fromEntries([...new FormData(form)].filter(([k])=>k!=='passport_photo'));
+ try{const url=`/api/people/${sid}/admission-applications`;
+ const result=zelimuCurrentAdmissionApplication?await api(url+'/'+zelimuCurrentAdmissionApplication,{method:'PATCH',body:{payload:data,status:review?'PENDING_REVIEW':'DRAFT'}}):await api(url,{method:'POST',body:{...data,submit_for_review:review}});
+ zelimuCurrentAdmissionApplication=result.id;msg.textContent=review?'Application submitted for review. Learner has NOT been enrolled.':'Draft saved. Learner has NOT been enrolled.';await zelimuLoadAdmissionApplications();
+ }catch(e){msg.textContent=e.message;}
+}
+async function zelimuLoadAdmissionApplications(){
+ const box=document.getElementById('admApplications');if(!box)return;
+ try{const rows=await api(`/api/people/${sid}/admission-applications`);box.replaceChildren();
+ for(const a of rows){const item=document.createElement('div');item.className='item';const label=document.createElement('span');label.textContent=[a.first_name,a.last_name].filter(Boolean).join(' ')+' · '+(a.admission_no||'No admission number')+' · '+a.status;
+ const button=document.createElement('button');button.type='button';button.className='btn secondary';button.textContent=a.status==='CONFIRMED'?'Confirmed':'OPEN APPLICATION';button.disabled=a.status==='CONFIRMED';button.onclick=async()=>{try{const full=await api(`/api/people/${sid}/admission-applications/${a.id}`);const form=document.getElementById('learnerForm');for(const [k,v] of Object.entries(full.payload||{})){const field=form.elements.namedItem(k);if(field&&typeof v==='string'&&field.type!=='file')field.value=v;}zelimuCurrentAdmissionApplication=a.id;document.getElementById('admAppMessage').textContent='Application opened: '+a.status+'. Review details before confirming.';form.scrollIntoView({block:'start'});}catch(e){alert(e.message);}};item.append(label,button);box.appendChild(item);}
+ if(!rows.length)box.textContent='No saved applications yet.';
+ }catch(e){box.textContent='Unable to load applications: '+e.message;}
+}
 function zelimuOpenAdmissionsV1(){
  const workspace=zelimuEnsureAdmissionsWorkspace();
  if(!workspace)return;
@@ -1866,6 +1888,7 @@ function zelimuOpenAdmissionsV1(){
    window.zelimuMountWorkspace(workspace);
  }
  showSection('zelimuAdmissionsWorkspaceV2');
+ zelimuLoadAdmissionApplications();
  workspace.scrollIntoView({block:'start'});
 }
 function zelimuUnusedAdmissionsV1(){
