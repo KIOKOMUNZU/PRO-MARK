@@ -1839,7 +1839,9 @@ function zelimuOpenAdmissionsV1(){
  if(!workspace)return;
  showSection('people');
  document.getElementById('people')?.classList.remove('nav-active');
+ document.getElementById('people')?.style.setProperty('display','none');
  workspace.classList.add('nav-active');
+ workspace.style.setProperty('display','block');
  workspace.scrollIntoView({block:'start'});
 }
 function zelimuUnusedAdmissionsV1(){
