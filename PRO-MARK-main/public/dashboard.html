@@ -339,7 +339,14 @@ body, main, .main-content, .dashboard-main {
 
 
 <link rel="stylesheet" href="/css/zelimu-approved-dashboard.css?v=approved-picture-20261029">
-</head>
+<style>/* ZELIMU STAFF MANAGEMENT V2 */
+#people #zelimuStaffHubV2{height:auto!important;min-height:0!important}
+#people .zelimu-staff-fields-v2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px;margin:12px 0}
+#people .zelimu-staff-fields-v2 label{display:block;font-weight:600;font-size:13px}
+#people .zelimu-staff-fields-v2 input,#people .zelimu-staff-fields-v2 select{box-sizing:border-box;width:100%;height:40px;min-height:40px;margin-top:4px;padding:7px 10px}
+#people #zelimuStaffTabsV2 button[aria-pressed="true"]{outline:2px solid #16834a}
+@media(max-width:750px){#people .zelimu-staff-fields-v2{grid-template-columns:1fr}}
+</style><style id="lc-chooser-style">#leavingCertificates .lc-chooser{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:12px 0 18px;padding:16px;background:#f4faf6;border:1px solid #d6e8dc;border-radius:12px}#leavingCertificates .lc-chooser label:nth-child(3),#leavingCertificates .lc-chooser small{grid-column:1/-1}#leavingCertificates .lc-chooser input,#leavingCertificates .lc-chooser select{box-sizing:border-box;width:100%;min-height:44px;margin-top:6px}@media(max-width:700px){#leavingCertificates .lc-chooser{grid-template-columns:minmax(0,1fr)}#leavingCertificates .lc-chooser label:nth-child(3),#leavingCertificates .lc-chooser small{grid-column:1}}</style></head>
 <body><main class="page">
 <header><div class="brand-lockup"><div class="pm-brand"><img src="/assets/zelimu-cbc-logo.svg" alt="ZELIMU CBC logo"><div><strong>ZELIMU CBC</strong><div class="muted small">School Management Portal</div></div></div><div><div class="muted small" id="schoolTitle">School workspace</div><div class="small role-caption" id="roleCaption">Secure school portal</div></div></div><div class="header-actions"><select id="ownerSchoolSwitch" class="owner-school-switch" style="display:none"></select><span id="who"></span><button class="btn secondary" id="signOut">Sign out</button></div></header><section class="portal-hero card"><div><span class="eyebrow">SCHOOL MANAGEMENT PLATFORM</span><h1 id="portalHeading">School workspace</h1><p id="portalSubtitle">Manage academic operations with a clear, role-aware workspace.</p></div><div><div class="hero-badge" id="roleBadge">LOADING ROLE…</div><div class="user-greeting" id="userGreeting"></div></div></section><div id="announcementBanner" class="notice" style="display:none;margin-top:12px"></div><section id="passwordPanel" class="card password-panel"><div class="section-title"><h2>My Password</h2><span class="pill">Secure account</span></div><p class="muted small">Change your password at any time. ZELIMU CBC never displays existing passwords because they are securely stored as one-way hashes.</p><form id="passwordForm"><label>Current password<input id="currentPassword" type="password" autocomplete="current-password" required></label><label>New password<input id="newPassword" type="password" minlength="10" autocomplete="new-password" required></label><label>Confirm new password<input id="confirmPassword" type="password" minlength="10" autocomplete="new-password" required></label><button class="btn primary" type="submit">Change password</button></form><div id="passwordMessage" class="notice" style="display:none"></div></section><section id="teacherMarking" class="nav-managed-section card teacher-only">
 <section id="teacherLinkConfirmation" class="card portal-module" style="display:none">
@@ -408,6 +415,7 @@ body, main, .main-content, .dashboard-main {
  <div class="pm-module-groups" id="navTabs">
   <div class="pm-module-group"><h3>01 · ADMINISTRATION</h3><div class="pm-admin-menu">
    <button data-target="pm24_2"><span class="pm-icon">⚙️</span><span>School Administration Setup</span></button>
+      <button data-target="people" data-admission-link="true"><span class="pm-icon">📝</span><span>Admissions · New Learner</span></button>
       <button data-target="pm24_4"><span class="pm-icon">🎓</span><span>Learner Enrollment &amp; Promotion</span></button>
    <button data-target="pm24_5"><span class="pm-icon">👪</span><span>Parent &amp; Guardian Management</span></button>
    <button data-target="pm24_13"><span class="pm-icon">🕘</span><span>Daily Learner Attendance</span></button>
@@ -473,7 +481,7 @@ body, main, .main-content, .dashboard-main {
 <section class="card owner-only" aria-label="Platform owner controls"><div class="pm-module-group owner-only"><h3>PLATFORM OWNER · SEPARATE CONTROL</h3><div class="pm-admin-menu"><a class="zelimu-owner-link" href="/owner.html">🏢 Open Platform Owner Control Centre</a><button data-target="pm24_17"><span class="pm-icon">💳</span><span>Platform Subscription Billing</span></button></div></div></section>
 
 <section id="feeStructurePrint" class="nav-managed-section card"><div class="section-title"><h2>Fee Structure Generator</h2><span class="pill">Printable PDF</span></div><p>Generate an official fee structure from a saved school finance fee item. Create or edit fee items under Finance → School Fees &amp; Receipts.</p><button class="btn secondary" id="feeStructureReload">Refresh fee structures</button><div id="feeStructureList" class="table-wrap">Select this module to load fee structures.</div></section>
-<section id="leavingCertificates" class="nav-managed-section card"><div class="section-title"><h2>School Leaving Certificates</h2><span class="pill">School Administration</span></div><form id="leavingCertificateForm" class="card-subsection"><label>Learner<select name="learner_id" required id="lcLearner"><option value="">Select learner</option></select></label><div class="grid"><label>Admission date (if known)<input name="admission_date" type="date"></label><label>Leaving date<input name="leaving_date" type="date" required></label></div><label>Reason for leaving<input name="reason" maxlength="250" placeholder="Transfer / completed studies / other"></label><label>Conduct<input name="conduct" maxlength="250"></label><label>Destination<input name="destination" maxlength="250"></label><label>Headteacher name<input name="headteacher" maxlength="120"></label><label>Remarks<textarea name="remarks" maxlength="250"></textarea></label><button class="btn" type="submit">Issue certificate</button><span id="lcMessage" role="status"></span></form><h3>Issued certificates</h3><button class="btn secondary" id="lcRefresh" type="button">Refresh register</button><div id="lcList" class="table-wrap"></div></section>
+<section id="leavingCertificates" class="nav-managed-section card"><div class="section-title"><h2>School Leaving Certificates</h2><span class="pill">School Administration</span></div><form id="leavingCertificateForm" class="card-subsection"><div class="lc-chooser"><label>1. Grade / Class<select id="lcClass" required><option value="">Select class first</option></select></label><label>2. Search learner<input id="lcSearch" type="search" placeholder="Name or admission number" disabled></label><label>3. Learner<select name="learner_id" required id="lcLearner" disabled><option value="">Select class first</option></select></label><small id="lcSearchStatus">Choose a class first.</small></div><div class="grid"><label>Admission date (if known)<input name="admission_date" type="date"></label><label>Leaving date<input name="leaving_date" type="date" required></label></div><label>Reason for leaving<input name="reason" maxlength="250" placeholder="Transfer / completed studies / other"></label><label>Conduct<input name="conduct" maxlength="250"></label><label>Destination<input name="destination" maxlength="250"></label><label>Headteacher name<input name="headteacher" maxlength="120"></label><label>Remarks<textarea name="remarks" maxlength="250"></textarea></label><button class="btn" type="submit">Issue certificate</button><span id="lcMessage" role="status"></span></form><h3>Issued certificates</h3><button class="btn secondary" id="lcRefresh" type="button">Refresh register</button><div id="lcList" class="table-wrap"></div></section>
 <section id="operations_workspace" class="nav-managed-section card" aria-label="School operations workspace">
 <div id="zelimuOperationsFunctionTabs"
      style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 18px"
@@ -522,7 +530,31 @@ body, main, .main-content, .dashboard-main {
 <section id="documents" class="nav-managed-section card admin-only"><div class="section-title"><div><h2>Official School Assets</h2><p class="muted small">Manage the official school stamp and authorised teacher signatures for school reports.</p></div><span class="pill">Stamp · signatures</span></div><div class="grid"><form id="stampForm" enctype="multipart/form-data"><h3>School stamp</h3><label>Effective from<input name="effective_from" type="date" required></label><label>Stamp image<input name="stamp" type="file" accept="image/png,image/jpeg,image/webp" required></label><button class="btn" type="submit">Upload stamp</button><div id="stampBox" class="preview">No active stamp uploaded yet.</div></form><form id="teacherSignatureForm" enctype="multipart/form-data"><label>Teacher<select id="sigTeacher" name="teacher_id" required></select></label><label>Signature image<input name="signature" type="file" accept="image/png,image/jpeg,image/webp" required></label><button class="btn" type="submit">Upload teacher signature</button></form></div></section>
 <section id="announcements" class="nav-managed-section card admin-only"><div class="section-title"><div><h2>School Announcements</h2><p class="muted small">Publish school-wide notices independently of guardian records and official assets.</p></div><span class="pill">Announcements</span></div><form id="announcementForm"><h3>Scrolling school message</h3><label>Message<textarea name="message" required placeholder="Welcome to our school..."></textarea></label><button class="btn" type="submit">Publish message</button></form></section><section id="identity" class="nav-managed-section card admin-only"><div class="section-title"><h2>General / School Identity</h2><span class="pill">School name · branding · contacts</span></div><div class="grid"><form id="identityForm"><label>School name<input name="school_name" required maxlength="160" placeholder="Official school name"></label><label>School motto<input name="motto"></label><label>Primary colour<input name="primary_color" type="color" value="#17365D"></label><label>Secondary colour<input name="secondary_color" type="color" value="#D9A441"></label><label>Address<textarea name="address"></textarea></label><label>Contact phone<input name="contact_phone"></label><label>Contact email<input name="contact_email" type="email"></label><button class="btn" type="submit">Save identity</button></form><div><p class="muted">Every school has its own logo, motto, colours and contact details. Upload the school logo here and the official school stamp in Official School Assets; both are used on report cards.</p><div id="themeSwatches" class="theme-swatches" aria-label="Theme preview"><span>Theme preview</span><i id="primarySwatch"></i><i id="secondarySwatch"></i></div><form id="logoForm" enctype="multipart/form-data"><label>School logo<input name="logo" type="file" accept="image/png,image/jpeg,image/webp" required></label><button class="btn" type="submit">Upload logo</button></form><div id="logoBox" class="preview">No logo uploaded yet.</div></div></div></section>
 <section id="academic" class="nav-managed-section card admin-only"><div class="section-title"><h2>Academic management</h2><span class="pill">Years · Terms · Levels · Classes · Subjects</span></div><div class="grid"><form id="yearForm"><h3>Academic year</h3><label>Year label<input name="year_label" placeholder="2027" required></label><label>Status<select name="status"><option>PLANNED</option><option>ACTIVE</option><option>CLOSED</option></select></label><button class="btn" type="submit">Create year + Term 1–3</button><p id="yearMsg" class="muted small"></p></form><div><h3>Academic structure</h3><div id="structure"></div></div></div><div class="grid"><form id="classForm"><h3>Create class</h3><label>Level<select name="school_level_id" id="classLevel" required></select></label><label>Class name<input name="name" placeholder="Grade 7" required></label><label>Stream<input name="stream" placeholder="A (optional)"></label><button class="btn" type="submit">Create class</button></form><form id="subjectForm"><h3>Create subject</h3><label>Subject code<input name="code" placeholder="MATH" required></label><label>Subject name<input name="name" placeholder="Mathematics" required></label><label>Type<select name="subject_type"><option>LEARNING_AREA</option><option>SUBJECT</option></select></label><button class="btn" type="submit">Create subject</button></form></div><div class="card-subsection promotion-panel"><div class="section-title"><h3>Academic Year Transition & Learner Promotion</h3><span class="pill">Preserve history · Promote in bulk</span></div><p class="muted small">Create the next academic year first. Then select the completed/source class, choose the destination year and class, select learners, and promote them. Historical reports and marks remain tied to the previous year.</p><div class="grid"><label>Source academic year<select id="promotionSourceYear"></select></label><label>Source class<select id="promotionSourceClass"></select></label><label>Destination academic year<select id="promotionDestinationYear"></select></label><label>Destination class<select id="promotionDestinationClass"></select></label></div><div class="actions"><button class="btn secondary" id="loadPromotionLearners" type="button">Load learners</button><button class="btn" id="promoteSelected" type="button">Promote selected learners</button></div><div id="promotionStatus" class="notice">Select a source year/class and destination year/class.</div><div id="promotionLearners" class="table-wrap"></div></div><div class="grid"><div><h3>Academic years & terms</h3><div id="years"></div><form id="termDatesForm" class="grid"><label>Term<select id="dateTerm" name="term_id" required></select></label><label>Opening date<input id="openingDate" name="opening_date" type="date" required></label><label>Closing date<input id="closingDate" name="closing_date" type="date" required></label><label>School reopening date<input id="reopeningDate" name="reopening_date" type="date"><span class="muted small">Use this for the next learner opening date.</span></label><button class="btn" type="submit">Save school calendar dates</button><p id="calendarDateMsg" class="muted small"></p></form></div><div><h3>Classes</h3><div id="classes"></div></div></div></section>
-<section id="classLists" class="nav-managed-section card portal-module role-module"><div class="section-title"><h2>Class Registers</h2><span class="pill">Learner registers by class</span></div><p class="muted">Select a class to open its learner register. School administrators can manage all classes; Class Teachers can manage their assigned class.</p><div id="classListCards" class="class-list-grid"></div><div id="classListDetail" class="card-subsection" style="display:none"><div class="section-title"><h3 id="classListTitle">Class register</h3><button class="btn secondary" id="classListBack" type="button">Back to classes</button></div><div class="actions"><button class="btn primary" id="classTeacherAddLearner" type="button">+ Add Learner to This Class</button></div><div id="classListLearners" class="table-wrap"></div></div></section><section id="people" class="nav-managed-section card admin-only"><div class="section-title"><div><h2>People</h2><span class="pill">Teachers · Learners</span></div><div class="actions"><button type="button" class="btn secondary" id="peopleOpenClassLists">CLASS LISTS</button><button type="button" class="btn secondary" id="peopleOpenAssignments">TEACHER SUBJECTS &amp; ASSIGNMENTS</button></div></div><div class="grid"><form id="teacherForm"><h3>Add teacher</h3><label>Staff number<input name="staff_no" placeholder="T001" required></label><label>First name<input name="first_name" required></label><label>Last name<input name="last_name" required></label><label>Email<input name="email" type="email"></label><button class="btn" type="submit">Add teacher</button></form><form id="learnerForm"><h3>Add learner</h3><label>Admission number<input name="admission_no" placeholder="Leave blank if not provided"></label><label>Assessment No.<input name="assessment_no" placeholder="Leave blank; add later"></label><label>Passport photo<input name="passport_photo" type="file" accept="image/png,image/jpeg,image/webp"></label><label>First name<input name="first_name" id="learnerFirstName" required></label><label>Middle name<input name="middle_name"></label><label>Last name<input name="last_name" required></label><label>Academic year<select name="academic_year_id" id="learnerYear"></select></label><label>Class<select name="class_id" id="learnerClass"></select></label><label>Gender<select name="gender"><option value="">Not specified</option><option>Female</option><option>Male</option></select></label><button class="btn" type="submit">Add learner</button></form></div><div class="portal-toolbar"><div><h3>Teachers</h3><p class="muted small">Search and open a teacher profile instead of displaying the whole directory.</p></div><input id="teacherSearch" class="search" placeholder="Search teacher by name or staff number"><div id="teachers" class="directory"></div></div><div class="portal-toolbar"><div><h3>Learner directory</h3><p class="muted small">Select the academic context first. Administrators can add, edit and remove learners in any class; Class Teachers are restricted to their assigned class.</p></div><div class="filter-grid"><select id="learnerFilterYear"></select><select id="learnerFilterLevel"><option value="">All levels</option></select><select id="learnerFilterClass"><option value="">Select a class</option></select><select id="learnerFilterStatus"><option value="">All statuses</option><option>ACTIVE</option><option>COMPLETED</option><option>TRANSFERRED_OUT</option><option>WITHDRAWN</option><option>ARCHIVED</option></select><input id="learnerSearch" class="search" placeholder="Search selected class"></div><div id="learnerDirectoryHint" class="notice">Choose a class to view its learners.</div><div id="learners" class="directory"></div></div></section>
+<section id="classLists" class="nav-managed-section card portal-module role-module"><div class="section-title"><h2>Class Registers</h2><span class="pill">Learner registers by class</span></div><p class="muted">Select a class to open its learner register. School administrators can manage all classes; Class Teachers can manage their assigned class.</p><div id="classListCards" class="class-list-grid"></div><div id="classListDetail" class="card-subsection" style="display:none"><div class="section-title"><h3 id="classListTitle">Class register</h3><button class="btn secondary" id="classListBack" type="button">Back to classes</button></div><div class="actions"><button class="btn primary" id="classTeacherAddLearner" type="button">+ Add Learner to This Class</button></div><div id="classListLearners" class="table-wrap"></div></div></section><section id="people" class="nav-managed-section card admin-only"><div class="section-title"><div><h2>People</h2><span class="pill">Teachers · Learners</span></div><div class="actions"><button type="button" class="btn secondary" id="peopleOpenClassLists">CLASS LISTS</button><button type="button" class="btn secondary" id="peopleOpenAssignments">TEACHER SUBJECTS &amp; ASSIGNMENTS</button></div></div><div class="grid"><div id="zelimuStaffArea" style="display:none;margin-top:18px"><div class="section-title"><div><h3>Non-Teaching Staff Registration</h3><p class="muted">Accountants, secretaries, drivers, cooks, security and support staff</p></div></div><form id="zelimuStaffForm" class="card"><label>Staff number<input name="staff_no" required maxlength="150"></label><label>First name<input name="first_name" required maxlength="150"></label><label>Last name<input name="last_name" required maxlength="150"></label><label>Email<input name="email" type="email"></label><label>Phone<input name="phone" type="tel"></label><label>Designation<input name="designation" required placeholder="Accountant, Driver, Secretary..."></label><label>Department<input name="department"></label><label>Employment type<select name="employment_type"><option value="">Select</option><option>Permanent</option><option>Contract</option><option>Casual</option><option>Intern</option></select></label><label>Employment date<input name="employment_date" type="date"></label><button class="btn primary" type="submit">REGISTER NON-TEACHING STAFF</button></form><h3>Non-Teaching Staff Directory</h3><div id="zelimuStaffDirectory" class="directory" aria-live="polite"></div></div><div id="zelimuStaffHubV2" class="card" style="grid-column:1/-1;padding:14px;margin-bottom:12px;display:none">
+<h3>Staff Management</h3><div id="zelimuStaffTabsV2" class="actions" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+<button type="button" class="btn secondary" data-staff-tab="teacher">Register Teacher</button>
+<button type="button" class="btn secondary" data-staff-tab="nonteaching">Register Non-Teaching Staff</button>
+<button type="button" class="btn secondary" data-staff-tab="directory">Staff Directory</button>
+<button type="button" class="btn secondary" data-staff-tab="profiles">Staff Profiles</button>
+<button type="button" class="btn secondary" data-staff-tab="employment">Employment Records</button></div>
+<div id="zelimuStaffManagePanelV2" style="display:none">
+<label>Search staff <input id="zelimuStaffSearchV2" type="search" placeholder="Name, staff number, designation or department"></label>
+<label>Staff category <select id="zelimuStaffFilterV2"><option value="">All staff</option><option value="TEACHER">Teaching staff</option><option value="NON_TEACHING">Non-teaching staff</option></select></label>
+<div id="zelimuStaffResultsV2" class="directory" aria-live="polite"></div>
+<form id="zelimuStaffEditV2" style="display:none;margin-top:14px" autocomplete="off"><h3 id="zelimuStaffEditTitleV2">Staff Profile</h3>
+<input type="hidden" name="id"><input type="hidden" name="staff_type">
+<div class="zelimu-staff-fields-v2">
+<label>First name<input name="first_name" required></label><label>Last name<input name="last_name" required></label>
+<label>Email<input name="email" type="email"></label><label>Phone<input name="phone" type="tel"></label>
+<label>Designation<input name="designation" required></label><label>Department<input name="department"></label>
+<label>Employment type<select name="employment_type"><option value="">Not specified</option><option>Permanent</option><option>Contract</option><option>Casual</option><option>Intern</option><option>Temporary</option></select></label>
+<label>Employment start date<input name="employment_date" type="date"></label>
+<label class="zelimu-teacher-only-v2">TSC number (if applicable)<input name="tsc_number"></label>
+<label class="zelimu-teacher-only-v2">Qualifications<input name="qualifications"></label>
+<label class="zelimu-teacher-only-v2">Professional notes<input name="notes"></label>
+<label>Employment status<select name="is_active"><option value="true">Active</option><option value="false">Inactive</option></select></label>
+</div><button class="btn primary" type="submit">Save Staff Profile</button>
+<button class="btn secondary" type="button" id="zelimuStaffCancelV2">Cancel</button></form></div></div><form id="teacherForm"><h3>Add teacher</h3><label>Staff number<input name="staff_no" placeholder="T001" required></label><label>First name<input name="first_name" required></label><label>Last name<input name="last_name" required></label><label>Email<input name="email" type="email"></label><label>Phone<input name="phone" type="tel"></label><label>Designation<input name="designation" value="Teacher"></label><label>Department<input name="department"></label><label>Employment type<select name="employment_type"><option value="">Not specified</option><option>Permanent</option><option>Contract</option><option>Casual</option><option>Intern</option></select></label><label>Employment start date<input name="employment_date" type="date"></label><label>TSC number (if applicable)<input name="tsc_number"></label><label>Qualifications<input name="qualifications"></label><button class="btn" type="submit">Add teacher</button></form><form id="learnerForm"><h3>Add learner</h3><label>Admission number<input name="admission_no" placeholder="Leave blank if not provided"></label><label>Assessment No.<input name="assessment_no" placeholder="Leave blank; add later"></label><label>Passport photo<input name="passport_photo" type="file" accept="image/png,image/jpeg,image/webp"></label><label>First name<input name="first_name" id="learnerFirstName" required></label><label>Middle name<input name="middle_name"></label><label>Last name<input name="last_name" required></label><label>Academic year<select name="academic_year_id" id="learnerYear"></select></label><label>Class<select name="class_id" id="learnerClass"></select></label><label>Gender<select name="gender"><option value="">Not specified</option><option>Female</option><option>Male</option></select></label><button class="btn" type="submit">Add learner</button></form></div><div class="portal-toolbar"><div><h3>Teachers</h3><p class="muted small">Search and open a teacher profile instead of displaying the whole directory.</p></div><input id="teacherSearch" class="search" placeholder="Search teacher by name or staff number"><div id="teachers" class="directory"></div></div><div class="portal-toolbar"><div><h3>Learner directory</h3><p class="muted small">Select the academic context first. Administrators can add, edit and remove learners in any class; Class Teachers are restricted to their assigned class.</p></div><div class="filter-grid"><select id="learnerFilterYear"></select><select id="learnerFilterLevel"><option value="">All levels</option></select><select id="learnerFilterClass"><option value="">Select a class</option></select><select id="learnerFilterStatus"><option value="">All statuses</option><option>ACTIVE</option><option>COMPLETED</option><option>TRANSFERRED_OUT</option><option>WITHDRAWN</option><option>ARCHIVED</option></select><input id="learnerSearch" class="search" placeholder="Search selected class"></div><div id="learnerDirectoryHint" class="notice">Choose a class to view its learners.</div><div id="learners" class="directory"></div></div></section>
 <section id="biometrics" class="nav-managed-section card admin-only" aria-label="Biometrics and attendance">
 <div class="section-title"><div><h2>◉ Biometric Attendance &amp; Device Management</h2><p class="muted small">Device-independent foundation · privacy-first · per-school records</p></div><span class="pill">Device connection pending</span></div>
 <div class="notice">No biometric hardware is connected. This module registers planned devices and records explicitly labelled manual attendance. Fingerprints, face images and biometric templates are never collected here. A certified device adapter is required before real biometric check-in can be enabled.</div>
@@ -561,7 +593,7 @@ body, main, .main-content, .dashboard-main {
 <div class="actions"><button class="btn primary" id="loadAnalytics" type="button">Run performance analysis</button></div>
 <div class="analytics-export-bar"><button type="button" class="btn secondary" id="exportAnalyticsCsv">Export analytics (CSV)</button><span class="muted small">Exports the latest selected school analytics; no learner records are sent outside your school.</span></div><div id="analyticsBox" class="analytics-dashboard"><div class="notice">Choose the academic context and run the analysis.</div></div>
 </section>
-<section id="merit" class="nav-managed-section card admin-or-leadership"><div class="section-title"><h2>Merit lists</h2><span class="pill">Learner + subject performance ranking</span></div><div class="grid"><label>Type of assessment<select id="mAssessment"><option value="">All configured main exams</option></select></label><label>Term<select id="mTerm"></select></label><label>Academic year<select id="mYear"></select></label><label>Class<select id="mClass"></select></label></div><div class="notice"><b>Assessment:</b> ZELIMU CBC uses the main examinations actually configured for this class and term. If the administrator creates 2 exams, those 2 are averaged; if 3 are created, all 3 are averaged. Leave <b>All configured main exams</b> selected for the normal merit calculation.</div><div class="actions"><button class="btn" id="generateMerit">Generate merit list</button><button class="btn secondary" id="meritPdf">Official Merit PDF</button></div><div id="meritStatus" class="notice">Select a class to generate its merit list.</div><div id="meritRows"></div></section>
+<section id="merit" class="nav-managed-section card admin-or-leadership"><div class="section-title"><h2>Merit lists</h2><span class="pill">Learner + subject performance ranking</span></div><div class="grid"><label>Type of assessment<select id="mAssessment"><option value="">All configured main exams</option></select></label><label>Term<select id="mTerm"></select></label><label>Academic year<select id="mYear"></select></label><label>Class<select id="mClass"></select></label></div><div class="notice"><b>Assessment:</b> ZELIMU CBC uses the main examinations actually configured for this class and term. Each examination has its own merit and analysis. The combined term merit uses the configured examination weights. Leave <b>All configured main exams</b> selected for the normal merit calculation.</div><div class="actions"><button class="btn" id="generateMerit">Generate merit list</button><button class="btn secondary" id="meritPdf">Official Merit PDF</button></div><div id="meritStatus" class="notice">Select a class to generate its merit list.</div><div id="meritRows"></div></section>
 <section id="reports" class="nav-managed-section card"><div class="section-title"><h2>Report cards</h2><span class="pill">A4 PDF · Designation</span></div><div class="grid"><label>Academic year<select id="reportYear"></select></label><label>Term<select id="reportTerm"></select></label><label>Learner<select id="reportLearner"></select></label><label>Class<select id="reportClass"></select></label></div><div class="actions"><button class="btn" id="termReport">Open learner term report</button><button class="btn secondary" id="termReportPreview">Preview report card</button><button class="btn" id="annualReport">Open annual report</button><button class="btn primary" id="classReport">Download whole class PDF</button><button class="btn" id="classReportPrint">Open class PDF for printing</button></div><div id="reportInfo" class="notice">Select a class and learner to preview the actual A4 report card.</div><div class="card-subsection report-designation-panel"><div class="section-title"><h3>Report card designation & learner support</h3><span class="pill">Overrides auto-calculation</span></div><div class="grid"><label>Designation<select id="rcDesignation"><option value="AUTO">Automatic from overall average</option><option value="DISTINCTION">Distinction</option><option value="MERIT">Merit</option><option value="CREDIT">Credit</option><option value="PASS">Pass</option><option value="DEVELOPING">Developing</option><option value="AT_RISK">At risk</option><option value="INCOMPLETE">Incomplete</option></select></label><label>Progression decision<select id="rcDecision"><option value="AUTO">Automatic decision</option><option value="PROMOTED">Promoted</option><option value="PROCEED">Proceed</option><option value="REPEAT">Repeat</option><option value="REVIEW">Review required</option><option value="GRADUATED">Graduated</option></select></label><label>Attendance days<input id="rcAttendance" type="number" min="0" placeholder="e.g. 62"></label><label>School open days<input id="rcOpenDays" type="number" min="0" placeholder="e.g. 65"></label><label>Conduct<select id="rcConduct"><option value="">Not recorded</option><option>Excellent</option><option>Very good</option><option>Good</option><option>Satisfactory</option><option>Needs support</option></select></label><label>Effort<select id="rcEffort"><option value="">Not recorded</option><option>Excellent</option><option>Very good</option><option>Good</option><option>Satisfactory</option><option>Needs support</option></select></label><label>Next-term target (%)<input id="rcTarget" type="number" min="0" max="100" step="0.1"></label></div><div class="grid"><label>Class teacher comment<textarea id="rcTeacherComment" rows="3" placeholder="Specific achievement, next step, and support needed"></textarea></label><label>Head teacher comment<textarea id="rcHeadComment" rows="3" placeholder="Leadership comment / approval"></textarea></label><label>Intervention / improvement plan<textarea id="rcIntervention" rows="3" placeholder="Targeted actions, responsible person, review date"></textarea></label></div><div class="actions"><button class="btn primary" id="saveReportDesignation" type="button">Save designation & support plan</button><button class="btn secondary" id="loadReportDesignation" type="button">Load saved record</button></div><div id="designationInfo" class="notice">Choose a learner, year and term to record attendance, designation, progression and support actions.</div></div><div id="classReportTable" class="class-report-table card-subsection"><div class="section-title"><h3>Selected class report register</h3><span class="pill">Ready for exams</span></div><div id="classReportRows" class="table-wrap"><table><thead><tr><th>#</th><th>Learner</th><th>ADM. NO.</th><th>ASSES. NO.</th><th>Report</th></tr></thead><tbody><tr><td colspan="5">Select a class to load its learners.</td></tr></tbody></table></div></div><div class="report-preview-shell"><div class="report-preview-head"><b>Report preview</b><span class="muted small">Browser preview · Print / Save PDF</span></div><iframe id="reportPreview" title="ZELIMU CBC report preview"></iframe></div></section>
 <div id="profileModal" class="modal" aria-hidden="true"><div class="modal-card"><button id="profileClose" class="modal-close" type="button" aria-label="Close">×</button><div id="profileContent"></div></div></div><section id="classTeacherWorkspace" class="card class-teacher-only">
 <div class="section-title"><h2>My Class Teacher Workspace</h2><span class="pill">Assigned class oversight</span></div>
@@ -743,8 +775,9 @@ async function openLearner(id){
 
 function safeOn(id,event,handler){const el=$(id);if(el)el.addEventListener(event,handler);return el;}
 function setBusy(btn,busy,text){if(!btn)return;btn.disabled=busy;if(busy){btn.dataset.oldText=btn.textContent;btn.textContent=text||'Working…';}else if(btn.dataset.oldText){btn.textContent=btn.dataset.oldText;delete btn.dataset.oldText;}}
-const MANAGED_SECTIONS=['feeStructurePrint','leavingCertificates','operations_workspace','biometrics','pm24_workspace','teacherMarking','identity','parents','documents','announcements','billing','resources','academic','classLists','people','userControl','assign','assess','markControl','results','merit','analytics','leadership','reports'];
+const MANAGED_SECTIONS=['feeStructurePrint','leavingCertificates','operations_workspace','biometrics','pm24_workspace','teacherMarking','identity','parents','documents','announcements','billing','resources','academic','classLists','people','zelimuAdmissionsWorkspaceV2','userControl','assign','assess','markControl','results','merit','analytics','leadership','reports'];
 function showSection(id){
+  document.getElementById('zelimuAdmissionsWorkspaceV2')?.classList.remove('nav-active');
   // The 24-module navigation has its own controller (openPM24). Never let
   // the legacy section controller reinterpret pm24_1..pm24_24 as teacherMarking.
   if(/^pm24_\d+$/.test(String(id))) return;
@@ -794,6 +827,7 @@ function wireNavigation(){
     e.preventDefault();
     const target=String(b.dataset.target||'');
     if(/^pm24_\d+$/.test(target))return;
+    if(b.dataset.admissionLink==='true'){zelimuOpenAdmissionsV1();return;}
     showSection(target);
   });
   if(isTeacher && !isAdmin) openPM24(8); else openPM24(1);
@@ -810,7 +844,7 @@ function fmtMark(v){const n=Number(v);return Number.isFinite(n)?(Math.abs(n-Math
 async function loadMeritAssessments(){const y=$('mYear')?.value,t=$('mTerm')?.value,c=$('mClass')?.value,el=$('mAssessment');if(!el)return;if(!y||!t||!c){el.innerHTML='<option value="">All configured main exams</option>';return;}try{const rows=await api(`/api/assessments/${sid}/${y}/${t}`);const filtered=(rows||[]).filter(a=>(a.class_id==null||String(a.class_id)===String(c))&&['OPENER','MID_TERM','END_TERM'].includes(String(a.assessment_type||'').toUpperCase()));const byType=new Map();for(const a of filtered){const type=String(a.assessment_type||'').toUpperCase();if(!byType.has(type))byType.set(type,a);}const unique=[...byType.values()];const order={OPENER:1,MID_TERM:2,END_TERM:3};unique.sort((a,b)=>(order[String(a.assessment_type||'').toUpperCase()]||9)-(order[String(b.assessment_type||'').toUpperCase()]||9)||Number(a.assessment_order||0));const labels={OPENER:'Opener',MID_TERM:'Mid Term',END_TERM:'End Term'};el.innerHTML='<option value="">All configured main exams</option>'+unique.map(a=>`<option value="${esc(a.id)}">${esc(a.canonical_name||labels[String(a.assessment_type||'').toUpperCase()]||a.name||a.assessment_type)}</option>`).join('');}catch(e){el.innerHTML='<option value="">All configured main exams</option>';console.warn('Merit assessments unavailable',e.message);}}
 async function generateMerit(){const y=$('mYear')?.value,t=$('mTerm')?.value,c=$('mClass')?.value,a=$('mAssessment')?.value;if(!y||!t||!c)return alert('Select academic year, term and class first.');const b=$('generateMerit');setBusy(b,true,'Generating…');try{const qs=new URLSearchParams({academic_year_id:y,term_id:t,class_id:c});if(a)qs.set('assessment_id',a);const r=await api(`/api/merit/${sid}?${qs.toString()}`);const rows=r.rows||[];
  if(!rows.length && r.diagnostics){$('meritStatus').textContent='No merit data was generated — see the explanation below.';$('meritRows').innerHTML=`<div class="notice"><b>Why nothing was generated:</b><br>${esc(r.diagnostics)}</div>`;return;}
- const assessmentNames=[...new Set(rows.flatMap(x=>x.assessments_used||[]).map(a=>String(a.name||a.type||'').trim()).filter(Boolean))];const assessmentNote=assessmentNames.length?`Main assessments used: ${assessmentNames.map(esc).join(' · ')}`:'Main assessments used: —';$('meritStatus').textContent=`Merit list generated successfully. ${rows.length} learner(s) ranked by TOTAL MARKS. Average = total marks ÷ subjects assessed. ${assessmentNote}`;const subjects=[...new Map(rows.flatMap(x=>x.subjects||[]).map(s=>[s.subject_id,s])).values()];const head=subjects.map(s=>`<th>${esc(s.subject_name)}<br><span class="muted small">Mark · Grade</span></th>`).join('');const body=rows.map(x=>{const learnerName=[x.first_name,x.middle_name,x.last_name].filter(Boolean).join(' ')||'—';const classLabel=x.class_name?`${x.class_name}${x.class_stream?' / '+x.class_stream:''}`:'';return `<tr><td>${esc(x.admission_no||'—')}</td><td>${esc(x.assessment_no||'—')}</td><td><b>${esc(learnerName)}</b></td><td>${esc(classLabel||'—')}</td>${subjects.map(s=>{const got=(x.subjects||[]).find(v=>v.subject_id===s.subject_id);return `<td>${got?`<b>${fmtMark(got.display_average??got.average)}</b> · <strong>${esc(got.grade||'—')}</strong>`:'—'}</td>`}).join('')}<td><b>${fmtMark(x.total_mark)}</b></td><td><b>${fmtMark(x.average_mark)}</b></td><td><b>${x.class_rank==null?'—':String(x.class_rank)}</b></td><td><b>${x.overall_rank==null?'—':String(x.overall_rank)}</b></td><td><strong>${esc(x.overall_grade||'—')}</strong></td></tr>`}).join('');const subjRank=(r.subject_rankings||[]).map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.subject_name)}</td><td>${fmtMark(x.average)}</td><td><strong>${esc(x.grade||'—')}</strong></td><td>${esc(x.teacher_name||'—')}</td><td>${x.learner_count}</td></tr>`).join('');$('meritRows').innerHTML=`<div class="notice"><b>ASSESSMENTS USED:</b> ${assessmentNames.length?assessmentNames.map(esc).join(' · '):'—'}</div><div class="table-wrap merit-table-wrap"><table class="merit-sheet"><thead><tr><th>ADM. NO.</th><th>ASSES. NO.</th><th>Learner</th><th>Class / Stream</th>${head}<th>Total Mark</th><th>Average</th><th>Class Pos.</th><th>Overall Pos.</th><th>Grade</th></tr></thead><tbody>${body||'<tr><td colspan="7">No merit data available.</td></tr>'}</tbody></table></div><div class="card-subsection"><h3>Subject performance ranking</h3><div class="table-wrap merit-table-wrap"><table class="merit-sheet merit-subject-table"><thead><tr><th>Rank</th><th>Subject</th><th>Class Average</th><th>Grade</th><th>Teacher</th><th>Learners</th></tr></thead><tbody>${subjRank||'<tr><td colspan="6">No subject performance available.</td></tr>'}</tbody></table></div></div>`;}catch(e){$('meritStatus').textContent=`Unable to generate merit list: ${e.message}`;}finally{setBusy(b,false);}}
+ const assessmentNames=[...new Set(rows.flatMap(x=>x.assessments_used||[]).map(a=>String(a.name||a.type||'').trim()).filter(Boolean))];const assessmentNote=assessmentNames.length?`Main assessments used: ${assessmentNames.map(esc).join(' · ')}`:'Main assessments used: —';$('meritStatus').textContent=`Merit list generated successfully. ${rows.length} learner(s) ranked by AVERAGE PERCENTAGE. Combined term results use configured examination weights. ${assessmentNote}`;const subjects=[...new Map(rows.flatMap(x=>x.subjects||[]).map(s=>[s.subject_id,s])).values()];const head=subjects.map(s=>`<th>${esc(s.subject_name)}<br><span class="muted small">Mark · Grade</span></th>`).join('');const body=rows.map(x=>{const learnerName=[x.first_name,x.middle_name,x.last_name].filter(Boolean).join(' ')||'—';const classLabel=x.class_name?`${x.class_name}${x.class_stream?' / '+x.class_stream:''}`:'';return `<tr><td>${esc(x.admission_no||'—')}</td><td>${esc(x.assessment_no||'—')}</td><td><b>${esc(learnerName)}</b></td><td>${esc(classLabel||'—')}</td>${subjects.map(s=>{const got=(x.subjects||[]).find(v=>v.subject_id===s.subject_id);return `<td>${got?`<b>${fmtMark(got.display_average??got.average)}</b> · <strong>${esc(got.grade||'—')}</strong>`:'—'}</td>`}).join('')}<td><b>${fmtMark(x.total_mark)}</b></td><td><b>${fmtMark(x.average_mark)}</b></td><td><b>${x.class_rank==null?'—':String(x.class_rank)}</b></td><td><b>${x.overall_rank==null?'—':String(x.overall_rank)}</b></td><td><strong>${esc(x.overall_grade||'—')}</strong></td></tr>`}).join('');const subjRank=(r.subject_rankings||[]).map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.subject_name)}</td><td>${fmtMark(x.average)}</td><td><strong>${esc(x.grade||'—')}</strong></td><td>${esc(x.teacher_name||'—')}</td><td>${x.learner_count}</td></tr>`).join('');$('meritRows').innerHTML=`<div class="notice"><b>ASSESSMENTS USED:</b> ${assessmentNames.length?assessmentNames.map(esc).join(' · '):'—'}</div><div class="table-wrap merit-table-wrap"><table class="merit-sheet"><thead><tr><th>ADM. NO.</th><th>ASSES. NO.</th><th>Learner</th><th>Class / Stream</th>${head}<th>Total Mark</th><th>Average</th><th>Class Pos.</th><th>Overall Pos.</th><th>Grade</th></tr></thead><tbody>${body||'<tr><td colspan="7">No merit data available.</td></tr>'}</tbody></table></div><div class="card-subsection"><h3>Subject performance ranking</h3><div class="table-wrap merit-table-wrap"><table class="merit-sheet merit-subject-table"><thead><tr><th>Rank</th><th>Subject</th><th>Class Average</th><th>Grade</th><th>Teacher</th><th>Learners</th></tr></thead><tbody>${subjRank||'<tr><td colspan="6">No subject performance available.</td></tr>'}</tbody></table></div></div>`;}catch(e){$('meritStatus').textContent=`Unable to generate merit list: ${e.message}`;}finally{setBusy(b,false);}}
 async function setupClassTeacherWorkspace(){
  const box=$('myClassTeacherList'); if(!box||!isClassTeacher)return;
  const rows=state.classTeacherAssignments||[];
@@ -910,7 +944,14 @@ async function downloadClassReportPdf(){const c=$('reportClass').value,y=$('repo
 }catch(e){$('reportInfo').textContent=e.message;alert(e.message);}finally{setBusy($('classReport'),false)}}
 async function openClassReportPdf(){const c=$('reportClass').value,y=$('reportYear').value,t=$('reportTerm').value;if(!c||!y||!t)return alert('Select class, academic year and term first.');await openProtectedPdf(`/api/reports/${sid}/class/${c}/${y}/${t}/pdf`);}
 function wireReportButtons(){safeOn('reportClass','change',loadClassReportRegister);safeOn('reportYear','change',async()=>{await terms($('reportYear').value,$('reportTerm'));await loadReportCalendarInfo();loadClassReportRegister();});safeOn('reportTerm','change',async()=>{await loadReportCalendarInfo();await loadClassReportRegister();const l=$('reportLearner').value,y=$('reportYear').value,t=$('reportTerm').value;if(l&&y&&t)fetchProtectedPdfBlob(`/api/reports/${sid}/term/${l}/${y}/${t}/pdf`).catch(()=>{});});safeOn('reportLearner','change',async()=>{await loadReportDesignation();const l=$('reportLearner').value,y=$('reportYear').value,t=$('reportTerm').value;if(l&&y&&t){clearTimeout(window._reportPrefetchTimer);window._reportPrefetchTimer=setTimeout(()=>{fetchProtectedPdfBlob(`/api/reports/${sid}/term/${l}/${y}/${t}/pdf`).catch(()=>{});},120);}});safeOn('loadReportDesignation','click',loadReportDesignation);safeOn('saveReportDesignation','click',saveReportDesignation);safeOn('termReport','click',async()=>{const l=$('reportLearner').value,y=$('reportYear').value,t=$('reportTerm').value;if(!l||!y||!t)return alert('Select learner, academic year and term first.');const b=$('termReport');setBusy(b,true,'Opening report…');try{await openProtectedPdf(`/api/reports/${sid}/term/${l}/${y}/${t}/pdf`);}catch(e){alert(e.message);}finally{setBusy(b,false);}});safeOn('termReportPreview','click',async()=>{const l=$('reportLearner').value,y=$('reportYear').value,t=$('reportTerm').value;if(!l||!y||!t)return alert('Select learner, academic year and term first.');if(window._reportPreviewBusy)return;window._reportPreviewBusy=true;const b=$('termReportPreview');setBusy(b,true,'Loading preview…');try{const blob=await fetchProtectedPdfBlob(`/api/reports/${sid}/term/${l}/${y}/${t}/pdf`);if(!blob.size)throw new Error('The report preview PDF was empty.');if(window._reportPreviewUrl)URL.revokeObjectURL(window._reportPreviewUrl);window._reportPreviewUrl=URL.createObjectURL(blob);$('reportPreview').src=window._reportPreviewUrl;$('reportInfo').textContent='Report card PDF loaded for viewing. You can now print or save it from the preview.';}catch(e){alert(e.message);}finally{window._reportPreviewBusy=false;setBusy(b,false);}});safeOn('annualReport','click',async()=>{const l=$('reportLearner').value,y=$('reportYear').value;if(!l||!y)return alert('Select learner and academic year first.');const b=$('annualReport');setBusy(b,true,'Opening annual report…');try{await openProtectedPdf(`/api/reports/${sid}/year/${l}/${y}/pdf`);}catch(e){alert(e.message);}finally{setBusy(b,false);}});safeOn('classReport','click',downloadClassReportPdf);safeOn('classReportPrint','click',openClassReportPdf);}
-function wirePeopleForms(){safeOn('teacherForm','submit',async e=>{e.preventDefault();try{await api(`/api/people/${sid}/teachers`,{method:'POST',body:Object.fromEntries(new FormData(e.target))});e.target.reset();await load();alert('Teacher added successfully.');}catch(x){alert(x.message);}});safeOn('learnerForm','submit',async e=>{e.preventDefault();try{const f=new FormData(e.target),body={};for(const [k,v] of f.entries())if(k!=='passport_photo')body[k]=v;const l=await api(`/api/people/${sid}/learners`,{method:'POST',body});const photo=f.get('passport_photo');if(photo&&photo.size){const pf=new FormData();pf.append('photo',photo);await api(`/api/documents/${sid}/learner/${l.id}/photo`,{method:'POST',body:pf});}e.target.reset();await load();alert('Learner added successfully.');}catch(x){alert(x.message);}});safeOn('teacherSearch','input',()=>renderTeachers(state.teachers));safeOn('learnerSearch','input',renderLearners);safeOn('learnerFilterClass','change',renderLearners);safeOn('learnerFilterStatus','change',renderLearners);safeOn('learnerFilterLevel','change',()=>{const level=$('learnerFilterLevel').value;const classes=state.classes.filter(x=>!level||String(x.school_level_id)===String(level));opts($('learnerFilterClass'),classes,x=>`${x.name} ${x.stream||''} · ${x.level_name||''}`,'Select a class');renderLearners();});}
+function wirePeopleForms(){safeOn('teacherForm','submit',async e=>{e.preventDefault();try{await api(`/api/people/${sid}/teachers`,{method:'POST',body:Object.fromEntries(new FormData(e.target))});e.target.reset();await load();alert('Teacher added successfully.');}catch(x){alert(x.message);}});safeOn('learnerForm','submit',async e=>{e.preventDefault();try{const f=new FormData(e.target),body={};for(const [k,v] of f.entries())if(k!=='passport_photo')body[k]=v;if(!body.academic_year_id||!body.class_id)throw new Error('Select an academic year and class.');
+const guardian=[body.guardian_first_name,body.guardian_last_name,body.guardian_phone].filter(Boolean);
+if(guardian.length>0&&guardian.length<3)throw new Error('Guardian first name, last name and phone must all be supplied.');
+if(!confirm('Confirm admission of '+[body.first_name,body.last_name].filter(Boolean).join(' ')+'? This will create the learner and enroll them in the selected class.'))return;
+if(zelimuCurrentAdmissionApplication)body.admission_application_id=zelimuCurrentAdmissionApplication;body.admission_workflow='CONFIRMED';if(body.guardian_phone&&!body.parent_phone)body.parent_phone=body.guardian_phone;const l=await api(`/api/people/${sid}/learners`,{method:'POST',body});const photo=f.get('passport_photo');if(photo&&photo.size){const pf=new FormData();pf.append('photo',photo);try{await api(`/api/documents/${sid}/learner/${l.id}/photo`,{method:'POST',body:pf});}catch(photoError){alert('Learner was admitted successfully, but the passport photo was not uploaded: '+photoError.message+'. Do NOT register the learner again; add the photo from the existing learner record.');}}e.target.reset();zelimuCurrentAdmissionApplication=null;await load();await zelimuLoadAdmissionApplications();alert('Learner admitted and enrolled successfully.');
+if(confirm('Print admission confirmation now?')){
+ const w=window.open('','_blank');if(w){const escPrint=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));w.document.write('<!doctype html><title>Admission Confirmation</title><style>body{font:16px Arial;margin:40px;line-height:1.7}h1{color:#16683f}hr{border:1px solid #ddd}</style><h1>ZELIMU CBC · Admission Confirmation</h1><hr><p><b>Learner:</b> '+escPrint([body.first_name,body.middle_name,body.last_name].filter(Boolean).join(' '))+'</p><p><b>Admission number:</b> '+escPrint(body.admission_no||'Not provided')+'</p><p><b>Assessment number:</b> '+escPrint(body.assessment_no||'Not provided')+'</p><p><b>Admission date:</b> '+escPrint(body.admission_date||new Date().toISOString().slice(0,10))+'</p><p><b>Record ID:</b> '+escPrint(l.id)+'</p><p>Admission and class enrollment recorded in ZELIMU CBC.</p>');w.document.close();w.print();}
+}}catch(x){alert(x.message);}});safeOn('teacherSearch','input',()=>renderTeachers(state.teachers));safeOn('learnerSearch','input',renderLearners);safeOn('learnerFilterClass','change',renderLearners);safeOn('learnerFilterStatus','change',renderLearners);safeOn('learnerFilterLevel','change',()=>{const level=$('learnerFilterLevel').value;const classes=state.classes.filter(x=>!level||String(x.school_level_id)===String(level));opts($('learnerFilterClass'),classes,x=>`${x.name} ${x.stream||''} · ${x.level_name||''}`,'Select a class');renderLearners();});}
 safeOn('classes','click',async e=>{const b=e.target.closest('.edit-class');if(!b)return;const c=(state.classes||[]).find(x=>String(x.id)===String(b.dataset.classId));if(!c)return;const box=document.createElement('div');box.className='card-subsection';box.innerHTML=`<h3>Edit class</h3><div class="grid"><label>Class name<input id="editClassName" value="${esc(c.name||'')}"></label><label>Stream<input id="editClassStream" value="${esc(c.stream||'')}"></label></div><div class="actions"><button type="button" class="btn primary" id="saveEditClass">Save class</button><button type="button" class="btn secondary" id="cancelEditClass">Cancel</button></div>`;b.closest('.class-card')?.after(box);$('cancelEditClass').onclick=()=>box.remove();$('saveEditClass').onclick=async()=>{const name=$('editClassName').value.trim(),stream=$('editClassStream').value.trim();if(!name)return alert('Class name is required.');try{await api(`/api/people/${sid}/classes/${c.id}`,{method:'PATCH',body:{name,stream,school_level_id:c.school_level_id}});box.remove();await load();alert('Class updated successfully.');}catch(x){alert(x.message);}};});
 function wireAcademicForms(){safeOn('yearForm','submit',async e=>{e.preventDefault();try{const r=await api(`/api/school/${sid}/academic-years`,{method:'POST',body:Object.fromEntries(new FormData(e.target))});e.target.reset();await load();alert(`Academic year ${r.year?.year_label||''} created with Term 1–3.`);}catch(x){alert(x.message);}});safeOn('classForm','submit',async e=>{e.preventDefault();try{await api(`/api/people/${sid}/classes`,{method:'POST',body:Object.fromEntries(new FormData(e.target))});e.target.reset();await load();alert('Class created successfully.');}catch(x){alert(x.message);}});safeOn('subjectForm','submit',async e=>{e.preventDefault();try{await api(`/api/people/${sid}/subjects`,{method:'POST',body:Object.fromEntries(new FormData(e.target))});e.target.reset();await load();alert('Subject created successfully.');}catch(x){alert(x.message);}});safeOn('termDatesForm','submit',async e=>{e.preventDefault();try{const f=new FormData(e.target);const termId=f.get('term_id');const opening=f.get('opening_date'),closing=f.get('closing_date'),reopening=f.get('reopening_date');await api(`/api/school/${sid}/terms/${termId}`,{method:'PUT',body:{opening_date:opening,closing_date:closing,reopening_date:reopening}});$('calendarDateMsg').textContent='School calendar dates saved exactly as entered.';await terms($('learnerYear').value,$('dateTerm'));}catch(x){$('calendarDateMsg').textContent=x.message;}});}
 function renderTeacherAssignmentManager(){const tid=$('tamTeacher')?.value;if(!tid)return;const rows=(state.assignments||[]).filter(x=>String(x.teacher_id)===String(tid));$('tamSummary').textContent=`${rows.length} subject/class assignment${rows.length===1?'':'s'} found for the selected teacher.`;$('tamAssignments').innerHTML=rows.map(x=>`<div class="item assignment-card"><span><b>${esc(x.subject_name||'Subject')}</b><br><span class="muted small">${esc(x.class_name||'Class')} ${esc(x.stream||'')} · ${esc(x.year_label||'')} · ${esc(x.term_name||'All terms')}</span></span><span class="pill">${esc(x.teacher_first_name||'')} ${esc(x.teacher_last_name||'')}</span></div>`).join('')||'<div class="notice">No subject assignments yet.</div>';}
@@ -997,282 +1038,7 @@ async function fetchProtectedPdfBlob(url){
 async function openProtectedPdf(url,existingPopup=null){
  const popup=existingPopup||window.open('about:blank','_blank');
  if(!popup)throw new Error('Your browser blocked the PDF window. Please allow pop-ups for ZELIMU CBC and try again.');
- try{popup.document.open();popup.document.write('<!doctype html><html><head><title>ZELIMU CBC PDF</title></head><body style="font-family:Arial,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f8fafc;color:#17365D"><div style="text-align:center"><div style="font-size:28px;font-weight:700">ZELIMU CBC</div><div style="margin-top:10px">Preparing PDF…</div><div style="margin:14px auto;width:220px;height:6px;background:#e5e7eb;border-radius:99px;overflow:hidden"><div style="width:45%;height:100%;background:#17365D"></div></div></div>\n
-<script>
-(function(){
-  const groups={
-    transport:[
-      'transport_routes','transport_allocations',
-      'transport_trips','transport_maintenance',
-      'transport_incidents'
-    ],
-    boarding:[
-      'boarding_rooms','boarding_allocations',
-      'boarding_rollcalls','boarding_welfare',
-      'boarding_supplies'
-    ],
-    hr:[
-      'hr_leave','hr_training','hr_recruitment',
-      'hr_appraisals','hr_documents'
-    ]
-  };
-
-  function refreshTabs(){
-    const container=document.getElementById(
-      'zelimuOperationsFunctionTabs'
-    );
-    const frame=document.getElementById('operationsFrame');
-
-    if(!container||!frame)return;
-
-    const current=frame.dataset.type||'';
-    const group=Object.values(groups).find(
-      entries=>entries.includes(current)
-    );
-
-    container.replaceChildren();
-    if(!group)return;
-
-    for(const type of group){
-      const original=document.querySelector(
-        '#navTabs button[data-operations="'+type+'"]'
-      );
-      if(!original)continue;
-
-      const button=document.createElement('button');
-      button.type='button';
-      button.className='btn secondary';
-      button.textContent=original.textContent.trim();
-      button.style.fontSize='13px';
-      button.style.padding='9px 12px';
-
-      if(type===current){
-        button.classList.add('active');
-        button.setAttribute('aria-current','page');
-      }
-
-      button.addEventListener('click',()=>{
-        if(original.disabled ||
-           original.classList.contains('role-hidden')){
-          return;
-        }
-        original.click();
-        refreshTabs();
-      });
-
-      container.appendChild(button);
-    }
-  }
-
-  document.addEventListener('click',event=>{
-    if(event.target.closest('#navTabs [data-operations]')){
-      queueMicrotask(refreshTabs);
-      requestAnimationFrame(refreshTabs);
-    }
-  });
-
-  window.zelimuRefreshOperationsTabs=refreshTabs;
-})();
-</script>
-
-
-<script>
-(function(){
-  'use strict';
-
-  const $link = id => document.getElementById(id);
-  const teacherRoles = [
-    'TEACHER','CLASS_TEACHER','SENIOR_TEACHER',
-    'HEADTEACHER','DEPUTY_HEADTEACHER'
-  ];
-
-  function currentUser(){
-    try {
-      return typeof user !== 'undefined' ? user :
-        JSON.parse(localStorage.getItem('user') || '{}');
-    } catch { return {}; }
-  }
-
-  function schoolId(){
-    return typeof sid !== 'undefined' ? sid :
-      (currentUser().school_id || new URLSearchParams(location.search).get('school_id'));
-  }
-
-  function adminAccess(){
-    return ['SCHOOL_ADMIN','ADMIN','PLATFORM_OWNER']
-      .includes(currentUser().role);
-  }
-
-  function teacherAccess(){
-    return teacherRoles.includes(currentUser().role);
-  }
-
-  async function requestApi(path, options={}){
-    const response=await fetch(path,{
-      method:options.method||'GET',
-      headers:{
-        'Authorization':'Bearer '+(localStorage.getItem('token')||''),
-        'Content-Type':'application/json'
-      },
-      ...(options.body ? {body:JSON.stringify(options.body)} : {})
-    });
-    const data=await response.json();
-    if(!response.ok)throw new Error(data.error||'Request failed.');
-    return data;
-  }
-
-  function showMessage(id,message){
-    const box=$link(id);
-    if(!box)return;
-    box.textContent=message;
-    box.style.display='block';
-  }
-
-  async function loadTeacherLinkOptions(){
-    const select=$link('teacherLinkTeacher');
-    if(!select||!adminAccess()||!schoolId())return;
-
-    try{
-      const teachers=await requestApi(
-        `/api/people/${schoolId()}/teachers`
-      );
-
-      select.replaceChildren(new Option('Select teacher',''));
-
-      teachers.filter(t=>t.is_active&&!t.user_id).forEach(t=>{
-        select.add(new Option(
-          `${t.staff_no||''} - ${t.first_name||''} ${t.last_name||''}`,
-          t.id
-        ));
-      });
-    }catch(e){
-      showMessage('teacherLinkAdminMessage',e.message);
-    }
-  }
-
-  async function loadMyTeacherLinkRequests(){
-    const box=$link('teacherLinkPendingList');
-    if(!box||!teacherAccess()||!schoolId())return;
-
-    try{
-      const requests=await requestApi(
-        `/api/people/${schoolId()}/teacher-accounts/my-link-requests`
-      );
-
-      box.replaceChildren();
-
-      if(!requests.length){
-        box.textContent='No pending teacher-account linking requests.';
-        return;
-      }
-
-      requests.forEach(r=>{
-        const item=document.createElement('div');
-        item.className='item';
-
-        const title=document.createElement('p');
-        title.textContent=
-          `${r.first_name||''} ${r.last_name||''} — ${r.staff_no||''}`;
-
-        const button=document.createElement('button');
-        button.type='button';
-        button.className='btn';
-        button.textContent='Confirm My Teacher Account';
-
-        button.addEventListener('click',async()=>{
-          if(!confirm(
-            'Confirm that this teacher record belongs to you?'
-          ))return;
-
-          button.disabled=true;
-
-          try{
-            await requestApi(
-              `/api/people/${schoolId()}/teacher-accounts/link-requests/${encodeURIComponent(r.id)}/confirm`,
-              {method:'POST'}
-            );
-
-            alert('Teacher account linked successfully.');
-            await loadMyTeacherLinkRequests();
-          }catch(e){
-            alert(e.message);
-            button.disabled=false;
-          }
-        });
-
-        item.append(title,button);
-        box.append(item);
-      });
-    }catch(e){
-      box.textContent=e.message;
-    }
-  }
-
-  function initializeTeacherLinking(){
-    const adminPanel=$link('teacherLinkAdminPanel');
-    const teacherPanel=$link('teacherLinkConfirmation');
-
-    if(adminPanel){
-      adminPanel.style.display=adminAccess()?'block':'none';
-    }
-
-    if(teacherPanel){
-      teacherPanel.style.display=teacherAccess()?'block':'none';
-    }
-
-    if(adminAccess()){
-      loadTeacherLinkOptions();
-    }
-
-    if(teacherAccess()){
-      loadMyTeacherLinkRequests();
-    }
-
-    const form=$link('teacherLinkRequestForm');
-
-    if(form&&!form.dataset.wired){
-      form.dataset.wired='true';
-
-      form.addEventListener('submit',async e=>{
-        e.preventDefault();
-        if(!adminAccess())return;
-
-        const button=form.querySelector('button[type="submit"]');
-        button.disabled=true;
-
-        try{
-          const values=Object.fromEntries(new FormData(form));
-
-          await requestApi(
-            `/api/people/${schoolId()}/teacher-accounts/link-existing`,
-            {method:'POST',body:values}
-          );
-
-          showMessage(
-            'teacherLinkAdminMessage',
-            'Link request created. Ask the teacher to sign in and confirm.'
-          );
-
-          form.reset();
-          await loadTeacherLinkOptions();
-        }catch(e){
-          showMessage('teacherLinkAdminMessage',e.message);
-        }finally{
-          button.disabled=false;
-        }
-      });
-    }
-  }
-
-  if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded',initializeTeacherLinking);
-  }else{
-    initializeTeacherLinking();
-  }
-})();
-</script>
-
-</body></html>');popup.document.close();}catch{}
+ try{popup.document.open();popup.document.write('<!doctype html><html><head><title>ZELIMU CBC PDF</title></head><body style="font-family:Arial,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f8fafc;color:#17365D"><div style="text-align:center"><div style="font-size:28px;font-weight:700">ZELIMU CBC</div><div style="margin-top:10px">Preparing PDF…</div><div style="margin:14px auto;width:220px;height:6px;background:#e5e7eb;border-radius:99px;overflow:hidden"><div style="width:45%;height:100%;background:#17365D"></div></div></div></body></html>');popup.document.close();}catch{}
  try{const blob=await fetchProtectedPdfBlob(url);const u=URL.createObjectURL(blob);popup.location.href=u;setTimeout(()=>URL.revokeObjectURL(u),5*60*1000);return true;}catch(e){try{popup.close();}catch{}throw new Error(e.message||'Unable to prepare PDF.');}
 }
 async function loadGradings(){const el=$('gradingList');if(!el)return;try{const r=await api(`/api/grading/${sid}/systems`);window.pmGradingSystems=r||[];el.innerHTML=(r||[]).map(x=>`<div class="item"><b>${esc(x.name)}</b> · ${esc(x.code)} <button type="button" class="btn secondary mini edit-grading" data-grading-id="${esc(x.id)}">Edit</button><br><span class="muted small">${esc(x.description||'')} · ${Array.isArray(x.bands)?x.bands.length:0} grading levels</span></div>`).join('')||'<div class="notice">No grading systems created yet.</div>';}catch(e){el.innerHTML=`<div class="notice">${esc(e.message)}</div>`;}}
@@ -1904,11 +1670,238 @@ async function renderSchoolFinanceModule(){
  $('sfRefresh').onclick=reload;await reload();
 }
 
-async // ZELIMU module navigation bridge.
+// ZELIMU module navigation bridge.
 // Reuse the existing section controller and its role checks.
 window.showSection = showSection;
 
-function openPM24(n){
+
+// ZELIMU STAFF UI V1
+async function zelimuLoadStaff(){
+ const host=document.getElementById('zelimuStaffDirectory');if(!host)return;
+ host.textContent='Loading staff records...';
+ try{
+  const rows=await api(`/api/people/${sid}/staff`);
+  host.replaceChildren();
+  if(!rows.length){host.textContent='No non-teaching staff registered yet.';return;}
+  for(const r of rows){const el=document.createElement('div');el.className='card';el.style.marginBottom='8px';el.textContent=`${r.staff_no} · ${r.first_name} ${r.last_name} · ${r.designation}${r.department?' · '+r.department:''}${r.is_active===false?' · Inactive':''}`;host.appendChild(el);}
+ }catch(e){host.textContent=e.message||'Unable to load staff.';}
+}
+if(!window.__zelimuStaffSubmitWired){
+ window.__zelimuStaffSubmitWired=true;
+ document.addEventListener('submit',async e=>{
+  if(e.target?.id!=='zelimuStaffForm')return;
+  e.preventDefault();const form=e.target,btn=form.querySelector('button[type=submit]');
+  if(btn)btn.disabled=true;
+  try{await api(`/api/people/${sid}/staff`,{method:'POST',body:Object.fromEntries(new FormData(form))});form.reset();await zelimuLoadStaff();alert('Non-teaching staff registered successfully.');}
+  catch(err){alert(err.message||'Staff registration failed.');}
+  finally{if(btn)btn.disabled=false;}
+ },true);
+}
+// ZELIMU STAFF MANAGEMENT V2
+let zelimuStaffRecordsV2=[];
+function zelimuStaffTabV2(tab){
+ const hub=document.getElementById('zelimuStaffHubV2'),t=document.getElementById('teacherForm'),n=document.getElementById('zelimuStaffArea');
+ if(!hub)return;hub.style.display='block';
+ if(t)t.style.display=tab==='teacher'?'':'none';
+ if(n)n.style.display=tab==='nonteaching'?'':'none';
+ const panel=document.getElementById('zelimuStaffManagePanelV2');if(panel)panel.style.display=['directory','profiles','employment'].includes(tab)?'block':'none';
+ hub.dataset.tab=tab;
+ hub.querySelectorAll('[data-staff-tab]').forEach(x=>{x.setAttribute('aria-pressed',String(x.dataset.staffTab===tab));});
+ const oldDirectory=document.getElementById('teacherSearch')?.closest('.portal-toolbar');if(oldDirectory)oldDirectory.style.display='none';
+ if(tab==='nonteaching')zelimuLoadStaff();
+ if(['directory','profiles','employment'].includes(tab))zelimuStaffLoadV2();
+}
+async function zelimuStaffLoadV2(){
+ const el=document.getElementById('zelimuStaffResultsV2');if(!el)return;el.textContent='Loading staff...';
+ try{zelimuStaffRecordsV2=await api(`/api/people/${sid}/staff-management`);zelimuStaffRenderV2();}
+ catch(e){el.textContent=e.message||'Unable to load staff. Apply migration 031.';}
+}
+function zelimuStaffRenderV2(){
+ const el=document.getElementById('zelimuStaffResultsV2');if(!el)return;el.replaceChildren();
+ const q=(document.getElementById('zelimuStaffSearchV2')?.value||'').toLowerCase(),filter=document.getElementById('zelimuStaffFilterV2')?.value||'';
+ const rows=zelimuStaffRecordsV2.filter(x=>(!filter||x.staff_type===filter)&&[x.staff_no,x.first_name,x.last_name,x.designation,x.department].join(' ').toLowerCase().includes(q));
+ if(!rows.length){el.textContent='No matching staff records.';return;}
+ for(const x of rows){const line=document.createElement('div');line.className='card';line.style.marginBottom='8px';
+ const title=document.createElement('span');title.textContent=`${x.staff_no} · ${x.first_name} ${x.last_name} · ${x.designation||'Teacher'} · ${x.is_active?'Active':'Inactive'}`;
+ const btn=document.createElement('button');btn.type='button';btn.className='btn secondary';btn.textContent='View / Edit';btn.style.marginLeft='12px';
+ btn.addEventListener('click',()=>zelimuStaffEditOpenV2(x));line.append(title,btn);el.appendChild(line);}
+}
+function zelimuStaffEditOpenV2(x){
+ const form=document.getElementById('zelimuStaffEditV2');if(!form)return;form.style.display='block';
+ for(const k of ['id','staff_type','first_name','last_name','email','phone','designation','department','employment_type','employment_date','tsc_number','qualifications','notes','is_active']){
+  const field=form.elements.namedItem(k);if(field)field.value=k==='is_active'?String(x.is_active!==false):k==='employment_date'?String(x[k]||'').slice(0,10):x[k]||'';
+ }
+ form.querySelectorAll('.zelimu-teacher-only-v2').forEach(el=>el.style.display=x.staff_type==='TEACHER'?'':'none');
+ document.getElementById('zelimuStaffEditTitleV2').textContent=`Staff Profile · ${x.staff_no}`;form.scrollIntoView({block:'nearest'});
+}
+if(!window.__zelimuStaffV2Wired){window.__zelimuStaffV2Wired=true;
+ document.addEventListener('click',e=>{const b=e.target.closest('[data-staff-tab]');if(b)zelimuStaffTabV2(b.dataset.staffTab);if(e.target.id==='zelimuStaffCancelV2')document.getElementById('zelimuStaffEditV2').style.display='none';});
+ document.addEventListener('input',e=>{if(e.target.id==='zelimuStaffSearchV2')zelimuStaffRenderV2();});
+ document.addEventListener('change',e=>{if(e.target.id==='zelimuStaffFilterV2')zelimuStaffRenderV2();});
+ document.addEventListener('submit',async e=>{if(e.target.id!=='zelimuStaffEditV2')return;e.preventDefault();
+ const f=e.target,body=Object.fromEntries(new FormData(f));const type=body.staff_type==='TEACHER'?'teacher':'non-teaching',id=body.id;
+ body.is_active=body.is_active==='true';delete body.id;delete body.staff_type;
+ const btn=f.querySelector('[type=submit]');btn.disabled=true;
+ try{await api(`/api/people/${sid}/staff-management/${type}/${id}`,{method:'PATCH',body});f.style.display='none';await zelimuStaffLoadV2();alert('Staff profile updated.');}
+ catch(err){alert(err.message||'Unable to save staff profile.');}finally{btn.disabled=false;}
+ },true);
+}
+function zelimuOpenPeopleMode(mode){
+ const section=document.getElementById('people');
+ if(!section)return;
+ showSection('people');
+
+ const teacher=mode==='teacher';
+ const admission=mode==='admission';
+ const tForm=document.getElementById('teacherForm');
+ const lForm=document.getElementById('learnerForm');
+
+ const staffArea=document.getElementById('zelimuStaffArea');
+ if(staffArea)staffArea.style.display=teacher?'':'none';
+ if(teacher){zelimuStaffTabV2('teacher');}else{const hub=document.getElementById('zelimuStaffHubV2');if(hub)hub.style.display='none';}
+ if(tForm)tForm.style.display=teacher?'':'none';
+ if(lForm)lForm.style.display=admission?'':'none';
+
+ const tDirectory=document.getElementById('teacherSearch')?.closest('.portal-toolbar');
+ const lDirectory=document.getElementById('learnerSearch')?.closest('.portal-toolbar');
+
+ if(tDirectory)tDirectory.style.display=teacher?'':'none';
+ if(lDirectory)lDirectory.style.display=teacher||admission?'none':'';
+
+ const title=section.querySelector('.section-title h2');
+ const pill=section.querySelector('.section-title .pill');
+
+ if(title)title.textContent=teacher?'Teacher & Staff Registration':admission?'Admissions · New Learner':'Learner Enrollment & Promotion';
+ if(pill)pill.textContent=teacher?'Teacher registration · directory':admission?'Register once · existing school classes':'Learner directory · class movement · promotion';
+
+ const classLists=document.getElementById('peopleOpenClassLists');
+ const assignments=document.getElementById('peopleOpenAssignments');
+
+ if(classLists)classLists.style.display=teacher||admission?'none':'';
+ if(assignments)assignments.style.display=teacher?'':'none';
+
+
+ /* ZELIMU ADMINISTRATION WORKSPACE LINKS V2 */
+ const actions=section.querySelector('.section-title .actions');
+ if(actions){
+   const misplaced=document.getElementById('peopleOpenAssignments');
+   if(misplaced)misplaced.style.display='none';
+
+   let promote=document.getElementById('zelimuOpenPromotion');
+   if(!promote){
+     promote=document.createElement('button');
+     promote.id='zelimuOpenPromotion';
+     promote.type='button';
+     promote.className='btn primary';
+     promote.textContent='PROMOTE LEARNERS';
+     promote.addEventListener('click',()=>{
+       zelimuOpenPeopleMode('learner');
+       const panel=document.querySelector('#people .promotion-panel');
+       if(panel)panel.scrollIntoView({block:'start'});
+     });
+     actions.appendChild(promote);
+   }
+   promote.style.display=teacher||admission?'none':'';
+ }
+
+ const academic=document.getElementById('academic');
+ const academicActions=academic?.querySelector('.section-title');
+ if(academicActions && !document.getElementById('zelimuAcademicAssignments')){
+   const assignment=document.createElement('button');
+   assignment.id='zelimuAcademicAssignments';
+   assignment.type='button';
+   assignment.className='btn secondary';
+   assignment.textContent='TEACHER SUBJECTS & ASSIGNMENTS';
+   assignment.addEventListener('click',()=>showSection('assign'));
+   academicActions.appendChild(assignment);
+ }
+
+ /* ZELIMU PROMOTION INSIDE ADMINISTRATION V3 */
+ const promotionPanel=document.querySelector('.promotion-panel');
+ if(promotionPanel){
+   if(promotionPanel.parentElement!==section){
+     section.appendChild(promotionPanel);
+   }
+   promotionPanel.style.display=teacher||admission?'none':'';
+ }
+ section.scrollIntoView({block:'start'});
+}
+function zelimuEnsureAdmissionsWorkspace(){
+ let workspace=document.getElementById('zelimuAdmissionsWorkspaceV2');
+ if(workspace)return workspace;
+ const people=document.getElementById('people');
+ const form=document.getElementById('learnerForm');
+ if(!people||!form)return null;
+ workspace=document.createElement('section');
+ workspace.id='zelimuAdmissionsWorkspaceV2';
+ workspace.className='nav-managed-section card admin-only';
+ workspace.innerHTML='<div class="section-title"><div><h2>Admissions · New Learner</h2><span class="pill">Register once · existing school classes</span></div></div><p class="muted small">Register a new learner using the school’s existing academic year and class records. Existing learners remain in Learner Enrollment &amp; Promotion.</p><div id="zelimuAdmissionsFormHostV2"></div>';
+ people.parentNode.insertBefore(workspace,people.nextSibling);
+ workspace.querySelector('#zelimuAdmissionsFormHostV2').appendChild(form);
+ const appPanel=document.createElement('div');appPanel.className='card-subsection';appPanel.innerHTML=`<h3>Admission applications</h3><p class="muted small">Save an unfinished application without enrolling a learner. Submit it for review, then confirm using the existing admission form.</p><div class="actions"><button type="button" class="btn secondary" id="admSaveDraft">SAVE DRAFT</button><button type="button" class="btn secondary" id="admSubmitReview">SUBMIT FOR REVIEW</button><button type="button" class="btn secondary" id="admRefresh">REFRESH APPLICATIONS</button></div><p id="admAppMessage" role="status"></p><div id="admApplications" class="directory"></div>`;workspace.appendChild(appPanel);
+ appPanel.querySelector('#admSaveDraft').onclick=()=>zelimuSaveAdmissionApplication(false);
+ appPanel.querySelector('#admSubmitReview').onclick=()=>zelimuSaveAdmissionApplication(true);
+ appPanel.querySelector('#admRefresh').onclick=zelimuLoadAdmissionApplications;
+
+ // Extend the original registration form; its existing submit handler and learner API are retained.
+ if(!form.querySelector('#zelimuAdmissionsExtendedV3')){
+ const extra=document.createElement('div');extra.id='zelimuAdmissionsExtendedV3';
+ extra.innerHTML=`<style>#zelimuAdmissionsExtendedV3{grid-column:1/-1}#zelimuAdmissionsExtendedV3 fieldset{border:1px solid #cddfd6;border-radius:12px;padding:14px;margin:12px 0}#zelimuAdmissionsExtendedV3 legend{font-weight:800;color:#17613e}#zelimuAdmissionsExtendedV3 .admissions-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px}#zelimuAdmissionsExtendedV3 label{display:flex;flex-direction:column;gap:5px;font-weight:600}#zelimuAdmissionsExtendedV3 input,#zelimuAdmissionsExtendedV3 select,#zelimuAdmissionsExtendedV3 textarea{width:100%;min-height:38px}#zelimuAdmissionsExtendedV3 .admissions-note{font-size:.9rem;color:#4a6256}</style>
+ <fieldset><legend>01 · Learner identification & admission</legend><div class="admissions-fields">
+ <label>Date of birth<input type="date" name="date_of_birth"></label><label>Admission date<input type="date" name="admission_date"></label><label>Admission type<select name="admission_type"><option value="NEW">New admission</option><option value="TRANSFER">Transfer</option><option value="READMISSION">Readmission</option></select></label><label>Previous school<input name="previous_school" maxlength="180"></label></div></fieldset>
+ <fieldset><legend>02 · Parent or guardian</legend><p class="admissions-note">Existing guardians with the same name and phone are linked instead of re-created. SMS consent is optional.</p><div class="admissions-fields">
+ <label>First name<input name="guardian_first_name" maxlength="120"></label><label>Last name<input name="guardian_last_name" maxlength="120"></label><label>Relationship<select name="guardian_relationship"><option value="">Select</option><option>Mother</option><option>Father</option><option>Guardian</option><option>Other</option></select></label><label>Phone<input name="guardian_phone" type="tel" maxlength="30"></label><label>Alternative phone<input name="guardian_alt_phone" type="tel" maxlength="30"></label><label>Email<input name="guardian_email" type="email"></label><label>Occupation<input name="guardian_occupation" maxlength="120"></label></div><label><input type="checkbox" name="guardian_consent" value="true"> Guardian has consented to school communications / SMS</label></fieldset>
+ <fieldset><legend>03 · Home & emergency contacts</legend><div class="admissions-fields"><label>County<input name="county" maxlength="100"></label><label>Sub-county<input name="sub_county" maxlength="100"></label><label>Residential address<input name="home_address" maxlength="250"></label><label>Emergency contact name<input name="emergency_name" maxlength="150"></label><label>Emergency phone<input name="emergency_phone" type="tel" maxlength="30"></label></div></fieldset>
+ <fieldset><legend>04 · Learner welfare & school services</legend><p class="admissions-note">Sensitive information: only authorised staff should access the admission form.</p><div class="admissions-fields"><label>Allergies<input name="allergies" maxlength="250"></label><label>Medical notes<input name="medical_notes" maxlength="500"></label><label>Learning support needs<input name="learning_support" maxlength="500"></label><label>Residence<select name="residence_type"><option value="">Not specified</option><option value="DAY">Day scholar</option><option value="BOARDING">Boarder</option></select></label><label>Transport route<input name="transport_route" maxlength="150"></label><label><span>School transport</span><select name="transport_required"><option value="false">Not required</option><option value="true">Required</option></select></label></div></fieldset>
+ <fieldset><legend>05 · Documents & review</legend><p class="admissions-note">Passport photo is uploaded through the existing secure learner-photo endpoint. Record other documents received here; attach official files later in the authorised documents workspace.</p><label>Documents received / pending<textarea name="documents_pending" rows="2" maxlength="500" placeholder="Birth certificate received; transfer letter pending..."></textarea></label><p class="admissions-note">Review the admission details before saving. Saving creates one learner, their enrollment and applicable fee charges.</p><button type="button" id="zelimuAdmissionReviewV3" class="btn secondary">REVIEW ADMISSION</button><div id="zelimuAdmissionReviewSummaryV3" class="notice" role="status" style="display:none"></div></fieldset>`;
+ const submit=form.querySelector('button[type="submit"]');if(submit)form.insertBefore(extra,submit);else form.appendChild(extra);
+ extra.querySelector('#zelimuAdmissionReviewV3').addEventListener('click',()=>{
+ const d=Object.fromEntries(new FormData(form));const text=[['Learner',[d.first_name,d.middle_name,d.last_name].filter(Boolean).join(' ')],['Admission number',d.admission_no||'Not supplied'],['Assessment number',d.assessment_no||'Not supplied'],['Academic year',form.querySelector('[name="academic_year_id"]')?.selectedOptions?.[0]?.textContent||'Not selected'],['Class',form.querySelector('[name="class_id"]')?.selectedOptions?.[0]?.textContent||'Not selected'],['Guardian',[d.guardian_first_name,d.guardian_last_name].filter(Boolean).join(' ')||'Not supplied'],['Guardian phone',d.guardian_phone||'Not supplied']];
+ const box=extra.querySelector('#zelimuAdmissionReviewSummaryV3');box.replaceChildren(...text.map(([k,v])=>{const row=document.createElement('div');const strong=document.createElement('strong');strong.textContent=k+': ';row.append(strong,document.createTextNode(v));return row}));box.style.display='block';
+ });
+ }
+
+ const heading=form.querySelector('h3');if(heading)heading.textContent='Register new learner · Admissions';
+ return workspace;
+}
+let zelimuCurrentAdmissionApplication=null;
+async function zelimuSaveAdmissionApplication(review){
+ const form=document.getElementById('learnerForm'),msg=document.getElementById('admAppMessage');if(!form)return;
+ const data=Object.fromEntries([...new FormData(form)].filter(([k])=>k!=='passport_photo'));
+ try{const url=`/api/people/${sid}/admission-applications`;
+ const result=zelimuCurrentAdmissionApplication?await api(url+'/'+zelimuCurrentAdmissionApplication,{method:'PATCH',body:{payload:data,status:review?'PENDING_REVIEW':'DRAFT'}}):await api(url,{method:'POST',body:{...data,submit_for_review:review}});
+ zelimuCurrentAdmissionApplication=result.id;msg.textContent=review?'Application submitted for review. Learner has NOT been enrolled.':'Draft saved. Learner has NOT been enrolled.';await zelimuLoadAdmissionApplications();
+ }catch(e){msg.textContent=e.message;}
+}
+async function zelimuLoadAdmissionApplications(){
+ const box=document.getElementById('admApplications');if(!box)return;
+ try{const rows=await api(`/api/people/${sid}/admission-applications`);box.replaceChildren();
+ for(const a of rows){const item=document.createElement('div');item.className='item';const label=document.createElement('span');label.textContent=[a.first_name,a.last_name].filter(Boolean).join(' ')+' · '+(a.admission_no||'No admission number')+' · '+a.status;
+ const button=document.createElement('button');button.type='button';button.className='btn secondary';button.textContent=a.status==='CONFIRMED'?'Confirmed':'OPEN APPLICATION';button.disabled=a.status==='CONFIRMED';button.onclick=async()=>{try{const full=await api(`/api/people/${sid}/admission-applications/${a.id}`);const form=document.getElementById('learnerForm');for(const [k,v] of Object.entries(full.payload||{})){const field=form.elements.namedItem(k);if(field&&typeof v==='string'&&field.type!=='file')field.value=v;}zelimuCurrentAdmissionApplication=a.id;document.getElementById('admAppMessage').textContent='Application opened: '+a.status+'. Review details before confirming.';form.scrollIntoView({block:'start'});}catch(e){alert(e.message);}};item.append(label,button);box.appendChild(item);}
+ if(!rows.length)box.textContent='No saved applications yet.';
+ }catch(e){box.textContent='Unable to load applications: '+e.message;}
+}
+function zelimuOpenAdmissionsV1(){
+ const workspace=zelimuEnsureAdmissionsWorkspace();
+ if(!workspace)return;
+ if(typeof window.zelimuMountWorkspace==='function'){
+   window.zelimuMountWorkspace(workspace);
+ }
+ showSection('zelimuAdmissionsWorkspaceV2');
+ zelimuLoadAdmissionApplications();
+ workspace.scrollIntoView({block:'start'});
+}
+function zelimuUnusedAdmissionsV1(){
+ zelimuOpenPeopleMode('admission');
+ const form=document.getElementById('learnerForm');
+ if(form){form.querySelector('h3').textContent='Register new learner · Admissions';form.scrollIntoView({block:'start'});}
+}
+async function openPM24(n){
+ if(n===3||n===4){
+   zelimuOpenPeopleMode(n===3?'teacher':'learner');
+   return;
+ }
+
  const m=PM24[n];if(!m)return;
  const panel=$('pm24_workspace'),navCard=$('navTabs')?.closest('.pm-workflow-intro');
  // Keep the module workspace in the central display, never inside the sidebar.
@@ -2116,7 +2109,37 @@ document.querySelectorAll('#navTabs button[data-operations]').forEach(b=>b.addEv
 const $=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function openPdf(url){try{const token=localStorage.getItem('token')||sessionStorage.getItem('token')||localStorage.getItem('pm_token');const r=await fetch(url,{headers:{Authorization:'Bearer '+token}});if(!r.ok){let j=await r.json().catch(()=>({}));throw Error(j.error||'PDF generation failed')}const blob=await r.blob();const u=URL.createObjectURL(blob);window.open(u,'_blank');setTimeout(()=>URL.revokeObjectURL(u),60000)}catch(e){alert(e.message)}}
 async function fees(){const id=state.schoolId,el=$('feeStructureList');el.textContent='Loading…';try{const d=await api(`/api/finance/${id}/overview`);el.innerHTML='<table><thead><tr><th>Fee item</th><th>Class</th><th>Academic year</th><th>Amount</th><th>PDF</th></tr></thead><tbody>'+(d.structures||[]).map(f=>`<tr><td>${esc(f.name)}</td><td>${esc([f.class_name,f.stream].filter(Boolean).join(' ')||'Not specified')}</td><td>${esc(f.year_label||'—')}</td><td>KES ${Number(f.amount).toLocaleString('en-KE')}</td><td><button class="btn secondary" data-fee="${esc(f.id)}">Generate PDF</button></td></tr>`).join('')+'</tbody></table>';if(!d.structures?.length)el.textContent='No fee structures yet. Create one in School Fees & Receipts.'}catch(e){el.textContent=e.message}}
-async function certificates(){const id=state.schoolId,el=$('lcList');el.textContent='Loading…';try{const d=await api(`/api/school-documents/${id}/leaving-certificates`);const fin={learners:state.learners||[]};$('lcLearner').innerHTML='<option value="">Select learner</option>'+(fin.learners||[]).map(l=>`<option value="${esc(l.id)}">${esc([l.first_name,l.middle_name,l.last_name].filter(Boolean).join(' '))} (${esc(l.admission_no||'')})</option>`).join('');el.innerHTML='<table><thead><tr><th>Certificate</th><th>Learner</th><th>Leaving date</th><th>PDF</th></tr></thead><tbody>'+d.map(r=>`<tr><td>${esc(r.data.certificate_number)}</td><td>${esc([r.first_name,r.middle_name,r.last_name].filter(Boolean).join(' '))}</td><td>${esc(r.data.leaving_date)}</td><td><button class="btn secondary" data-certificate="${esc(r.id)}">Open PDF</button></td></tr>`).join('')+'</tbody></table>';if(!d.length)el.textContent='No certificates issued yet.'}catch(e){el.textContent=e.message}}
+async function certificates(){const id=state.schoolId,el=$('lcList');el.textContent='Loading…';try{const d=await api(`/api/school-documents/${id}/leaving-certificates`);const fin={learners:state.learners||[]};zelimuLCFilter();el.innerHTML='<table><thead><tr><th>Certificate</th><th>Learner</th><th>Leaving date</th><th>PDF</th></tr></thead><tbody>'+d.map(r=>`<tr><td>${esc(r.data.certificate_number)}</td><td>${esc([r.first_name,r.middle_name,r.last_name].filter(Boolean).join(' '))}</td><td>${esc(r.data.leaving_date)}</td><td><button class="btn secondary" data-certificate="${esc(r.id)}">Open PDF</button></td></tr>`).join('')+'</tbody></table>';if(!d.length)el.textContent='No certificates issued yet.'}catch(e){el.textContent=e.message}}
+function zelimuLCFilter(){
+ const cl=$('lcClass'),q=$('lcSearch'),sel=$('lcLearner'),msg=$('lcSearchStatus');
+ if(!cl||!q||!sel||!msg)return;
+ const classes=Array.isArray(state.classes)?state.classes:[];
+ const learners=Array.isArray(state.learners)?state.learners:[];
+ const classKey=l=>String(l.enrollment_class_id||l.class_id||'');
+ const selected=cl.value;
+ const classNames=new Map(classes.filter(c=>c.id).map(c=>[String(c.id),[c.name||c.class_name||c.level_name||'Class',c.stream||''].filter(Boolean).join(' ')]));
+ learners.forEach(l=>{const k=classKey(l);if(k&&!classNames.has(k))classNames.set(k,l.class_name||'Class');});
+ const signature=[...classNames].map(([id,name])=>id+':'+name).join('|');
+ if(cl.dataset.classSignature!==signature){
+   cl.replaceChildren(new Option('Select grade / class',''),...[...classNames].sort((a,b)=>a[1].localeCompare(b[1],undefined,{numeric:true})).map(([id,name])=>new Option(name,id)));
+   cl.dataset.classSignature=signature;
+   if(classNames.has(selected))cl.value=selected;
+ }
+ q.disabled=!cl.value;sel.disabled=!cl.value;
+ if(!cl.value){sel.replaceChildren(new Option('Select class first',''));msg.textContent=classNames.size?'Select a class first.':'No configured classes loaded. Refresh school data.';return;}
+ const term=q.value.trim().toLocaleLowerCase();
+ const matched=learners.filter(l=>classKey(l)===cl.value).filter(l=>!term||[l.first_name,l.middle_name,l.last_name,l.admission_no,l.assessment_no].some(v=>String(v||'').toLocaleLowerCase().includes(term)));
+ const previous=sel.value;
+ sel.replaceChildren(new Option('Select learner',''),...matched.slice(0,100).map(l=>new Option([l.first_name,l.middle_name,l.last_name].filter(Boolean).join(' ')+' ('+(l.admission_no||'—')+')',l.id)));
+ if(matched.some(l=>String(l.id)===previous))sel.value=previous;
+ if(!matched.length){
+   const unassigned=learners.filter(l=>!classKey(l)).length;
+   msg.textContent=unassigned?`No learners matched this class. ${unassigned} learner(s) have no class assignment in the loaded records; check enrollment records.`:'No learners matched this class or search.';
+ }else msg.textContent=matched.length>100?`${matched.length} matches; type a name or admission number to narrow results.`:`${matched.length} learner(s) found.`;
+}
+$('lcClass')?.addEventListener('change',()=>{$('lcSearch').value='';zelimuLCFilter();});
+let zelimuLCSearchTimer;
+$('lcSearch')?.addEventListener('input',()=>{clearTimeout(zelimuLCSearchTimer);zelimuLCSearchTimer=setTimeout(zelimuLCFilter,160);});
 $('feeStructureReload')?.addEventListener('click',fees);$('lcRefresh')?.addEventListener('click',certificates);
 $('feeStructureList')?.addEventListener('click',e=>{const b=e.target.closest('[data-fee]');if(b)openPdf(`/api/school-documents/${state.schoolId}/fee-structures/${b.dataset.fee}/pdf`)});
 $('lcList')?.addEventListener('click',e=>{const b=e.target.closest('[data-certificate]');if(b)openPdf(`/api/school-documents/${state.schoolId}/leaving-certificates/${b.dataset.certificate}/pdf`)});
@@ -2288,4 +2311,321 @@ body main.page > .portal-hero {
 </script>
 
 <script src="/js/zelimu-approved-dashboard.js?v=20261029-final"></script>
+
+<script>
+(function(){
+  const groups={
+    transport:[
+      'transport_routes','transport_allocations',
+      'transport_trips','transport_maintenance',
+      'transport_incidents'
+    ],
+    boarding:[
+      'boarding_rooms','boarding_allocations',
+      'boarding_rollcalls','boarding_welfare',
+      'boarding_supplies'
+    ],
+    hr:[
+      'hr_leave','hr_training','hr_recruitment',
+      'hr_appraisals','hr_documents'
+    ]
+  };
+
+  function refreshTabs(){
+    const container=document.getElementById(
+      'zelimuOperationsFunctionTabs'
+    );
+    const frame=document.getElementById('operationsFrame');
+
+    if(!container||!frame)return;
+
+    const current=frame.dataset.type||'';
+    const group=Object.values(groups).find(
+      entries=>entries.includes(current)
+    );
+
+    container.replaceChildren();
+    if(!group)return;
+
+    for(const type of group){
+      const original=document.querySelector(
+        '#navTabs button[data-operations="'+type+'"]'
+      );
+      if(!original)continue;
+
+      const button=document.createElement('button');
+      button.type='button';
+      button.className='btn secondary';
+      button.textContent=original.textContent.trim();
+      button.style.fontSize='13px';
+      button.style.padding='9px 12px';
+
+      if(type===current){
+        button.classList.add('active');
+        button.setAttribute('aria-current','page');
+      }
+
+      button.addEventListener('click',()=>{
+        if(original.disabled ||
+           original.classList.contains('role-hidden')){
+          return;
+        }
+        original.click();
+        refreshTabs();
+      });
+
+      container.appendChild(button);
+    }
+  }
+
+  document.addEventListener('click',event=>{
+    if(event.target.closest('#navTabs [data-operations]')){
+      queueMicrotask(refreshTabs);
+      requestAnimationFrame(refreshTabs);
+    }
+  });
+
+  window.zelimuRefreshOperationsTabs=refreshTabs;
+})();
+</script>
+
+
+<script>
+(function(){
+  'use strict';
+
+  const $link = id => document.getElementById(id);
+  const teacherRoles = [
+    'TEACHER','CLASS_TEACHER','SENIOR_TEACHER',
+    'HEADTEACHER','DEPUTY_HEADTEACHER'
+  ];
+
+  function currentUser(){
+    try {
+      return typeof user !== 'undefined' ? user :
+        JSON.parse(localStorage.getItem('user') || '{}');
+    } catch { return {}; }
+  }
+
+  function schoolId(){
+    return typeof sid !== 'undefined' ? sid :
+      (currentUser().school_id || new URLSearchParams(location.search).get('school_id'));
+  }
+
+  function adminAccess(){
+    return ['SCHOOL_ADMIN','ADMIN','PLATFORM_OWNER']
+      .includes(currentUser().role);
+  }
+
+  function teacherAccess(){
+    return teacherRoles.includes(currentUser().role);
+  }
+
+  async function requestApi(path, options={}){
+    const response=await fetch(path,{
+      method:options.method||'GET',
+      headers:{
+        'Authorization':'Bearer '+(localStorage.getItem('token')||''),
+        'Content-Type':'application/json'
+      },
+      ...(options.body ? {body:JSON.stringify(options.body)} : {})
+    });
+    const data=await response.json();
+    if(!response.ok)throw new Error(data.error||'Request failed.');
+    return data;
+  }
+
+  function showMessage(id,message){
+    const box=$link(id);
+    if(!box)return;
+    box.textContent=message;
+    box.style.display='block';
+  }
+
+  async function loadTeacherLinkOptions(){
+    const select=$link('teacherLinkTeacher');
+    if(!select||!adminAccess()||!schoolId())return;
+
+    try{
+      const teachers=await requestApi(
+        `/api/people/${schoolId()}/teachers`
+      );
+
+      select.replaceChildren(new Option('Select teacher',''));
+
+      teachers.filter(t=>t.is_active&&!t.user_id).forEach(t=>{
+        select.add(new Option(
+          `${t.staff_no||''} - ${t.first_name||''} ${t.last_name||''}`,
+          t.id
+        ));
+      });
+    }catch(e){
+      showMessage('teacherLinkAdminMessage',e.message);
+    }
+  }
+
+  async function loadMyTeacherLinkRequests(){
+    const box=$link('teacherLinkPendingList');
+    if(!box||!teacherAccess()||!schoolId())return;
+
+    try{
+      const requests=await requestApi(
+        `/api/people/${schoolId()}/teacher-accounts/my-link-requests`
+      );
+
+      box.replaceChildren();
+
+      if(!requests.length){
+        box.textContent='No pending teacher-account linking requests.';
+        return;
+      }
+
+      requests.forEach(r=>{
+        const item=document.createElement('div');
+        item.className='item';
+
+        const title=document.createElement('p');
+        title.textContent=
+          `${r.first_name||''} ${r.last_name||''} — ${r.staff_no||''}`;
+
+        const button=document.createElement('button');
+        button.type='button';
+        button.className='btn';
+        button.textContent='Confirm My Teacher Account';
+
+        button.addEventListener('click',async()=>{
+          if(!confirm(
+            'Confirm that this teacher record belongs to you?'
+          ))return;
+
+          button.disabled=true;
+
+          try{
+            await requestApi(
+              `/api/people/${schoolId()}/teacher-accounts/link-requests/${encodeURIComponent(r.id)}/confirm`,
+              {method:'POST'}
+            );
+
+            alert('Teacher account linked successfully.');
+            await loadMyTeacherLinkRequests();
+          }catch(e){
+            alert(e.message);
+            button.disabled=false;
+          }
+        });
+
+        item.append(title,button);
+        box.append(item);
+      });
+    }catch(e){
+      box.textContent=e.message;
+    }
+  }
+
+  function initializeTeacherLinking(){
+    const adminPanel=$link('teacherLinkAdminPanel');
+    const teacherPanel=$link('teacherLinkConfirmation');
+
+    if(adminPanel){
+      adminPanel.style.display=adminAccess()?'block':'none';
+    }
+
+    if(teacherPanel){
+      teacherPanel.style.display=teacherAccess()?'block':'none';
+    }
+
+    if(adminAccess()){
+      loadTeacherLinkOptions();
+    }
+
+    if(teacherAccess()){
+      loadMyTeacherLinkRequests();
+    }
+
+    const form=$link('teacherLinkRequestForm');
+
+    if(form&&!form.dataset.wired){
+      form.dataset.wired='true';
+
+      form.addEventListener('submit',async e=>{
+        e.preventDefault();
+        if(!adminAccess())return;
+
+        const button=form.querySelector('button[type="submit"]');
+        button.disabled=true;
+
+        try{
+          const values=Object.fromEntries(new FormData(form));
+
+          await requestApi(
+            `/api/people/${schoolId()}/teacher-accounts/link-existing`,
+            {method:'POST',body:values}
+          );
+
+          showMessage(
+            'teacherLinkAdminMessage',
+            'Link request created. Ask the teacher to sign in and confirm.'
+          );
+
+          form.reset();
+          await loadTeacherLinkOptions();
+        }catch(e){
+          showMessage('teacherLinkAdminMessage',e.message);
+        }finally{
+          button.disabled=false;
+        }
+      });
+    }
+  }
+
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',initializeTeacherLinking);
+  }else{
+    initializeTeacherLinking();
+  }
+})();
+</script>
+
+
+<style>
+#assess .za-hub{margin:14px 0 20px}#assess .za-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:12px;margin-top:15px}#assess .za-tile{display:flex;align-items:flex-start;gap:12px;text-align:left;padding:17px;background:#fff;border:1px solid #d5e6df;border-radius:13px;color:#083c30;cursor:pointer;min-height:112px;box-shadow:0 2px 8px #073e2b0a}#assess .za-tile:hover,#assess .za-tile:focus-visible{border-color:#178653;background:#f0faf4}#assess .za-tile strong{display:block;font-size:15px;margin-bottom:6px}#assess .za-tile small{display:block;color:#536a62;font-size:12px;line-height:1.5}#assess .za-number{display:inline-grid;place-items:center;min-width:29px;height:29px;border-radius:9px;background:#e0f2e8;color:#096a3b;font-weight:800}#assess .za-header{background:#edf6f1;border-left:4px solid #178653;padding:17px;border-radius:10px}#assess .za-header h3{margin:0 0 5px}#assess .za-back{margin:10px 0 18px}#assess .za-pane[hidden],#assess .za-hub[hidden]{display:none!important}@media(max-width:620px){#assess .za-grid{grid-template-columns:1fr}#assess .za-tile{min-height:88px}}
+</style>
+<script>
+(function(){
+function initializeAssessmentHub(){
+ const root=document.getElementById('assess');if(!root||root.dataset.zaHub)return;root.dataset.zaHub='1';
+ const heading=root.querySelector(':scope > .section-title');
+ const gradingHeading=Array.from(root.children).find(n=>n.tagName==='H3'&&n.textContent.trim()==='Grading system setup');
+ if(!heading||!gradingHeading)return;
+ const setup=document.createElement('div');setup.className='za-pane';setup.id='zaAssessmentSetup';
+ const grading=document.createElement('div');grading.className='za-pane';grading.id='zaAssessmentGrading';
+ let gradingStarted=false;
+ Array.from(root.children).forEach(n=>{if(n===heading)return;if(n===gradingHeading)gradingStarted=true;(gradingStarted?grading:setup).appendChild(n)});
+ const hub=document.createElement('div');hub.className='za-hub';hub.id='zaAssessmentHub';
+ hub.innerHTML='<div class="za-header"><h3>Assessment Control Centre</h3><p class="muted small">Manage examinations, class subjects, mark entry, grading, approvals, performance and historical results in connected workspaces.</p></div><div class="za-grid"></div>';
+ root.append(hub,setup,grading);
+ const cards=[
+ ['Examination Setup','Configure main examinations and optional CATs for every assigned class subject.','setup'],
+ ['Class Subjects & Allocation','Open existing academic subjects and teacher/class assignments.','assign'],
+ ['Teacher Mark Entry','Open the existing teacher mark-entry workspace (subject to your role).','teacherMarking'],
+ ['Marks Management','Review saved marks and assessment results.','results'],
+ ['Examination Control & Approval','Manage deadlines, close mark entry and publish authorised results.','markControl'],
+ ['Grading Systems','Set CBC grading bands, descriptors and target classes.','grading'],
+ ['Performance Analytics & Merit','Run academic analysis and generate merit lists.','analytics'],
+ ['Report Cards & Results','Generate individual and class report cards.','reports'],
+ ['Assessment History','Review saved results by academic year, term and class.','results']
+ ];
+ const grid=hub.querySelector('.za-grid');
+ cards.forEach(([name,desc,target],i)=>{const b=document.createElement('button');b.type='button';b.className='za-tile';b.innerHTML='<span class="za-number">'+(i+1)+'</span><span><strong></strong><small></small></span>';b.querySelector('strong').textContent=name;b.querySelector('small').textContent=desc;b.addEventListener('click',()=>{
+  if(target==='setup'||target==='grading'){openPane(target);return;}
+  if(target==='teacherMarking' && document.getElementById('teacherMarking')?.classList.contains('teacher-only') && !document.getElementById('teacherMarking')?.offsetParent){alert('Teacher Mark Entry is available to authorised teachers. Administrators can manage marks and assignments in the other workspaces.');return;}
+  if(typeof showSection==='function'){showSection(target);document.getElementById(target)?.scrollIntoView({block:'start'});}else{alert('Workspace navigation is not ready. Please refresh.');}
+ });grid.appendChild(b)});
+ function openPane(target){hub.hidden=!!target;setup.hidden=target!=='setup';grading.hidden=target!=='grading';if(target){const pane=target==='setup'?setup:grading;if(!pane.querySelector('.za-back')){const back=document.createElement('button');back.type='button';back.className='btn secondary za-back';back.textContent='← Assessment Control Centre';back.addEventListener('click',()=>openPane(null));pane.prepend(back);}pane.scrollIntoView({block:'start'});}else root.scrollIntoView({block:'start'});}
+ openPane(null);
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initializeAssessmentHub);else initializeAssessmentHub();
+})();
+</script>
+
 </body></html>

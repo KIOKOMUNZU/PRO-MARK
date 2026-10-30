@@ -1,0 +1,32 @@
+const db=require('./db');
+module.exports=async()=>{await db.query(`CREATE TABLE IF NOT EXISTS school_module_records (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),school_id uuid NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+ record_type text NOT NULL,data jsonb NOT NULL DEFAULT '{}'::jsonb,
+ created_by uuid,created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now()
+)`);await db.query('CREATE INDEX IF NOT EXISTS school_module_records_scope_idx ON school_module_records(school_id,record_type,created_at DESC)');
+await db.query(`CREATE TABLE IF NOT EXISTS biometric_devices (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), school_id uuid NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+ name varchar(100) NOT NULL, manufacturer varchar(100) NOT NULL DEFAULT '', model varchar(100) NOT NULL DEFAULT '',
+ connection_type varchar(32) NOT NULL DEFAULT 'UNCONFIGURED', status varchar(32) NOT NULL DEFAULT 'PLANNED',
+ last_seen_at timestamptz, created_by uuid, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+ CONSTRAINT biometric_device_status_chk CHECK(status IN ('PLANNED','CONFIGURING','CONNECTED','DISABLED'))
+)`);
+await db.query(`CREATE TABLE IF NOT EXISTS biometric_person_links (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), school_id uuid NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+ device_id uuid NOT NULL REFERENCES biometric_devices(id) ON DELETE CASCADE,
+ person_type varchar(10) NOT NULL CHECK(person_type IN ('LEARNER','STAFF')), person_id uuid NOT NULL,
+ external_reference varchar(128) NOT NULL, created_at timestamptz NOT NULL DEFAULT now(),
+ UNIQUE(school_id,device_id,external_reference), UNIQUE(school_id,device_id,person_type,person_id)
+)`);
+await db.query(`CREATE TABLE IF NOT EXISTS biometric_attendance_events (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), school_id uuid NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+ device_id uuid REFERENCES biometric_devices(id) ON DELETE SET NULL,
+ person_type varchar(10) NOT NULL CHECK(person_type IN ('LEARNER','STAFF')), person_id uuid NOT NULL,
+ event_type varchar(10) NOT NULL CHECK(event_type IN ('CHECK_IN','CHECK_OUT')),
+ event_time timestamptz NOT NULL, source varchar(12) NOT NULL CHECK(source IN ('MANUAL','DEVICE')),
+ verification_status varchar(20) NOT NULL CHECK(verification_status IN ('NOT_BIOMETRIC','PENDING','VERIFIED','REJECTED')),
+ external_event_id varchar(128), recorded_by uuid, created_at timestamptz NOT NULL DEFAULT now(),
+ UNIQUE(school_id,device_id,external_event_id)
+)`);
+await db.query('CREATE INDEX IF NOT EXISTS biometric_events_school_time_idx ON biometric_attendance_events(school_id,event_time DESC)');
+};
