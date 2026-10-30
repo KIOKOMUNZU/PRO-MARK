@@ -775,7 +775,7 @@ async function openLearner(id){
 
 function safeOn(id,event,handler){const el=$(id);if(el)el.addEventListener(event,handler);return el;}
 function setBusy(btn,busy,text){if(!btn)return;btn.disabled=busy;if(busy){btn.dataset.oldText=btn.textContent;btn.textContent=text||'Working…';}else if(btn.dataset.oldText){btn.textContent=btn.dataset.oldText;delete btn.dataset.oldText;}}
-const MANAGED_SECTIONS=['feeStructurePrint','leavingCertificates','operations_workspace','biometrics','pm24_workspace','teacherMarking','identity','parents','documents','announcements','billing','resources','academic','classLists','people','userControl','assign','assess','markControl','results','merit','analytics','leadership','reports'];
+const MANAGED_SECTIONS=['feeStructurePrint','leavingCertificates','operations_workspace','biometrics','pm24_workspace','teacherMarking','identity','parents','documents','announcements','billing','resources','academic','classLists','people','zelimuAdmissionsWorkspaceV2','userControl','assign','assess','markControl','results','merit','analytics','leadership','reports'];
 function showSection(id){
   document.getElementById('zelimuAdmissionsWorkspaceV2')?.classList.remove('nav-active');
   // The 24-module navigation has its own controller (openPM24). Never let
@@ -1837,11 +1837,7 @@ function zelimuEnsureAdmissionsWorkspace(){
 function zelimuOpenAdmissionsV1(){
  const workspace=zelimuEnsureAdmissionsWorkspace();
  if(!workspace)return;
- showSection('people');
- document.getElementById('people')?.classList.remove('nav-active');
- document.getElementById('people')?.style.setProperty('display','none');
- workspace.classList.add('nav-active');
- workspace.style.setProperty('display','block');
+ showSection('zelimuAdmissionsWorkspaceV2');
  workspace.scrollIntoView({block:'start'});
 }
 function zelimuUnusedAdmissionsV1(){
