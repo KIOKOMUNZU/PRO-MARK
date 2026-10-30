@@ -1633,7 +1633,45 @@ async function renderSchoolFinanceModule(){
 // Reuse the existing section controller and its role checks.
 window.showSection = showSection;
 
+
+function zelimuOpenPeopleMode(mode){
+ const section=document.getElementById('people');
+ if(!section)return;
+ showSection('people');
+
+ const teacher=mode==='teacher';
+ const tForm=document.getElementById('teacherForm');
+ const lForm=document.getElementById('learnerForm');
+
+ if(tForm)tForm.style.display=teacher?'':'none';
+ if(lForm)lForm.style.display=teacher?'none':'';
+
+ const tDirectory=document.getElementById('teacherSearch')?.closest('.portal-toolbar');
+ const lDirectory=document.getElementById('learnerSearch')?.closest('.portal-toolbar');
+
+ if(tDirectory)tDirectory.style.display=teacher?'':'none';
+ if(lDirectory)lDirectory.style.display=teacher?'none':'';
+
+ const title=section.querySelector('.section-title h2');
+ const pill=section.querySelector('.section-title .pill');
+
+ if(title)title.textContent=teacher?'Teacher & Staff Registration':'Learner Enrollment & Promotion';
+ if(pill)pill.textContent=teacher?'Teacher registration · directory':'Learner admission · directory';
+
+ const classLists=document.getElementById('peopleOpenClassLists');
+ const assignments=document.getElementById('peopleOpenAssignments');
+
+ if(classLists)classLists.style.display=teacher?'none':'';
+ if(assignments)assignments.style.display=teacher?'':'none';
+
+ section.scrollIntoView({block:'start'});
+}
 async function openPM24(n){
+ if(n===3||n===4){
+   zelimuOpenPeopleMode(n===3?'teacher':'learner');
+   return;
+ }
+
  const m=PM24[n];if(!m)return;
  const panel=$('pm24_workspace'),navCard=$('navTabs')?.closest('.pm-workflow-intro');
  // Keep the module workspace in the central display, never inside the sidebar.
