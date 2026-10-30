@@ -17,7 +17,7 @@ const nav=[
   ['🎓','School Leaving Certificates','leavingCertificates'],
   ['♙','Teacher & Staff Registration','pm24_3']
  ]],
- ['SCHOOL MANAGEMENT',[['♙','Admissions','admissions'],['♟','Learners','pm24_4'],['▣','Academics','pm24_6'],['☑','Assessments','pm24_7'],['▦','Timetable','pm24_19']]],
+ ['SCHOOL MANAGEMENT',[['♙','Admissions','admissions'],['▣','Academics','pm24_6'],['☑','Assessments','pm24_7'],['▦','Timetable','pm24_19']]],
  ['FINANCE & RESOURCES',[['◫','Finance','pm24_28'],['▰','Transport','transport'],['⌂','Boarding','boarding'],['✣','Resources','pm24_25']]],
  ['PEOPLE & COMMUNICATION',[['♟','Staff / HR','staff_hr'],['✉','Communications','pm24_15'],['♟','Parent Portal','pm24_5']]],
  ['ANALYTICS & REPORTS',[['▥','Analytics','pm24_10'],['▤','Reports','pm24_11']]],
@@ -86,24 +86,12 @@ function make(){
 
 
    if(target==='admissions'){
-     const section=document.getElementById('people');
-     const form=document.getElementById('learnerForm');
-
-     if(!section || !form){
-       alert('Learner registration is not available.');
-       return;
+     const admissionButton=document.querySelector('#navTabs button[data-admission-link="true"]');
+     if(admissionButton){
+       admissionButton.click();
+     }else{
+       alert('Admissions workspace is unavailable.');
      }
-
-     if(typeof window.showSection!=='function'){
-       alert('The learner registration controller is unavailable.');
-       return;
-     }
-
-     window.showSection('people');
-
-     form.scrollIntoView({block:'start',behavior:'smooth'});
-     const admission=form.querySelector('[name="admission_no"]');
-     if(admission)admission.focus({preventScroll:true});
      return;
    }
 
