@@ -132,6 +132,52 @@ router.post('/:schoolId/leadership',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN')
 
 router.get('/:schoolId/teachers',schoolBoundary,async(req,res)=>{try{const q=await db.query(`SELECT t.id,t.staff_no,t.first_name,t.last_name,t.email,t.is_active,t.user_id,COALESCE(string_agg(DISTINCT r.role::text, ', ' ORDER BY r.role::text) FILTER (WHERE r.role IS NOT NULL),NULLIF(t.imported_role::text,''),'NO LOGIN ROLE') account_roles,COALESCE(bool_or(r.mark_entry_enabled),false) mark_entry_enabled FROM teachers t LEFT JOIN user_school_roles r ON r.user_id=t.user_id AND r.school_id=t.school_id WHERE t.school_id=$1 GROUP BY t.id,t.staff_no,t.first_name,t.last_name,t.email,t.is_active,t.user_id ORDER BY t.last_name,t.first_name`,[req.params.schoolId]);res.json(Array.isArray(q?.rows)?q.rows:[])}catch(e){console.error('GET /teachers failed',e);res.status(500).json({error:'Unable to load teachers',detail:e.message});}});
 // ZELIMU STAFF API V1 — non-teaching staff, school-scoped and administrator-only.
+// ZELIMU STAFF MANAGEMENT V2 — school-scoped unified directory and profile editing.
+router.get('/:schoolId/staff-management',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER'),async(req,res)=>{
+ try{
+  const sid=req.params.schoolId;
+  const t=await db.query(`SELECT t.id,'TEACHER'::text staff_type,t.staff_no,t.first_name,t.last_name,t.email,
+   p.phone,COALESCE(p.designation,'Teacher') designation,p.department,p.employment_type,p.employment_date,
+   p.tsc_number,p.qualifications,p.notes,t.is_active
+   FROM teachers t LEFT JOIN teacher_staff_profiles p ON p.teacher_id=t.id AND p.school_id=t.school_id
+   WHERE t.school_id=$1`,[sid]);
+  const n=await db.query(`SELECT id,'NON_TEACHING'::text staff_type,staff_no,first_name,last_name,email,phone,designation,department,
+   employment_type,employment_date,NULL::text tsc_number,NULL::text qualifications,NULL::text notes,is_active
+   FROM non_teaching_staff WHERE school_id=$1`,[sid]);
+  res.json([...t.rows,...n.rows].sort((a,b)=>String(a.last_name).localeCompare(String(b.last_name))));
+ }catch(e){console.error('staff-management GET',e);res.status(500).json({error:'Unable to load staff profiles. Apply migration 031.'});}
+});
+router.patch('/:schoolId/staff-management/:type/:id',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{
+ const sid=req.params.schoolId,id=req.params.id,type=req.params.type,b=req.body||{};
+ if(!['teacher','non-teaching'].includes(type)||!/^[0-9a-f-]{36}$/i.test(id))return res.status(400).json({error:'Invalid staff record.'});
+ const str=(v,max=250)=>String(v??'').trim().slice(0,max);
+ const name=str(b.first_name),last=str(b.last_name),designation=str(b.designation);
+ if(!name||!last||!designation)return res.status(400).json({error:'Names and designation are required.'});
+ const date=b.employment_date||null;
+ if(date&&!/^\d{4}-\d{2}-\d{2}$/.test(date))return res.status(400).json({error:'Invalid employment date.'});
+ const c=await db.pool.connect();
+ try{
+  await c.query('BEGIN');let q;
+  if(type==='teacher'){
+   q=await c.query('UPDATE teachers SET first_name=$3,last_name=$4,email=$5,is_active=$6 WHERE school_id=$1 AND id=$2 RETURNING id',
+    [sid,id,name,last,str(b.email)||null,b.is_active!==false]);
+   if(!q.rowCount){await c.query('ROLLBACK');return res.status(404).json({error:'Teacher not found.'});}
+   await c.query(`INSERT INTO teacher_staff_profiles(school_id,teacher_id,phone,designation,department,employment_type,employment_date,tsc_number,qualifications,notes)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+    ON CONFLICT(teacher_id) DO UPDATE SET phone=EXCLUDED.phone,designation=EXCLUDED.designation,department=EXCLUDED.department,
+    employment_type=EXCLUDED.employment_type,employment_date=EXCLUDED.employment_date,tsc_number=EXCLUDED.tsc_number,
+    qualifications=EXCLUDED.qualifications,notes=EXCLUDED.notes,updated_at=now()`,
+    [sid,id,str(b.phone)||null,designation,str(b.department)||null,str(b.employment_type)||null,date,str(b.tsc_number)||null,str(b.qualifications,2000)||null,str(b.notes,2000)||null]);
+  }else{
+   q=await c.query(`UPDATE non_teaching_staff SET first_name=$3,last_name=$4,email=$5,phone=$6,designation=$7,department=$8,
+    employment_type=$9,employment_date=$10,is_active=$11 WHERE school_id=$1 AND id=$2 RETURNING id`,
+    [sid,id,name,last,str(b.email)||null,str(b.phone)||null,designation,str(b.department)||null,str(b.employment_type)||null,date,b.is_active!==false]);
+   if(!q.rowCount){await c.query('ROLLBACK');return res.status(404).json({error:'Staff record not found.'});}
+  }
+  await c.query('COMMIT');res.json({ok:true,id});
+ }catch(e){await c.query('ROLLBACK').catch(()=>{});console.error('staff-management PATCH',e);res.status(400).json({error:'Unable to update staff record.'});}
+ finally{c.release();}
+});
 router.get('/:schoolId/staff',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER'),async(req,res)=>{
  try{const q=await db.query('SELECT id,staff_no,first_name,last_name,email,phone,designation,department,employment_type,employment_date,is_active,created_at FROM non_teaching_staff WHERE school_id=$1 ORDER BY last_name,first_name',[req.params.schoolId]);res.json(q.rows);}
  catch(e){console.error('GET /staff',e);res.status(500).json({error:'Unable to load staff. Ensure the staff migration has been applied.'});}
@@ -150,7 +196,11 @@ router.post('/:schoolId/staff',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),asyn
   res.status(201).json(q.rows[0]);
  }catch(e){res.status(e.code==='23505'?409:400).json({error:e.code==='23505'?'Staff number already exists.':e.message});}
 });
-router.post('/:schoolId/teachers',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{const b=req.body;if(!clean(b.staff_no)||!clean(b.first_name)||!clean(b.last_name))return res.status(400).json({error:'Staff number, first name and last name are required'});try{const q=await db.query(`INSERT INTO teachers(school_id,staff_no,first_name,last_name,email) VALUES($1,$2,$3,$4,$5) RETURNING *`,[req.params.schoolId,clean(b.staff_no),clean(b.first_name),clean(b.last_name),clean(b.email)||null]);res.status(201).json(q.rows[0]);}catch(e){res.status(400).json({error:e.code==='23505'?'That staff number already exists in this school.':e.message});}});
+router.post('/:schoolId/teachers',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{const b=req.body;if(!clean(b.staff_no)||!clean(b.first_name)||!clean(b.last_name))return res.status(400).json({error:'Staff number, first name and last name are required'});try{const q=await db.query(`INSERT INTO teachers(school_id,staff_no,first_name,last_name,email) VALUES($1,$2,$3,$4,$5) RETURNING *`,[req.params.schoolId,clean(b.staff_no),clean(b.first_name),clean(b.last_name),clean(b.email)||null]);if(q.rows[0] && [b.phone,b.designation,b.department,b.employment_type,b.employment_date,b.tsc_number,b.qualifications].some(Boolean)){
+ await db.query(`INSERT INTO teacher_staff_profiles(school_id,teacher_id,phone,designation,department,employment_type,employment_date,tsc_number,qualifications)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(teacher_id) DO NOTHING`,
+ [req.params.schoolId,q.rows[0].id,clean(b.phone)||null,clean(b.designation)||'Teacher',clean(b.department)||null,clean(b.employment_type)||null,b.employment_date||null,clean(b.tsc_number)||null,clean(b.qualifications)||null]);
+ }res.status(201).json(q.rows[0]);}catch(e){res.status(400).json({error:e.code==='23505'?'That staff number already exists in this school.':e.message});}});
 router.post('/:schoolId/teacher-accounts',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{
   const b=req.body||{},sid=req.params.schoolId;
   const email=clean(b.email).toLowerCase();
