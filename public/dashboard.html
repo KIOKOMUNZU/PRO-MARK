@@ -1694,7 +1694,33 @@ function zelimuStaffTabV2(tab){
  if(!hub)return;hub.style.display='block';
  if(t)t.style.display=tab==='teacher'?'':'none';
  if(n)n.style.display=tab==='nonteaching'?'':'none';
- const panel=document.getElementById('zelimuStaffManagePanelV2');if(panel)panel.style.display=['directory','profiles','employment'].includes(tab)?'block':'none';
+ const panel=document.getElementById('zelimuStaffManagePanelV2');
+ if(panel){
+   const managing=['directory','profiles','employment'].includes(tab);
+   panel.style.display=managing?'block':'none';
+   if(managing){
+     const titles={
+       directory:['Staff Directory','Search, filter and view registered teaching and non-teaching staff.'],
+       profiles:['Staff Profiles','View and update personal and professional staff information.'],
+       employment:['Employment Records','Manage designations, departments, employment dates and staff status.']
+     };
+     let heading=document.getElementById('zelimuStaffWorkspaceHeadingV3');
+     if(!heading){
+       heading=document.createElement('div');
+       heading.id='zelimuStaffWorkspaceHeadingV3';
+       panel.prepend(heading);
+     }
+     heading.replaceChildren();
+     const h=document.createElement('h3');
+     h.textContent=titles[tab][0];
+     const description=document.createElement('p');
+     description.className='muted';
+     description.textContent=titles[tab][1];
+     heading.append(h,description);
+     const form=document.getElementById('zelimuStaffEditV2');
+     if(form)form.style.display='none';
+   }
+ }
  hub.dataset.tab=tab;
  hub.querySelectorAll('[data-staff-tab]').forEach(x=>{x.setAttribute('aria-pressed',String(x.dataset.staffTab===tab));});
  const oldDirectory=document.getElementById('teacherSearch')?.closest('.portal-toolbar');if(oldDirectory)oldDirectory.style.display='none';
@@ -1714,7 +1740,11 @@ function zelimuStaffRenderV2(){
  for(const x of rows){const line=document.createElement('div');line.className='card';line.style.marginBottom='8px';
  const title=document.createElement('span');title.textContent=`${x.staff_no} · ${x.first_name} ${x.last_name} · ${x.designation||'Teacher'} · ${x.is_active?'Active':'Inactive'}`;
  const btn=document.createElement('button');btn.type='button';btn.className='btn secondary';btn.textContent='View / Edit';btn.style.marginLeft='12px';
- btn.addEventListener('click',()=>zelimuStaffEditOpenV2(x));line.append(title,btn);el.appendChild(line);}
+ const tab=document.getElementById('zelimuStaffHubV2')?.dataset.tab||'directory';
+ btn.textContent=tab==='directory'?'View Staff':tab==='profiles'?'Open Profile':'Open Employment Record';
+ btn.addEventListener('click',()=>zelimuStaffEditOpenV2(x));
+ line.append(title,btn);
+ el.appendChild(line);}
 }
 function zelimuStaffEditOpenV2(x){
  const form=document.getElementById('zelimuStaffEditV2');if(!form)return;form.style.display='block';
@@ -1722,7 +1752,24 @@ function zelimuStaffEditOpenV2(x){
   const field=form.elements.namedItem(k);if(field)field.value=k==='is_active'?String(x.is_active!==false):k==='employment_date'?String(x[k]||'').slice(0,10):x[k]||'';
  }
  form.querySelectorAll('.zelimu-teacher-only-v2').forEach(el=>el.style.display=x.staff_type==='TEACHER'?'':'none');
- document.getElementById('zelimuStaffEditTitleV2').textContent=`Staff Profile · ${x.staff_no}`;form.scrollIntoView({block:'nearest'});
+ const tab=document.getElementById('zelimuStaffHubV2')?.dataset.tab||'directory';
+ const heading=document.getElementById('zelimuStaffEditTitleV2');
+ heading.textContent=(tab==='directory'?'Staff Details':tab==='employment'?'Employment Record':'Staff Profile')+' · '+x.staff_no;
+ const personal=['first_name','last_name','email','phone','tsc_number','qualifications','notes'];
+ const employment=['designation','department','employment_type','employment_date','is_active'];
+ form.querySelectorAll('label').forEach(label=>{
+   const field=label.querySelector('input,select');
+   if(!field)return;
+   const name=field.name;
+   label.style.display=tab==='directory'||(tab==='profiles'?personal.includes(name):employment.includes(name))?'':'none';
+   if(tab==='directory')label.style.display='';
+ });
+ const save=form.querySelector('[type=submit]');
+ if(save)save.style.display=tab==='directory'?'none':'';
+ form.querySelectorAll('input,select').forEach(field=>{
+   if(field.type!=='hidden')field.disabled=tab==='directory';
+ });
+ form.scrollIntoView({block:'nearest'});
 }
 if(!window.__zelimuStaffV2Wired){window.__zelimuStaffV2Wired=true;
  document.addEventListener('click',e=>{const b=e.target.closest('[data-staff-tab]');if(b)zelimuStaffTabV2(b.dataset.staffTab);if(e.target.id==='zelimuStaffCancelV2')document.getElementById('zelimuStaffEditV2').style.display='none';});
