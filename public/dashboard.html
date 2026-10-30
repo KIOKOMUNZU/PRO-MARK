@@ -1679,8 +1679,8 @@ function zelimuOpenPeopleMode(mode){
      promote.className='btn primary';
      promote.textContent='PROMOTE LEARNERS';
      promote.addEventListener('click',()=>{
-       showSection('academic');
-       const panel=document.querySelector('#academic .promotion-panel');
+       zelimuOpenPeopleMode('learner');
+       const panel=document.querySelector('#people .promotion-panel');
        if(panel)panel.scrollIntoView({block:'start'});
      });
      actions.appendChild(promote);
@@ -1698,6 +1698,15 @@ function zelimuOpenPeopleMode(mode){
    assignment.textContent='TEACHER SUBJECTS & ASSIGNMENTS';
    assignment.addEventListener('click',()=>showSection('assign'));
    academicActions.appendChild(assignment);
+ }
+
+ /* ZELIMU PROMOTION INSIDE ADMINISTRATION V3 */
+ const promotionPanel=document.querySelector('.promotion-panel');
+ if(promotionPanel){
+   if(promotionPanel.parentElement!==section){
+     section.appendChild(promotionPanel);
+   }
+   promotionPanel.style.display=teacher?'none':'';
  }
  section.scrollIntoView({block:'start'});
 }
