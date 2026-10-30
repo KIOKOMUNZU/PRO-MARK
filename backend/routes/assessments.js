@@ -508,20 +508,34 @@ router.patch('/:schoolId/:yearId/:termId/:assessmentId',schoolBoundary,roles('SC
       if(standard){
         q=await db.query(`
           UPDATE assessments
-          SET deadline_at=$1,status=$2
+          SET deadline_at=$1,status=$2,
+              max_mark=CASE WHEN $8::boolean THEN $9::numeric ELSE max_mark END,
+              weight=CASE WHEN $10::boolean THEN $11::numeric ELSE weight END,
+              include_in_final=CASE WHEN $12::boolean THEN $13::boolean ELSE include_in_final END,
+              assessment_order=CASE WHEN $14::boolean THEN $15::integer ELSE assessment_order END
           WHERE school_id=$3 AND academic_year_id=$4 AND term_id=$5
             AND assessment_type=$6
             AND (class_id=$7 OR class_id IS NULL)
+            AND ($16::text IS NULL OR lower(name)=lower($16))
           RETURNING *
-        `,[deadline,status,sid,yearId,termId,type,scopeClass]);
+        `,[deadline,status,sid,yearId,termId,type,scopeClass,
+           b.max_mark!==undefined,nextMax,b.weight!==undefined,nextWeight,
+           b.include_in_final!==undefined,nextInclude,b.assessment_order!==undefined,nextOrder,
+           type==='CAT'?String(current.name||''):null]);
       }else{
         q=await db.query(`
           UPDATE assessments
-          SET deadline_at=$1,status=$2
+          SET deadline_at=$1,status=$2,
+              max_mark=CASE WHEN $8::boolean THEN $9::numeric ELSE max_mark END,
+              weight=CASE WHEN $10::boolean THEN $11::numeric ELSE weight END,
+              include_in_final=CASE WHEN $12::boolean THEN $13::boolean ELSE include_in_final END,
+              assessment_order=CASE WHEN $14::boolean THEN $15::integer ELSE assessment_order END
           WHERE school_id=$3 AND academic_year_id=$4 AND term_id=$5
             AND name=$6 AND (class_id=$7 OR class_id IS NULL)
           RETURNING *
-        `,[deadline,status,sid,yearId,termId,nextName,scopeClass]);
+        `,[deadline,status,sid,yearId,termId,nextName,scopeClass,
+           b.max_mark!==undefined,nextMax,b.weight!==undefined,nextWeight,
+           b.include_in_final!==undefined,nextInclude,b.assessment_order!==undefined,nextOrder]);
       }
     }else{
       q=await db.query(`
