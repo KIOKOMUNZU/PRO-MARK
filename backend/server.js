@@ -24,7 +24,6 @@ app.use("/api/biometrics",require("./routes/biometrics"));
 app.use("/api/timetable-generator",require("./routes/timetable-generator"));
 app.use("/api/resources",require("./routes/resources"));
 app.use("/api/extended",require("./routes/extended"));
-app.use("/api", (req,res)=>res.status(404).json({error:"API endpoint not found",method:req.method,path:req.originalUrl}));
 app.get("/{*splat}",(req,res)=>res.sendFile(path.join(__dirname,"..","public","index.html")));
 app.use((err,req,res,next)=>{console.error("Unhandled request error:",err);if(res.headersSent)return next(err);if(req.path.startsWith("/api/"))return res.status(err.status||500).json({error:err.message||"Internal server error."});return res.status(err.status||500).send("Internal server error.");});
 // Open the HTTP port immediately so Render can detect the service.

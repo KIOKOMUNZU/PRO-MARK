@@ -131,76 +131,7 @@ router.post('/:schoolId/leadership',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN')
 });
 
 router.get('/:schoolId/teachers',schoolBoundary,async(req,res)=>{try{const q=await db.query(`SELECT t.id,t.staff_no,t.first_name,t.last_name,t.email,t.is_active,t.user_id,COALESCE(string_agg(DISTINCT r.role::text, ', ' ORDER BY r.role::text) FILTER (WHERE r.role IS NOT NULL),NULLIF(t.imported_role::text,''),'NO LOGIN ROLE') account_roles,COALESCE(bool_or(r.mark_entry_enabled),false) mark_entry_enabled FROM teachers t LEFT JOIN user_school_roles r ON r.user_id=t.user_id AND r.school_id=t.school_id WHERE t.school_id=$1 GROUP BY t.id,t.staff_no,t.first_name,t.last_name,t.email,t.is_active,t.user_id ORDER BY t.last_name,t.first_name`,[req.params.schoolId]);res.json(Array.isArray(q?.rows)?q.rows:[])}catch(e){console.error('GET /teachers failed',e);res.status(500).json({error:'Unable to load teachers',detail:e.message});}});
-// ZELIMU STAFF API V1 — non-teaching staff, school-scoped and administrator-only.
-// ZELIMU STAFF MANAGEMENT V2 — school-scoped unified directory and profile editing.
-router.get('/:schoolId/staff-management',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER'),async(req,res)=>{
- try{
-  const sid=req.params.schoolId;
-  const t=await db.query(`SELECT t.id,'TEACHER'::text staff_type,t.staff_no,t.first_name,t.last_name,t.email,
-   p.phone,COALESCE(p.designation,'Teacher') designation,p.department,p.employment_type,p.employment_date,
-   p.tsc_number,p.qualifications,p.notes,t.is_active
-   FROM teachers t LEFT JOIN teacher_staff_profiles p ON p.teacher_id=t.id AND p.school_id=t.school_id
-   WHERE t.school_id=$1`,[sid]);
-  const n=await db.query(`SELECT id,'NON_TEACHING'::text staff_type,staff_no,first_name,last_name,email,phone,designation,department,
-   employment_type,employment_date,NULL::text tsc_number,NULL::text qualifications,NULL::text notes,is_active
-   FROM non_teaching_staff WHERE school_id=$1`,[sid]);
-  res.json([...t.rows,...n.rows].sort((a,b)=>String(a.last_name).localeCompare(String(b.last_name))));
- }catch(e){console.error('staff-management GET',e);res.status(500).json({error:'Unable to load staff profiles. Apply migration 031.'});}
-});
-router.patch('/:schoolId/staff-management/:type/:id',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{
- const sid=req.params.schoolId,id=req.params.id,type=req.params.type,b=req.body||{};
- if(!['teacher','non-teaching'].includes(type)||!/^[0-9a-f-]{36}$/i.test(id))return res.status(400).json({error:'Invalid staff record.'});
- const str=(v,max=250)=>String(v??'').trim().slice(0,max);
- const name=str(b.first_name),last=str(b.last_name),designation=str(b.designation);
- if(!name||!last||!designation)return res.status(400).json({error:'Names and designation are required.'});
- const date=b.employment_date||null;
- if(date&&!/^\d{4}-\d{2}-\d{2}$/.test(date))return res.status(400).json({error:'Invalid employment date.'});
- const c=await db.pool.connect();
- try{
-  await c.query('BEGIN');let q;
-  if(type==='teacher'){
-   q=await c.query('UPDATE teachers SET first_name=$3,last_name=$4,email=$5,is_active=$6 WHERE school_id=$1 AND id=$2 RETURNING id',
-    [sid,id,name,last,str(b.email)||null,b.is_active!==false]);
-   if(!q.rowCount){await c.query('ROLLBACK');return res.status(404).json({error:'Teacher not found.'});}
-   await c.query(`INSERT INTO teacher_staff_profiles(school_id,teacher_id,phone,designation,department,employment_type,employment_date,tsc_number,qualifications,notes)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-    ON CONFLICT(teacher_id) DO UPDATE SET phone=EXCLUDED.phone,designation=EXCLUDED.designation,department=EXCLUDED.department,
-    employment_type=EXCLUDED.employment_type,employment_date=EXCLUDED.employment_date,tsc_number=EXCLUDED.tsc_number,
-    qualifications=EXCLUDED.qualifications,notes=EXCLUDED.notes,updated_at=now()`,
-    [sid,id,str(b.phone)||null,designation,str(b.department)||null,str(b.employment_type)||null,date,str(b.tsc_number)||null,str(b.qualifications,2000)||null,str(b.notes,2000)||null]);
-  }else{
-   q=await c.query(`UPDATE non_teaching_staff SET first_name=$3,last_name=$4,email=$5,phone=$6,designation=$7,department=$8,
-    employment_type=$9,employment_date=$10,is_active=$11 WHERE school_id=$1 AND id=$2 RETURNING id`,
-    [sid,id,name,last,str(b.email)||null,str(b.phone)||null,designation,str(b.department)||null,str(b.employment_type)||null,date,b.is_active!==false]);
-   if(!q.rowCount){await c.query('ROLLBACK');return res.status(404).json({error:'Staff record not found.'});}
-  }
-  await c.query('COMMIT');res.json({ok:true,id});
- }catch(e){await c.query('ROLLBACK').catch(()=>{});console.error('staff-management PATCH',e);res.status(400).json({error:'Unable to update staff record.'});}
- finally{c.release();}
-});
-router.get('/:schoolId/staff',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER'),async(req,res)=>{
- try{const q=await db.query('SELECT id,staff_no,first_name,last_name,email,phone,designation,department,employment_type,employment_date,is_active,created_at FROM non_teaching_staff WHERE school_id=$1 ORDER BY last_name,first_name',[req.params.schoolId]);res.json(q.rows);}
- catch(e){console.error('GET /staff',e);res.status(500).json({error:'Unable to load staff. Ensure the staff migration has been applied.'});}
-});
-router.post('/:schoolId/staff',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{
- const b=req.body||{},sid=req.params.schoolId;
- const staffNo=clean(b.staff_no),first=clean(b.first_name),last=clean(b.last_name),designation=clean(b.designation);
- if(!staffNo||!first||!last||!designation)return res.status(400).json({error:'Staff number, first name, last name and designation are required.'});
- if([staffNo,first,last,designation].some(x=>x.length>150))return res.status(400).json({error:'A field is too long.'});
- try{
-  const conflict=await db.query('SELECT 1 FROM teachers WHERE school_id=$1 AND lower(staff_no)=lower($2) LIMIT 1',[sid,staffNo]);
-  if(conflict.rowCount)return res.status(409).json({error:'Staff number is already used by a teacher.'});
-  const q=await db.query(`INSERT INTO non_teaching_staff(school_id,staff_no,first_name,last_name,email,phone,designation,department,employment_type,employment_date)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id,staff_no,first_name,last_name,email,phone,designation,department,employment_type,employment_date,is_active`,
-    [sid,staffNo,first,last,clean(b.email)||null,clean(b.phone)||null,designation,clean(b.department)||null,clean(b.employment_type)||null,b.employment_date||null]);
-  res.status(201).json(q.rows[0]);
- }catch(e){res.status(e.code==='23505'?409:400).json({error:e.code==='23505'?'Staff number already exists.':e.message});}
-});
-router.post('/:schoolId/teachers',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{const b=req.body;if(!clean(b.staff_no)||!clean(b.first_name)||!clean(b.last_name))return res.status(400).json({error:'Staff number, first name and last name are required'});try{const q=await db.query(`INSERT INTO teachers(school_id,staff_no,first_name,last_name,email) VALUES($1,$2,$3,$4,$5) RETURNING *`,[req.params.schoolId,clean(b.staff_no),clean(b.first_name),clean(b.last_name),clean(b.email)||null]);if(q.rows[0] && [b.phone,b.designation,b.department,b.employment_type,b.employment_date,b.tsc_number,b.qualifications].some(Boolean)){
- await db.query(`INSERT INTO teacher_staff_profiles(school_id,teacher_id,phone,designation,department,employment_type,employment_date,tsc_number,qualifications)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(teacher_id) DO NOTHING`,
- [req.params.schoolId,q.rows[0].id,clean(b.phone)||null,clean(b.designation)||'Teacher',clean(b.department)||null,clean(b.employment_type)||null,b.employment_date||null,clean(b.tsc_number)||null,clean(b.qualifications)||null]);
- }res.status(201).json(q.rows[0]);}catch(e){res.status(400).json({error:e.code==='23505'?'That staff number already exists in this school.':e.message});}});
+router.post('/:schoolId/teachers',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{const b=req.body;if(!clean(b.staff_no)||!clean(b.first_name)||!clean(b.last_name))return res.status(400).json({error:'Staff number, first name and last name are required'});try{const q=await db.query(`INSERT INTO teachers(school_id,staff_no,first_name,last_name,email) VALUES($1,$2,$3,$4,$5) RETURNING *`,[req.params.schoolId,clean(b.staff_no),clean(b.first_name),clean(b.last_name),clean(b.email)||null]);res.status(201).json(q.rows[0]);}catch(e){res.status(400).json({error:e.code==='23505'?'That staff number already exists in this school.':e.message});}});
 router.post('/:schoolId/teacher-accounts',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{
   const b=req.body||{},sid=req.params.schoolId;
   const email=clean(b.email).toLowerCase();
@@ -444,61 +375,6 @@ router.patch('/:schoolId/learners/:learnerId/identifiers',schoolBoundary,roles('
   res.json(q.rows[0]);
  }catch(e){res.status(e.status||400).json({error:e.code==='23505'?'That admission number already exists in this school.':e.message});}
 });
-// Return JSON for the academic-year promotion roster. A missing route previously
-// fell through to the dashboard HTML fallback, producing invalid JSON (HTTP 200).
-// Year-scoped register: historical completed enrollments remain visible in their source year.
-router.get('/:schoolId/year-registers/:yearId',schoolBoundary,
- roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER'),async(req,res)=>{
- try{
-  const sid=req.params.schoolId,yearId=req.params.yearId;
-  await assertBelongs('academic_years',yearId,sid);
-  const params=[sid,yearId];let scope='';
-  if(req.user.role==='CLASS_TEACHER'){
-   params.push(req.user.user_id);
-   scope=` AND EXISTS (SELECT 1 FROM class_teacher_assignments a JOIN teachers t ON t.id=a.teacher_id AND t.school_id=a.school_id WHERE a.school_id=e.school_id AND a.class_id=e.class_id AND a.academic_year_id=e.academic_year_id AND t.user_id=$3)`;
-  }
-  const rows=(await db.query(`SELECT e.learner_id AS id,e.class_id,e.academic_year_id,e.status AS enrollment_status,l.first_name,l.middle_name,l.last_name,l.admission_no,l.assessment_no,l.is_active
-    FROM learner_enrollments e JOIN learners l ON l.id=e.learner_id AND l.school_id=e.school_id
-    WHERE e.school_id=$1 AND e.academic_year_id=$2${scope}
-    ORDER BY l.last_name,l.first_name,l.id`,params)).rows;
-  res.setHeader('Cache-Control','no-store');res.json(rows);
- }catch(e){res.status(e.status||500).json({error:e.message||'Year register unavailable'});}
-});
-
-router.get('/:schoolId/enrollments/:yearId',schoolBoundary,
-  roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER'),
-  async(req,res)=>{
-    const sid=req.params.schoolId, yearId=req.params.yearId;
-    try{
-      await assertBelongs('academic_years',yearId,sid);
-      const params=[sid,yearId];
-      let scope='';
-      if(req.user.role==='CLASS_TEACHER'){
-        params.push(req.user.user_id);
-        scope=` AND EXISTS (
-          SELECT 1 FROM class_teacher_assignments cta
-          JOIN teachers t ON t.id=cta.teacher_id AND t.school_id=cta.school_id
-          WHERE cta.school_id=e.school_id AND cta.class_id=e.class_id
-            AND cta.academic_year_id=e.academic_year_id AND t.user_id=$3
-        )`;
-      }
-      const q=await db.query(`
-        SELECT e.learner_id,e.academic_year_id,e.class_id,e.status,
-               l.first_name,l.middle_name,l.last_name,l.admission_no,
-               c.name AS class_name,c.stream
-        FROM learner_enrollments e
-        JOIN learners l ON l.id=e.learner_id AND l.school_id=e.school_id
-        JOIN classes c ON c.id=e.class_id AND c.school_id=e.school_id
-        WHERE e.school_id=$1 AND e.academic_year_id=$2
-          AND COALESCE(e.status,'ACTIVE')='ACTIVE'${scope}
-        ORDER BY c.name,c.stream,l.last_name,l.first_name,l.id`,params);
-      res.json(q.rows);
-    }catch(e){
-      console.error('Promotion roster load failed:',e);
-      res.status(e.status||500).json({error:e.message||'Unable to load promotion learners.'});
-    }
-  });
-
 // Bulk learner promotion / progression engine. Historical enrolments and marks remain untouched.
 router.post('/:schoolId/promote',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','CLASS_TEACHER'),async(req,res)=>{
  const sid=req.params.schoolId,b=req.body||{}; const c=await db.pool.connect();
@@ -651,40 +527,8 @@ router.post('/:schoolId/learners/:learnerId/remove-from-class',schoolBoundary,ro
   res.json({ok:true,learner_id:learnerId,academic_year_id:b.academic_year_id,class_id:enr.class_id,status:'TRANSFERRED_OUT',message:'Learner removed from the class. Historical marks and reports remain preserved.'});
  }catch(e){try{await c.query('ROLLBACK')}catch{}res.status(e.status||400).json({error:e.message});}finally{c.release();}
 });
-// Admissions Phase 2: applications are separate from learner records until confirmation.
-const admissionRoles=roles('SCHOOL_ADMIN','ADMIN');
-router.get('/:schoolId/admission-applications',schoolBoundary,admissionRoles,async(req,res)=>{
- try{const q=await db.query(`SELECT id,status,payload->>'first_name' first_name,payload->>'last_name' last_name,payload->>'admission_no' admission_no,learner_id,review_note,created_at,updated_at FROM learner_admission_applications WHERE school_id=$1 ORDER BY updated_at DESC LIMIT 300`,[req.params.schoolId]);res.json(q.rows);}catch(e){res.status(500).json({error:e.message});}
-});
-router.get('/:schoolId/admission-applications/:id',schoolBoundary,admissionRoles,async(req,res)=>{
- try{const q=await db.query(`SELECT * FROM learner_admission_applications WHERE id=$1 AND school_id=$2`,[req.params.id,req.params.schoolId]);if(!q.rows[0])return res.status(404).json({error:'Application not found'});res.json(q.rows[0]);}catch(e){res.status(500).json({error:e.message});}
-});
-router.post('/:schoolId/admission-applications',schoolBoundary,admissionRoles,async(req,res)=>{
- const b=req.body||{},sid=req.params.schoolId;
- try{const status=b.submit_for_review?'PENDING_REVIEW':'DRAFT';const payload={...b};delete payload.submit_for_review;delete payload.passport_photo;
- if(JSON.stringify(payload).length>30000)return res.status(413).json({error:'Application is too large'});
- const q=await db.query(`INSERT INTO learner_admission_applications(school_id,status,payload,created_by) VALUES($1,$2,$3::jsonb,$4) RETURNING id,status`,[sid,status,JSON.stringify(payload),req.user.user_id]);res.status(201).json(q.rows[0]);
- }catch(e){res.status(400).json({error:e.message});}
-});
-router.patch('/:schoolId/admission-applications/:id',schoolBoundary,admissionRoles,async(req,res)=>{
- const b=req.body||{},sid=req.params.schoolId;
- try{const current=(await db.query(`SELECT * FROM learner_admission_applications WHERE id=$1 AND school_id=$2`,[req.params.id,sid])).rows[0];
- if(!current)return res.status(404).json({error:'Application not found'});
- if(current.status==='CONFIRMED')return res.status(409).json({error:'Confirmed applications cannot be edited'});
- const status=b.status||current.status;if(!['DRAFT','PENDING_REVIEW','RETURNED'].includes(status))return res.status(400).json({error:'Invalid application status'});
- const payload=b.payload&&typeof b.payload==='object'&&!Array.isArray(b.payload)?b.payload:current.payload;
- if(JSON.stringify(payload).length>30000)return res.status(413).json({error:'Application is too large'});
- const q=await db.query(`UPDATE learner_admission_applications SET status=$3,payload=$4::jsonb,review_note=$5,updated_at=now() WHERE id=$1 AND school_id=$2 RETURNING id,status`,[req.params.id,sid,status,JSON.stringify(payload),clean(b.review_note)||current.review_note]);res.json(q.rows[0]);
- }catch(e){res.status(400).json({error:e.message});}
-});
 router.get('/:schoolId/learners',schoolBoundary,async(req,res)=>{try{let extra='';const params=[req.params.schoolId];if(req.user.role==='CLASS_TEACHER'){extra=` AND EXISTS (SELECT 1 FROM class_teacher_assignments cta JOIN teachers ct ON ct.id=cta.teacher_id WHERE cta.school_id=l.school_id AND cta.class_id=l.class_id AND ct.user_id=$2 AND cta.academic_year_id=(SELECT id FROM academic_years WHERE school_id=l.school_id ORDER BY year_label DESC LIMIT 1))`;params.push(req.user.user_id);}res.json((await db.query(`SELECT l.*,cl.name class_name,cl.stream,lv.name level_name,ss.name section_name FROM learners l LEFT JOIN classes cl ON cl.id=l.class_id LEFT JOIN school_levels lv ON lv.id=cl.school_level_id LEFT JOIN school_sections ss ON ss.id=lv.school_section_id WHERE l.school_id=$1${extra} ORDER BY l.last_name,l.first_name`,params)).rows)}catch(e){res.status(500).json({error:'Unable to load learners'});}});
-router.post('/:schoolId/learners',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','CLASS_TEACHER','SENIOR_TEACHER'),async(req,res)=>{const b=req.body,sid=req.params.schoolId,c=await db.pool.connect();try{if(!clean(b.first_name)||!clean(b.last_name))return res.status(400).json({error:'First name and last name are required'});if(b.class_id)await assertBelongs('classes',b.class_id,sid);if(req.user.role==='CLASS_TEACHER'){if(!b.class_id)return res.status(400).json({error:'Class Teacher must select the assigned class.'});const ok=(await db.query(`SELECT 1 FROM class_teacher_assignments a JOIN teachers t ON t.id=a.teacher_id WHERE a.school_id=$1 AND t.user_id=$2 AND a.class_id=$3 AND a.academic_year_id=$4 AND (a.term_id=$5 OR a.term_id IS NULL) LIMIT 1`,[sid,req.user.user_id,b.class_id,b.academic_year_id,b.term_id||null])).rows[0];if(!ok)return res.status(403).json({error:'You can only add learners to a class assigned to you as Class Teacher.'});}if(b.academic_year_id)await assertBelongs('academic_years',b.academic_year_id,sid);
-if(b.admission_workflow==='CONFIRMED'&&(!b.academic_year_id||!b.class_id))return res.status(400).json({error:'Academic year and class are required for admission.'});
-if(b.admission_no||b.assessment_no){const dup=await c.query(`SELECT id,admission_no,assessment_no,first_name,last_name FROM learners WHERE school_id=$1 AND ((NULLIF(trim($2::text),'') IS NOT NULL AND lower(trim(admission_no))=lower(trim($2::text))) OR (NULLIF(trim($3::text),'') IS NOT NULL AND lower(trim(assessment_no))=lower(trim($3::text)))) LIMIT 1`,[sid,b.admission_no||'',b.assessment_no||'']);if(dup.rows.length)return res.status(409).json({error:'An existing learner has this admission or assessment number. Search Learner Enrollment & Promotion before registering.',existing_learner_id:dup.rows[0].id});}
-if(b.guardian_first_name||b.guardian_last_name||b.guardian_phone){if(!clean(b.guardian_first_name)||!clean(b.guardian_last_name)||!clean(b.guardian_phone))return res.status(400).json({error:'Provide guardian first name, last name and phone together.'});}
-await c.query('BEGIN');
-if(b.admission_application_id){const app=(await c.query(`SELECT id,status FROM learner_admission_applications WHERE id=$1 AND school_id=$2 FOR UPDATE`,[b.admission_application_id,sid])).rows[0];if(!app||app.status==='CONFIRMED')throw Object.assign(new Error('Application not found or already confirmed'),{status:409});}
-const l=(await c.query(`INSERT INTO learners(school_id,admission_no,assessment_no,first_name,middle_name,last_name,date_of_birth,gender,class_id,parent_phone) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,[sid,clean(b.admission_no)||null,clean(b.assessment_no)||null,clean(b.first_name),clean(b.middle_name),clean(b.last_name),b.date_of_birth||null,clean(b.gender)||null,b.class_id||null,clean(b.parent_phone)||null])).rows[0];if(b.academic_year_id&&b.class_id){await c.query(`INSERT INTO learner_enrollments(school_id,learner_id,academic_year_id,class_id) VALUES($1,$2,$3,$4) ON CONFLICT(learner_id,academic_year_id) DO UPDATE SET class_id=EXCLUDED.class_id`,[sid,l.id,b.academic_year_id,b.class_id]);}
+router.post('/:schoolId/learners',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','CLASS_TEACHER','SENIOR_TEACHER'),async(req,res)=>{const b=req.body,sid=req.params.schoolId,c=await db.pool.connect();try{if(!clean(b.first_name)||!clean(b.last_name))return res.status(400).json({error:'First name and last name are required'});if(b.class_id)await assertBelongs('classes',b.class_id,sid);if(req.user.role==='CLASS_TEACHER'){if(!b.class_id)return res.status(400).json({error:'Class Teacher must select the assigned class.'});const ok=(await db.query(`SELECT 1 FROM class_teacher_assignments a JOIN teachers t ON t.id=a.teacher_id WHERE a.school_id=$1 AND t.user_id=$2 AND a.class_id=$3 AND a.academic_year_id=$4 AND (a.term_id=$5 OR a.term_id IS NULL) LIMIT 1`,[sid,req.user.user_id,b.class_id,b.academic_year_id,b.term_id||null])).rows[0];if(!ok)return res.status(403).json({error:'You can only add learners to a class assigned to you as Class Teacher.'});}await c.query('BEGIN');const l=(await c.query(`INSERT INTO learners(school_id,admission_no,assessment_no,first_name,middle_name,last_name,date_of_birth,gender,class_id,parent_phone) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,[sid,clean(b.admission_no)||null,clean(b.assessment_no)||null,clean(b.first_name),clean(b.middle_name),clean(b.last_name),b.date_of_birth||null,clean(b.gender)||null,b.class_id||null,clean(b.parent_phone)||null])).rows[0];if(b.academic_year_id&&b.class_id){await c.query(`INSERT INTO learner_enrollments(school_id,learner_id,academic_year_id,class_id) VALUES($1,$2,$3,$4) ON CONFLICT(learner_id,academic_year_id) DO UPDATE SET class_id=EXCLUDED.class_id`,[sid,l.id,b.academic_year_id,b.class_id]);}
 // AUTO_ASSIGN_ADMISSION_FEES_V1
 // Use the same transaction as learner admission and enrolment.
 // Only active, class-specific structures for the selected year qualify.
@@ -713,18 +557,6 @@ if (b.academic_year_id && b.class_id) {
   ]);
 }
 
-// Admissions details and guardian are committed with the learner and enrollment.
-const metaFields=['admission_date','admission_type','previous_school','county','sub_county','home_address','emergency_name','emergency_phone','allergies','medical_notes','learning_support','residence_type','transport_route','documents_pending','guardian_relationship','guardian_alt_phone','guardian_occupation'];
-const admissionType=['NEW','TRANSFER','READMISSION'].includes(String(b.admission_type||'NEW'))?String(b.admission_type||'NEW'):'NEW';
-const meta=metaFields.map(k=>k==='admission_type'?admissionType:(clean(b[k])||null));
-await c.query(`INSERT INTO learner_admission_profiles(learner_id,school_id,${metaFields.join(',')},transport_required,created_by) VALUES($1,$2,${metaFields.map((_,i)=>'$'+(i+3)).join(',')},$20,$21)`,[l.id,sid,...meta,b.transport_required==='true'||b.transport_required===true,req.user.user_id]);
-if(clean(b.guardian_phone)){
- const phone=clean(b.guardian_phone),first=clean(b.guardian_first_name),last=clean(b.guardian_last_name);
- let guardian=(await c.query(`SELECT id FROM parent_guardians WHERE school_id=$1 AND lower(trim(phone))=lower($2) AND lower(trim(first_name))=lower($3) AND lower(trim(last_name))=lower($4) LIMIT 1`,[sid,phone,first,last])).rows[0];
- if(!guardian){guardian=(await c.query(`INSERT INTO parent_guardians(school_id,first_name,last_name,relationship,phone,email,communication_consent,sms_enabled) VALUES($1,$2,$3,$4,$5,$6,$7,$7) RETURNING id`,[sid,first,last,clean(b.guardian_relationship)||null,phone,clean(b.guardian_email)||null,b.guardian_consent===true||b.guardian_consent==='true'])).rows[0];}
- await c.query(`INSERT INTO learner_guardians(learner_id,parent_guardian_id,is_primary) VALUES($1,$2,true) ON CONFLICT(learner_id,parent_guardian_id) DO UPDATE SET is_primary=true`,[l.id,guardian.id]);
-}
-if(b.admission_application_id)await c.query(`UPDATE learner_admission_applications SET status='CONFIRMED',learner_id=$3,confirmed_at=now(),updated_at=now() WHERE id=$1 AND school_id=$2`,[b.admission_application_id,sid,l.id]);
 await c.query('COMMIT');res.status(201).json(l);}catch(e){await c.query('ROLLBACK');res.status(e.status||400).json({error:e.code==='23505'?'That admission number already exists in this school.':e.message});}finally{c.release();}});
 router.get('/:schoolId/classes',schoolBoundary,async(req,res)=>{try{res.json((await db.query(`SELECT c.*,lv.name level_name,ss.name section_name,(SELECT count(*) FROM learners l WHERE l.class_id=c.id AND l.is_active) learner_count FROM classes c JOIN school_levels lv ON lv.id=c.school_level_id JOIN school_sections ss ON ss.id=lv.school_section_id WHERE c.school_id=$1 AND c.is_active=true ORDER BY ss.sort_order,lv.sort_order,c.name,c.stream`,[req.params.schoolId])).rows)}catch(e){res.status(500).json({error:'Unable to load classes'});}});
 router.post('/:schoolId/classes',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{const b=req.body;try{await assertBelongs('school_levels',b.school_level_id,req.params.schoolId);if(!clean(b.name))return res.status(400).json({error:'Class name is required'});const q=await db.query(`INSERT INTO classes(school_id,school_level_id,name,stream) VALUES($1,$2,$3,$4) RETURNING *`,[req.params.schoolId,b.school_level_id,clean(b.name),clean(b.stream)]);res.status(201).json(q.rows[0]);}catch(e){res.status(e.status||400).json({error:e.code==='23505'?'That class and stream already exist.':e.message});}});
@@ -801,18 +633,15 @@ router.get('/:schoolId/classes/:classId/pdf',schoolBoundary,roles('SCHOOL_ADMIN'
     FROM classes c JOIN school_levels lv ON lv.id=c.school_level_id JOIN schools sc ON sc.id=c.school_id
     LEFT JOIN school_identity si ON si.school_id=c.school_id WHERE c.id=$1 AND c.school_id=$2`,[cid,sid])).rows[0];
   if(!c)return res.status(404).json({error:'Class not found'});
-  const yearId=req.query.academic_year_id;
-  if(!yearId)return res.status(400).json({error:'Academic year is required for a class register PDF.'});
-  await assertBelongs('academic_years',yearId,sid);
-  const cachedPdf=null;if(cachedPdf){res.setHeader('Content-Type','application/pdf');res.setHeader('Content-Length',String(cachedPdf.length));res.setHeader('Content-Disposition',`inline; filename="class-list-${String(c.name||'class').replace(/[^a-z0-9]+/gi,'-').toLowerCase()}.pdf"`);return res.end(cachedPdf);}
+  const cachedPdf=getClassListPdf(`${sid}|${cid}`);if(cachedPdf){res.setHeader('Content-Type','application/pdf');res.setHeader('Content-Length',String(cachedPdf.length));res.setHeader('Content-Disposition',`inline; filename="class-list-${String(c.name||'class').replace(/[^a-z0-9]+/gi,'-').toLowerCase()}.pdf"`);return res.end(cachedPdf);}
   if(req.user.role==='CLASS_TEACHER'){
    const ok=(await db.query(`SELECT 1 FROM class_teacher_assignments a JOIN teachers t ON t.id=a.teacher_id WHERE a.school_id=$1 AND a.class_id=$2 AND t.user_id=$3 LIMIT 1`,[sid,cid,req.user.user_id])).rows[0];
    if(!ok)return res.status(403).json({error:'You can only print a class list for a class assigned to you.'});
   }
-  const rows=(await db.query(`SELECT l.admission_no,l.assessment_no,l.first_name,l.middle_name,l.last_name,l.gender,e.status
-    FROM learner_enrollments e JOIN learners l ON l.id=e.learner_id AND l.school_id=e.school_id
-    WHERE e.school_id=$1 AND e.class_id=$2 AND e.academic_year_id=$3
-    ORDER BY l.last_name,l.first_name,l.id`,[sid,cid,yearId])).rows;
+  const rows=(await db.query(`SELECT l.admission_no,l.assessment_no,l.first_name,l.middle_name,l.last_name,l.gender,COALESCE(le.status,l.status,'ACTIVE') status
+    FROM learners l LEFT JOIN LATERAL (SELECT status FROM learner_enrollments WHERE school_id=$1 AND learner_id=l.id AND class_id=$2 ORDER BY enrolled_at DESC NULLS LAST LIMIT 1) le ON true
+    WHERE l.school_id=$1 AND (l.class_id=$2 OR le.status IN ('ACTIVE','COMPLETED'))
+    ORDER BY lower(trim(coalesce(l.first_name,'') || ' ' || coalesce(l.middle_name,'') || ' ' || coalesce(l.last_name,''))),l.id`,[sid,cid])).rows;
   const PDFDocument=require('pdfkit');
   const doc=new PDFDocument({size:'A4',layout:'landscape',margin:28});
   const chunks=[];doc.on('data',x=>chunks.push(x));
