@@ -1664,6 +1664,41 @@ function zelimuOpenPeopleMode(mode){
  if(classLists)classLists.style.display=teacher?'none':'';
  if(assignments)assignments.style.display=teacher?'':'none';
 
+
+ /* ZELIMU ADMINISTRATION WORKSPACE LINKS V2 */
+ const actions=section.querySelector('.section-title .actions');
+ if(actions){
+   const misplaced=document.getElementById('peopleOpenAssignments');
+   if(misplaced)misplaced.style.display='none';
+
+   let promote=document.getElementById('zelimuOpenPromotion');
+   if(!promote){
+     promote=document.createElement('button');
+     promote.id='zelimuOpenPromotion';
+     promote.type='button';
+     promote.className='btn primary';
+     promote.textContent='PROMOTE LEARNERS';
+     promote.addEventListener('click',()=>{
+       showSection('academic');
+       const panel=document.querySelector('#academic .promotion-panel');
+       if(panel)panel.scrollIntoView({block:'start'});
+     });
+     actions.appendChild(promote);
+   }
+   promote.style.display=teacher?'none':'';
+ }
+
+ const academic=document.getElementById('academic');
+ const academicActions=academic?.querySelector('.section-title');
+ if(academicActions && !document.getElementById('zelimuAcademicAssignments')){
+   const assignment=document.createElement('button');
+   assignment.id='zelimuAcademicAssignments';
+   assignment.type='button';
+   assignment.className='btn secondary';
+   assignment.textContent='TEACHER SUBJECTS & ASSIGNMENTS';
+   assignment.addEventListener('click',()=>showSection('assign'));
+   academicActions.appendChild(assignment);
+ }
  section.scrollIntoView({block:'start'});
 }
 async function openPM24(n){
