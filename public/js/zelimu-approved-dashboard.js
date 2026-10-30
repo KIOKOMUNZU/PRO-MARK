@@ -6,6 +6,17 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const nav=[
  ['Command Centre',[['⌂','Command Centre','home']]],
+ ['ADMINISTRATION',[
+  ['⚙','School Administration Setup','pm24_2'],
+  ['🎓','Learner Enrollment & Promotion','pm24_4'],
+  ['👪','Parent & Guardian Management','pm24_5'],
+  ['🕘','Daily Learner Attendance','pm24_13'],
+  ['◉','Biometrics & Access Attendance','biometrics'],
+  ['⚖','Discipline & Welfare Records','pm24_14'],
+  ['📋','Class Lists & Registers','pm24_26'],
+  ['🎓','School Leaving Certificates','leavingCertificates'],
+  ['♙','Teacher & Staff Registration','pm24_3']
+ ]],
  ['SCHOOL MANAGEMENT',[['♙','Admissions','admissions'],['♟','Learners','pm24_4'],['▣','Academics','pm24_6'],['☑','Assessments','pm24_7'],['▦','Timetable','pm24_19']]],
  ['FINANCE & RESOURCES',[['◫','Finance','pm24_28'],['▰','Transport','transport'],['⌂','Boarding','boarding'],['✣','Resources','pm24_25']]],
  ['PEOPLE & COMMUNICATION',[['♟','Staff / HR','staff_hr'],['✉','Communications','pm24_15'],['♟','Parent Portal','pm24_5']]],
