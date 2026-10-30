@@ -1038,49 +1038,7 @@ async function fetchProtectedPdfBlob(url){
 async function openProtectedPdf(url,existingPopup=null){
  const popup=existingPopup||window.open('about:blank','_blank');
  if(!popup)throw new Error('Your browser blocked the PDF window. Please allow pop-ups for ZELIMU CBC and try again.');
- try{popup.document.open();popup.document.write('<!doctype html><html><head><title>ZELIMU CBC PDF</title></head><body style="font-family:Arial,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f8fafc;color:#17365D"><div style="text-align:center"><div style="font-size:28px;font-weight:700">ZELIMU CBC</div><div style="margin-top:10px">Preparing PDF…</div><div style="margin:14px auto;width:220px;height:6px;background:#e5e7eb;border-radius:99px;overflow:hidden"><div style="width:45%;height:100%;background:#17365D"></div></div></div>\n
-<style>
-#assess .za-hub{margin:14px 0 20px}#assess .za-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:12px;margin-top:15px}#assess .za-tile{display:flex;align-items:flex-start;gap:12px;text-align:left;padding:17px;background:#fff;border:1px solid #d5e6df;border-radius:13px;color:#083c30;cursor:pointer;min-height:112px;box-shadow:0 2px 8px #073e2b0a}#assess .za-tile:hover,#assess .za-tile:focus-visible{border-color:#178653;background:#f0faf4}#assess .za-tile strong{display:block;font-size:15px;margin-bottom:6px}#assess .za-tile small{display:block;color:#536a62;font-size:12px;line-height:1.5}#assess .za-number{display:inline-grid;place-items:center;min-width:29px;height:29px;border-radius:9px;background:#e0f2e8;color:#096a3b;font-weight:800}#assess .za-header{background:#edf6f1;border-left:4px solid #178653;padding:17px;border-radius:10px}#assess .za-header h3{margin:0 0 5px}#assess .za-back{margin:10px 0 18px}#assess .za-pane[hidden],#assess .za-hub[hidden]{display:none!important}@media(max-width:620px){#assess .za-grid{grid-template-columns:1fr}#assess .za-tile{min-height:88px}}
-</style>
-<script>
-(function(){
-function initializeAssessmentHub(){
- const root=document.getElementById('assess');if(!root||root.dataset.zaHub)return;root.dataset.zaHub='1';
- const heading=root.querySelector(':scope > .section-title');
- const gradingHeading=Array.from(root.children).find(n=>n.tagName==='H3'&&n.textContent.trim()==='Grading system setup');
- if(!heading||!gradingHeading)return;
- const setup=document.createElement('div');setup.className='za-pane';setup.id='zaAssessmentSetup';
- const grading=document.createElement('div');grading.className='za-pane';grading.id='zaAssessmentGrading';
- let gradingStarted=false;
- Array.from(root.children).forEach(n=>{if(n===heading)return;if(n===gradingHeading)gradingStarted=true;(gradingStarted?grading:setup).appendChild(n)});
- const hub=document.createElement('div');hub.className='za-hub';hub.id='zaAssessmentHub';
- hub.innerHTML='<div class="za-header"><h3>Assessment Control Centre</h3><p class="muted small">Manage examinations, class subjects, mark entry, grading, approvals, performance and historical results in connected workspaces.</p></div><div class="za-grid"></div>';
- root.append(hub,setup,grading);
- const cards=[
- ['Examination Setup','Configure main examinations and optional CATs for every assigned class subject.','setup'],
- ['Class Subjects & Allocation','Open existing academic subjects and teacher/class assignments.','assign'],
- ['Teacher Mark Entry','Open the existing teacher mark-entry workspace (subject to your role).','teacherMarking'],
- ['Marks Management','Review saved marks and assessment results.','results'],
- ['Examination Control & Approval','Manage deadlines, close mark entry and publish authorised results.','markControl'],
- ['Grading Systems','Set CBC grading bands, descriptors and target classes.','grading'],
- ['Performance Analytics & Merit','Run academic analysis and generate merit lists.','analytics'],
- ['Report Cards & Results','Generate individual and class report cards.','reports'],
- ['Assessment History','Review saved results by academic year, term and class.','results']
- ];
- const grid=hub.querySelector('.za-grid');
- cards.forEach(([name,desc,target],i)=>{const b=document.createElement('button');b.type='button';b.className='za-tile';b.innerHTML='<span class="za-number">'+(i+1)+'</span><span><strong></strong><small></small></span>';b.querySelector('strong').textContent=name;b.querySelector('small').textContent=desc;b.addEventListener('click',()=>{
-  if(target==='setup'||target==='grading'){openPane(target);return;}
-  if(target==='teacherMarking' && document.getElementById('teacherMarking')?.classList.contains('teacher-only') && !document.getElementById('teacherMarking')?.offsetParent){alert('Teacher Mark Entry is available to authorised teachers. Administrators can manage marks and assignments in the other workspaces.');return;}
-  if(typeof showSection==='function'){showSection(target);document.getElementById(target)?.scrollIntoView({block:'start'});}else{alert('Workspace navigation is not ready. Please refresh.');}
- });grid.appendChild(b)});
- function openPane(target){hub.hidden=!!target;setup.hidden=target!=='setup';grading.hidden=target!=='grading';if(target){const pane=target==='setup'?setup:grading;if(!pane.querySelector('.za-back')){const back=document.createElement('button');back.type='button';back.className='btn secondary za-back';back.textContent='← Assessment Control Centre';back.addEventListener('click',()=>openPane(null));pane.prepend(back);}pane.scrollIntoView({block:'start'});}else root.scrollIntoView({block:'start'});}
- openPane(null);
-}
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initializeAssessmentHub);else initializeAssessmentHub();
-})();
-</script>
-
-</body></html>');popup.document.close();}catch{}
+ try{popup.document.open();popup.document.write('<!doctype html><html><head><title>ZELIMU CBC PDF</title></head><body style="font-family:Arial,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f8fafc;color:#17365D"><div style="text-align:center"><div style="font-size:28px;font-weight:700">ZELIMU CBC</div><div style="margin-top:10px">Preparing PDF…</div><div style="margin:14px auto;width:220px;height:6px;background:#e5e7eb;border-radius:99px;overflow:hidden"><div style="width:45%;height:100%;background:#17365D"></div></div></div></body></html>');popup.document.close();}catch{}
  try{const blob=await fetchProtectedPdfBlob(url);const u=URL.createObjectURL(blob);popup.location.href=u;setTimeout(()=>URL.revokeObjectURL(u),5*60*1000);return true;}catch(e){try{popup.close();}catch{}throw new Error(e.message||'Unable to prepare PDF.');}
 }
 async function loadGradings(){const el=$('gradingList');if(!el)return;try{const r=await api(`/api/grading/${sid}/systems`);window.pmGradingSystems=r||[];el.innerHTML=(r||[]).map(x=>`<div class="item"><b>${esc(x.name)}</b> · ${esc(x.code)} <button type="button" class="btn secondary mini edit-grading" data-grading-id="${esc(x.id)}">Edit</button><br><span class="muted small">${esc(x.description||'')} · ${Array.isArray(x.bands)?x.bands.length:0} grading levels</span></div>`).join('')||'<div class="notice">No grading systems created yet.</div>';}catch(e){el.innerHTML=`<div class="notice">${esc(e.message)}</div>`;}}
@@ -1708,48 +1666,6 @@ async function renderSchoolFinanceModule(){
 <link rel="stylesheet" href="/css/zelimu-sidebar-uniform-green.css?v=1">
 <link rel="stylesheet" href="/css/zelimu-header-branding.css?v=2">
 </head><body><h1>${esc($('schoolTitle')?.textContent||'ZELIMU CBC')}</h1><h2>OFFICIAL SCHOOL FEE RECEIPT</h2><p class="muted">Receipt No: <b>${esc(p.receipt_no)}</b></p><table><tbody><tr><th>Payment date</th><td>${esc(String(p.payment_date||'').slice(0,10))}</td></tr><tr><th>Learner</th><td>${esc(learner)}</td></tr><tr><th>Admission number</th><td>${esc(p.admission_no||'')}</td></tr><tr><th>Payment method</th><td>${esc(p.payment_method||'')}</td></tr><tr><th>Reference</th><td>${esc(p.reference||'—')}</td></tr><tr><th>Notes</th><td>${esc(p.notes||'—')}</td></tr></tbody></table><div class="total">Amount received: ${esc(p.currency)} ${fmt(p.amount)}</div><p class="muted">Generated by ZELIMU CBC School Finance</p><button onclick="window.print()">Print receipt</button>
-
-<style>
-#assess .za-hub{margin:14px 0 20px}#assess .za-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:12px;margin-top:15px}#assess .za-tile{display:flex;align-items:flex-start;gap:12px;text-align:left;padding:17px;background:#fff;border:1px solid #d5e6df;border-radius:13px;color:#083c30;cursor:pointer;min-height:112px;box-shadow:0 2px 8px #073e2b0a}#assess .za-tile:hover,#assess .za-tile:focus-visible{border-color:#178653;background:#f0faf4}#assess .za-tile strong{display:block;font-size:15px;margin-bottom:6px}#assess .za-tile small{display:block;color:#536a62;font-size:12px;line-height:1.5}#assess .za-number{display:inline-grid;place-items:center;min-width:29px;height:29px;border-radius:9px;background:#e0f2e8;color:#096a3b;font-weight:800}#assess .za-header{background:#edf6f1;border-left:4px solid #178653;padding:17px;border-radius:10px}#assess .za-header h3{margin:0 0 5px}#assess .za-back{margin:10px 0 18px}#assess .za-pane[hidden],#assess .za-hub[hidden]{display:none!important}@media(max-width:620px){#assess .za-grid{grid-template-columns:1fr}#assess .za-tile{min-height:88px}}
-</style>
-<script>
-(function(){
-function initializeAssessmentHub(){
- const root=document.getElementById('assess');if(!root||root.dataset.zaHub)return;root.dataset.zaHub='1';
- const heading=root.querySelector(':scope > .section-title');
- const gradingHeading=Array.from(root.children).find(n=>n.tagName==='H3'&&n.textContent.trim()==='Grading system setup');
- if(!heading||!gradingHeading)return;
- const setup=document.createElement('div');setup.className='za-pane';setup.id='zaAssessmentSetup';
- const grading=document.createElement('div');grading.className='za-pane';grading.id='zaAssessmentGrading';
- let gradingStarted=false;
- Array.from(root.children).forEach(n=>{if(n===heading)return;if(n===gradingHeading)gradingStarted=true;(gradingStarted?grading:setup).appendChild(n)});
- const hub=document.createElement('div');hub.className='za-hub';hub.id='zaAssessmentHub';
- hub.innerHTML='<div class="za-header"><h3>Assessment Control Centre</h3><p class="muted small">Manage examinations, class subjects, mark entry, grading, approvals, performance and historical results in connected workspaces.</p></div><div class="za-grid"></div>';
- root.append(hub,setup,grading);
- const cards=[
- ['Examination Setup','Configure main examinations and optional CATs for every assigned class subject.','setup'],
- ['Class Subjects & Allocation','Open existing academic subjects and teacher/class assignments.','assign'],
- ['Teacher Mark Entry','Open the existing teacher mark-entry workspace (subject to your role).','teacherMarking'],
- ['Marks Management','Review saved marks and assessment results.','results'],
- ['Examination Control & Approval','Manage deadlines, close mark entry and publish authorised results.','markControl'],
- ['Grading Systems','Set CBC grading bands, descriptors and target classes.','grading'],
- ['Performance Analytics & Merit','Run academic analysis and generate merit lists.','analytics'],
- ['Report Cards & Results','Generate individual and class report cards.','reports'],
- ['Assessment History','Review saved results by academic year, term and class.','results']
- ];
- const grid=hub.querySelector('.za-grid');
- cards.forEach(([name,desc,target],i)=>{const b=document.createElement('button');b.type='button';b.className='za-tile';b.innerHTML='<span class="za-number">'+(i+1)+'</span><span><strong></strong><small></small></span>';b.querySelector('strong').textContent=name;b.querySelector('small').textContent=desc;b.addEventListener('click',()=>{
-  if(target==='setup'||target==='grading'){openPane(target);return;}
-  if(target==='teacherMarking' && document.getElementById('teacherMarking')?.classList.contains('teacher-only') && !document.getElementById('teacherMarking')?.offsetParent){alert('Teacher Mark Entry is available to authorised teachers. Administrators can manage marks and assignments in the other workspaces.');return;}
-  if(typeof showSection==='function'){showSection(target);document.getElementById(target)?.scrollIntoView({block:'start'});}else{alert('Workspace navigation is not ready. Please refresh.');}
- });grid.appendChild(b)});
- function openPane(target){hub.hidden=!!target;setup.hidden=target!=='setup';grading.hidden=target!=='grading';if(target){const pane=target==='setup'?setup:grading;if(!pane.querySelector('.za-back')){const back=document.createElement('button');back.type='button';back.className='btn secondary za-back';back.textContent='← Assessment Control Centre';back.addEventListener('click',()=>openPane(null));pane.prepend(back);}pane.scrollIntoView({block:'start'});}else root.scrollIntoView({block:'start'});}
- openPane(null);
-}
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initializeAssessmentHub);else initializeAssessmentHub();
-})();
-</script>
-
 </body></html>`);receiptWindow.document.close();});
  $('sfRefresh').onclick=reload;await reload();
 }
