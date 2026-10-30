@@ -612,3 +612,14 @@ body .z7-shortcut:nth-child(4n+4) {
     grid-template-columns: repeat(2,minmax(0,1fr)) !important;
   }
 }
+
+/* ZELIMU_HEADER_CONTROLS_REPAIR_20261030 */
+body .z7-toolbar .z7-pick[hidden],body .z7-toolbar .z7-school-label[hidden]{display:none!important}
+body .z7-toolbar select.z7-pick{cursor:pointer;max-width:190px;min-width:125px;font-family:inherit;appearance:auto}
+body .z7-toolbar .z7-school-label{max-width:210px;overflow:hidden;text-overflow:ellipsis}
+body .z7-toolbar .z7-user{min-width:0;max-width:210px;white-space:normal}
+body .z7-toolbar #z7User{display:block;overflow-wrap:anywhere;line-height:1.25}
+body .z7-toolbar .z7-signout{border:1px solid #a51d29;background:#fff;color:#a51d29;border-radius:7px;padding:9px 12px;font-weight:700;cursor:pointer;white-space:nowrap}
+body .z7-toolbar .z7-signout:hover{background:#fff1f2}
+body .z7-toolbar{height:auto;min-height:70px;flex-wrap:wrap}
+body .z7-toolbar-right{flex-wrap:wrap}

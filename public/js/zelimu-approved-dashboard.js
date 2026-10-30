@@ -28,7 +28,7 @@ function make(){
  const host=document.querySelector('.zelimu-command-v1')||document.querySelector('.zc-dashboard');
  if(!host||host.querySelector('.z7'))return;
  const sidebar=`<aside class="z7-side"><div class="z7-brand"><span class="z7-logo">🎓</span><div><strong>ZELIMU CBC</strong><small>Smart Schools. Brighter Futures.</small></div></div>${nav.map(([head,items],i)=>`${i?`<div class="z7-navhead">${head}</div>`:''}<nav class="z7-nav">${items.map(([ic,name,target])=>`<button type="button" class="${target==='home'?'z7-current':''}" data-z7-target="${target}"><span class="zi">${ic}</span><span>${name}</span>${target!=='home'?'<span class="chev">›</span>':''}</button>`).join('')}</nav>`).join('')}<div class="z7-side-foot"><strong>🎓 ZELIMU CBC</strong><span>v4.0.9</span></div></aside>`;
- const toolbar=`<div class="z7-toolbar"><div class="z7-pickers"><span class="z7-pick"><span class="zi">▣</span><span id="z7School">SCHOOL</span>⌄</span><span class="z7-pick"><span class="zi">▦</span><span id="z7Year">Academic year</span>⌄</span><span class="z7-pick"><span class="zi">▣</span><span id="z7Term">Current term</span>⌄</span></div><div class="z7-toolbar-right"><input class="z7-search" id="z7Search" placeholder="Search learners, staff, modules, reports..." aria-label="Search modules"><button type="button" class="z7-bell" data-z7-target="announcements">♟</button><button type="button" class="z7-bell" data-z7-target="pm24_15">✉</button><div class="z7-user"><span class="z7-avatar">♙</span><span><span id="z7User">School Administrator</span><small id="z7Role">School account</small></span></div></div></div>`;
+ const toolbar=`<div class="z7-toolbar"><div class="z7-pickers"><span class="z7-pick z7-school-label" title="Current school"><span class="zi">▣</span><span id="z7School">SCHOOL</span></span><select class="z7-pick" id="z7SchoolSelect" aria-label="Switch school" hidden></select><select class="z7-pick" id="z7YearSelect" aria-label="Academic year"><option value="">Academic year</option></select><select class="z7-pick" id="z7TermSelect" aria-label="Current term"><option value="">Current term</option></select></div><div class="z7-toolbar-right"><input class="z7-search" id="z7Search" placeholder="Search learners, staff, modules, reports..." aria-label="Search modules"><button type="button" class="z7-bell" data-z7-target="announcements">♟</button><button type="button" class="z7-bell" data-z7-target="pm24_15">✉</button><div class="z7-user"><span class="z7-avatar">♙</span><span><span id="z7User">Signed-in user</span><small id="z7Role">School account</small></span></div><button type="button" id="z7SignOut" class="z7-signout">Sign Out</button></div></div>`;
  const actions=[['♟','New learner applications','admissions'],['▤','Fee payment verifications','pm24_28'],['♟','Leave requests (staff)','pm24_3'],['▣','Assessment entries (review)','pm24_7'],['▰','Transport route requests','transport'],['◈','Disciplinary reports','pm24_14']];
  const approvals=panel('Pending Approvals & Actions',actions.map(([ic,name,target])=>`<button type="button" class="z7-actionrow" data-z7-target="${target}"><span>${ic}</span><span>${name}</span><span>›</span></button>`).join(''),'pm24_2');
  const performance=panel('Academic Performance Trend',`<div style="display:flex;justify-content:flex-end;gap:8px"><span class="z7-select">All Classes ⌄</span><span class="z7-select">All Assessment Types ⌄</span></div>${chart('Awaiting verified assessment results')}<div class="z7-legend"><span style="color:#00835b">● Grade 7</span><span style="color:#eaa31c">● Grade 8</span><span style="color:#1479f3">● Grade 9</span></div>`,'pm24_10','Open Analytics');
@@ -148,6 +148,69 @@ function make(){
    alert('Module unavailable in existing navigation: ' + target);
 
  });
+
+ // ZELIMU_HEADER_CONTROLS_REPAIR_20261030
+ function installHeaderControls(){
+  const schoolSelect=$('z7SchoolSelect'), yearSelect=$('z7YearSelect'), termSelect=$('z7TermSelect');
+  const schoolSource=$('ownerSchoolSwitch');
+  const yearSource=$('anYear')||$('reportYear')||$('mYear');
+  const termSource=$('anTerm')||$('reportTerm')||$('mTerm');
+  function copyOptions(source,dest,placeholder){
+   if(!source||!dest)return;
+   const options=[...source.options];
+   if(!options.length)return;
+   const fingerprint=options.map(x=>x.value+':'+x.textContent).join('|');
+   if(dest.dataset.sourceFingerprint!==fingerprint){
+    dest.innerHTML='';
+    options.forEach(x=>dest.add(new Option(x.textContent,x.value,x.defaultSelected,x.selected)));
+    dest.dataset.sourceFingerprint=fingerprint;
+   }
+   dest.value=source.value;
+   if(!dest.value && !options.some(x=>x.value===''))dest.selectedIndex=source.selectedIndex;
+  }
+  function refresh(){
+   if(schoolSource && schoolSource.options.length && schoolSource.style.display!=='none'){
+    copyOptions(schoolSource,schoolSelect);
+    schoolSelect.hidden=false;
+    const label=document.querySelector('.z7-school-label');if(label)label.hidden=true;
+   }
+   copyOptions(yearSource,yearSelect);
+   copyOptions(termSource,termSelect);
+   const account=(()=>{try{return JSON.parse(localStorage.getItem('user')||'{}')}catch{return {}}})();
+   const fullName=[account.first_name,account.middle_name,account.last_name].filter(Boolean).join(' ').trim();
+   const displayName=fullName||account.name||account.email||$('who')?.textContent?.split(' · ')[0]||'Signed-in user';
+   if($('z7User'))$('z7User').textContent=displayName;
+   if($('z7Role'))$('z7Role').textContent=String(account.role||'School account').replaceAll('_',' ');
+  }
+  schoolSelect?.addEventListener('change',()=>{
+   if(!schoolSource)return;
+   schoolSource.value=schoolSelect.value;
+   schoolSource.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+  yearSelect?.addEventListener('change',()=>{
+   if(!yearSource)return;
+   yearSource.value=yearSelect.value;
+   yearSource.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+  termSelect?.addEventListener('change',()=>{
+   if(!termSource)return;
+   termSource.value=termSelect.value;
+   termSource.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+  $('z7SignOut')?.addEventListener('click',()=>{
+   const original=$('signOut');
+   if(original){original.click();return;}
+   localStorage.removeItem('token');localStorage.removeItem('user');
+   location.replace('/login.html');
+  });
+  refresh();
+  // Populate selectors after the original asynchronous dashboard data arrives.
+  let count=0;
+  const watch=setInterval(()=>{refresh();if(++count>=30)clearInterval(watch)},500);
+  window.addEventListener('load',refresh,{once:true});
+ }
+ installHeaderControls();
+
 }
 function init(){make()}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
