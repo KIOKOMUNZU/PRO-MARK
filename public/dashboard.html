@@ -1837,6 +1837,9 @@ function zelimuEnsureAdmissionsWorkspace(){
 function zelimuOpenAdmissionsV1(){
  const workspace=zelimuEnsureAdmissionsWorkspace();
  if(!workspace)return;
+ if(typeof window.zelimuMountWorkspace==='function'){
+   window.zelimuMountWorkspace(workspace);
+ }
  showSection('zelimuAdmissionsWorkspaceV2');
  workspace.scrollIntoView({block:'start'});
 }
