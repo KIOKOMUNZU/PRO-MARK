@@ -415,6 +415,7 @@ body, main, .main-content, .dashboard-main {
  <div class="pm-module-groups" id="navTabs">
   <div class="pm-module-group"><h3>01 · ADMINISTRATION</h3><div class="pm-admin-menu">
    <button data-target="pm24_2"><span class="pm-icon">⚙️</span><span>School Administration Setup</span></button>
+      <button data-target="people" data-admission-link="true"><span class="pm-icon">📝</span><span>Admissions · New Learner</span></button>
       <button data-target="pm24_4"><span class="pm-icon">🎓</span><span>Learner Enrollment &amp; Promotion</span></button>
    <button data-target="pm24_5"><span class="pm-icon">👪</span><span>Parent &amp; Guardian Management</span></button>
    <button data-target="pm24_13"><span class="pm-icon">🕘</span><span>Daily Learner Attendance</span></button>
@@ -825,6 +826,7 @@ function wireNavigation(){
     e.preventDefault();
     const target=String(b.dataset.target||'');
     if(/^pm24_\d+$/.test(target))return;
+    if(b.dataset.admissionLink==='true'){zelimuOpenAdmissionsV1();return;}
     showSection(target);
   });
   if(isTeacher && !isAdmin) openPM24(8); else openPM24(1);
@@ -1742,6 +1744,7 @@ function zelimuOpenPeopleMode(mode){
  showSection('people');
 
  const teacher=mode==='teacher';
+ const admission=mode==='admission';
  const tForm=document.getElementById('teacherForm');
  const lForm=document.getElementById('learnerForm');
 
@@ -1749,24 +1752,24 @@ function zelimuOpenPeopleMode(mode){
  if(staffArea)staffArea.style.display=teacher?'':'none';
  if(teacher){zelimuStaffTabV2('teacher');}else{const hub=document.getElementById('zelimuStaffHubV2');if(hub)hub.style.display='none';}
  if(tForm)tForm.style.display=teacher?'':'none';
- if(lForm)lForm.style.display=teacher?'none':'';
+ if(lForm)lForm.style.display=admission?'':'none';
 
  const tDirectory=document.getElementById('teacherSearch')?.closest('.portal-toolbar');
  const lDirectory=document.getElementById('learnerSearch')?.closest('.portal-toolbar');
 
  if(tDirectory)tDirectory.style.display=teacher?'':'none';
- if(lDirectory)lDirectory.style.display=teacher?'none':'';
+ if(lDirectory)lDirectory.style.display=teacher||admission?'none':'';
 
  const title=section.querySelector('.section-title h2');
  const pill=section.querySelector('.section-title .pill');
 
- if(title)title.textContent=teacher?'Teacher & Staff Registration':'Learner Enrollment & Promotion';
- if(pill)pill.textContent=teacher?'Teacher registration · directory':'Learner admission · directory';
+ if(title)title.textContent=teacher?'Teacher & Staff Registration':admission?'Admissions · New Learner':'Learner Enrollment & Promotion';
+ if(pill)pill.textContent=teacher?'Teacher registration · directory':admission?'Register once · existing school classes':'Learner directory · class movement · promotion';
 
  const classLists=document.getElementById('peopleOpenClassLists');
  const assignments=document.getElementById('peopleOpenAssignments');
 
- if(classLists)classLists.style.display=teacher?'none':'';
+ if(classLists)classLists.style.display=teacher||admission?'none':'';
  if(assignments)assignments.style.display=teacher?'':'none';
 
 
@@ -1790,7 +1793,7 @@ function zelimuOpenPeopleMode(mode){
      });
      actions.appendChild(promote);
    }
-   promote.style.display=teacher?'none':'';
+   promote.style.display=teacher||admission?'none':'';
  }
 
  const academic=document.getElementById('academic');
@@ -1811,9 +1814,14 @@ function zelimuOpenPeopleMode(mode){
    if(promotionPanel.parentElement!==section){
      section.appendChild(promotionPanel);
    }
-   promotionPanel.style.display=teacher?'none':'';
+   promotionPanel.style.display=teacher||admission?'none':'';
  }
  section.scrollIntoView({block:'start'});
+}
+function zelimuOpenAdmissionsV1(){
+ zelimuOpenPeopleMode('admission');
+ const form=document.getElementById('learnerForm');
+ if(form){form.querySelector('h3').textContent='Register new learner · Admissions';form.scrollIntoView({block:'start'});}
 }
 async function openPM24(n){
  if(n===3||n===4){
