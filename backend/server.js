@@ -12,6 +12,7 @@ app.use("/api/settings",require("./routes/settings"));
 app.use("/api/people",require("./routes/people"));
 app.use("/api/assessments",require("./routes/assessments"));
 app.use("/api/grading",require("./routes/grading"));
+app.use("/api/merit-flex",require("./routes/merit-flex"));
 app.use("/api/merit",require("./routes/merit"));
 app.use("/api/merit-weight-profiles",require("./routes/merit-v6-profiles"));
 app.use("/api/merit-v6-term",require("./routes/merit-v6-term"));
