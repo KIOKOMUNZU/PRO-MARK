@@ -596,6 +596,14 @@ body, main, .main-content, .dashboard-main {
 <div id="assessmentBulkMsg" class="notice">No changes made yet.</div>
 <div class="notice"><b>Important:</b> selecting a class applies the selected assessments to every subject already assigned to that class. No subject-by-subject repetition is required.</div>
 <h3>Configured assessments for this class / term</h3><div id="assessmentList"></div>
+<div class="card-subsection" id="meritConfigurationPanel">
+<h3>Merit Calculation Configuration</h3>
+<p class="muted small">
+Choose the examinations and CATs included in merit calculations.
+Set the calculation method and percentage weights for the selected class.
+</p>
+<div id="meritUnifiedMount"></div>
+</div>
 <h3>Grading system setup</h3><form id="gradingForm"><div class="grid"><label>Name<input name="name" placeholder="Junior CBC Grading" required></label><label>Code<input name="code" placeholder="CBC_JNR" required></label><label>Target classes<select id="gradingTargets" name="target_classes" multiple size="7"></select></label><label>Optional level-wide fallback<select id="gradingLevelTargets" name="target_levels" multiple size="5"></select></label></div><p class="muted small">Select two or more classes when they should share the same grading. You can later select different classes and save another grading system. A level-wide fallback is available for classes without a specific class grading.</p><div class="table-wrap"><table id="gradingBandTable"><thead><tr><th>Grade</th><th>Min Mark (%)</th><th>Max Mark (%)</th><th>Points</th><th>Descriptor</th><th>Remarks</th><th>Action</th></tr></thead><tbody id="gradingBandRows"></tbody></table></div><div class="actions"><button class="btn secondary" id="addGradingLevel" type="button">+ Add Level</button><button class="btn" type="submit">Save grading system</button></div><div id="gradingMsg" class="notice">Define the grading bands and ranges, then save.</div></form><div id="gradingList"></div></section>
 <section id="markControl" class="nav-managed-section card admin-only"><div class="section-title"><h2>Mark Entry Control Centre</h2><span class="pill">Deadlines · Reopen · Publish · Parent SMS · Analytics</span></div><div class="grid"><label>Academic year<select id="mcYear"></select></label><label>Term<select id="mcTerm"></select></label><label>Class<select id="mcClass"></select></label><label>Assessment<select id="mcAssessment"></select></label><label>Deadline<input id="mcDeadline" type="datetime-local"></label></div><div class="notice"><b>Teacher mark-entry control:</b> choose the class, assessment and deadline, then click <b>Save deadline</b>. The deadline applies across all subjects in that class for the selected assessment type. A blank deadline leaves mark entry open until you close it.</div><div class="actions"><button class="btn" id="saveDeadline" type="button">Save deadline</button><button class="btn secondary" id="closeAssessment" type="button">Close mark entry</button></div><div id="deadlineMsg" class="notice">Set a deadline for each assessment. Teachers are automatically locked after the deadline.</div><hr><div class="section-title"><h3>Publish results & notify parents by grade</h3><span class="pill">Select grade → review parents → Publish</span></div><div class="grid"><label>Academic year<select id="pubYear"></select></label><label>Term<select id="pubTerm"></select></label><label>Grade / Level<select id="pubLevel"></select></label></div><div id="gradePublishRoster" class="table-wrap"><div class="notice">Select a grade to load learners and parent phone numbers.</div></div><div class="actions"><button class="btn primary" id="publishGrade" type="button">Publish results & send parent SMS</button></div><div id="publishMsg" class="notice" style="display:none"></div></section><section id="leadership" class="nav-managed-section card admin-only"><div class="section-title"><h2>School Leadership & Roles</h2><span class="pill">Head · Deputy Head · Senior Teacher</span></div><div class="grid"><form id="leadershipForm"><h3>Assign leadership role</h3><label>Staff member<select id="leadershipTeacher" name="teacher_id" required></select></label><label>Role<select name="role" required><option value="HEADTEACHER">Head Teacher</option><option value="DEPUTY_HEADTEACHER">Deputy Head Teacher</option><option value="SENIOR_TEACHER">Senior Teacher</option></select></label><button class="btn" type="submit">Assign role</button><p class="muted small">The staff member must already have an active ZELIMU CBC login. Only one Head Teacher is active for a school.</p></form><div><h3>Current leadership</h3><div id="leadershipList" class="directory"></div></div></div></section><section id="results" class="nav-managed-section card admin-only"><div class="section-title"><h2>Results & Saved Marks</h2><span class="pill">Search saved marks</span></div><div class="grid"><label>Academic year<select id="resYear"></select></label><label>Term<select id="resTerm"></select></label><label>Class<select id="resClass"></select></label><label>Subject<select id="resSubject"></select></label><label>Assessment<select id="resAssessment"></select></label></div><button class="btn" id="loadResults">Load marks / results</button><div class="table-wrap"><table><thead><tr><th>Learner</th><th>Admission</th><th>Class</th><th>Subject</th><th>Assessment</th><th>Mark</th><th>Out of</th></tr></thead><tbody id="resultRows"></tbody></table></div></section>
 <section id="analytics" class="nav-managed-section card admin-or-leadership class-teacher-analytics">
@@ -614,7 +622,7 @@ body, main, .main-content, .dashboard-main {
  <button type="button" class="za-tile" data-za-tool="teachers" role="tab">👩‍🏫 <strong>Teacher &amp; Department</strong><small>Assigned subject performance</small></button>
  <button type="button" class="za-tile" data-za-tool="reports" role="tab">📄 <strong>Reports &amp; Exports</strong><small>CSV, print and report cards</small></button>
  </div><div id="zaWorkspaceDetail" class="za-detail" role="tabpanel" aria-live="polite">Select a workspace above, choose year and term, then load results.</div>
-<div id="meritUnifiedMount"></div>
+
 <section hidden id="v6WeightedPanel" class="za-detail" style="margin-top:12px" aria-label="V6 weighted term merit preview">
  <h3>V6 · Weighted Term Merit Preview</h3><p class="muted small">Independent calculation preview. Existing official merit PDFs and report cards remain unchanged. Select year, term and class using the analytics filters above.</p>
  <div class="za-v5-controls" style="flex-wrap:wrap"><button type="button" class="za-v5-btn" id="v6LoadWeights">Load assessment weights</button><button type="button" class="za-v5-btn" id="v6LoadMerit">Preview weighted merit</button><button type="button" class="za-v5-btn secondary" id="v6Export" disabled>Export preview CSV</button></div>
@@ -2723,11 +2731,66 @@ $('zaLoad').onclick=load;
 if($('zaPrint'))$('zaPrint').onclick=()=>window.print();
 if($('zaReportCards'))$('zaReportCards').onclick=()=>{const btn=document.querySelector('[data-target="reports"]');if(btn)btn.click();else alert('Open Report Cards & Results from the Academic menu.');};
 }
-async function merit(){const c=context();if(!c.year||!c.term||!c.cls){out.innerHTML='<p>Select academic year, term and a class before generating merit.</p>'+meritControls();return;}const aid=$('zaAssessment')?.value||'';out.innerHTML='<p>Loading merit rankings…</p>';const qs=new URLSearchParams({academic_year_id:c.year,term_id:c.term,class_id:c.cls});if(aid)qs.set('assessment_id',aid);const data=await get(`/api/merit/${sid()}?${qs}`);meritData=data;const rows=data.rows||[];const subjectNames=[...new Set(rows.flatMap(x=>(x.subjects||[]).map(s=>s.subject_name)))];const headers=['Position','Learner','Admission','Class','Average (%)','Total','Grade',...subjectNames];const dataRows=rows.map(x=>[x.class_rank??x.overall_rank??'—',[x.first_name,x.last_name].filter(Boolean).join(' '),x.admission_no,x.class_name,fmt(x.average_mark),fmt(x.total_mark),x.overall_grade||'—',...subjectNames.map(n=>{const s=(x.subjects||[]).find(s=>s.subject_name===n);return s?`${fmt(s.average)} ${s.grade||''}`:'—'})]);out.innerHTML=`<h3>Merit Lists</h3>${meritControls()}${kpis([['Learners with recorded marks',rows.length],['Subjects',subjectNames.length]])}${data.diagnostics?panel('Data warning',esc(data.diagnostics)):''}${panel('Learner merit and subject grades',table(headers,dataRows))}${panel('Subject rankings',table(['Subject','Average (%)','Grade','Teacher'],(data.subject_rankings||[]).map(x=>[x.subject_name,fmt(x.average),x.grade,x.teacher_name])))}`;
-$('zaMeritRun').onclick=merit;$('zaMeritPdf').onclick=()=>{const u=`/api/merit/${sid()}/pdf?${qs}`;const btn=$('meritPdf');const y=$('mYear'),t=$('mTerm'),cl=$('mClass'),a=$('mAssessment');if(y&&t&&cl&&btn){y.value=c.year;t.value=c.term;cl.value=c.cls;if(a)a.value=aid;btn.click();}else alert('Open official Merit PDF from the Merit Lists menu.');};$('zaMeritCsv').onclick=()=>csv('zelimu-merit.csv',headers,dataRows);
+async function merit(){
+ const c=context();
+ if(!c.year||!c.term||!c.cls){
+   out.hidden=false;
+   out.innerHTML='<p>Select academic year, term and class before generating merit.</p>'+meritControls();
+   $('zaMeritRun').onclick=merit;
+   return;
+ }
+ out.hidden=false;
+ out.innerHTML='<p>Generating merit rankings…</p>';
+ const qs=new URLSearchParams({
+   academic_year_id:c.year,
+   term_id:c.term,
+   class_id:c.cls
+ });
+ try{
+   const profile=await get(`/api/merit-flex/${sid()}/setup?${qs}`);
+   if(!profile.profile){
+     out.innerHTML='<p>No merit calculation configuration has been saved for this class and term. Open Examination Setup and save the merit configuration first.</p>';
+     return;
+   }
+   const data=await get(`/api/merit-flex/${sid()}/preview?${qs}`);
+   const rows=data.rows||[];
+   const headers=['Rank','Learner','Admission','Average (%)','Status'];
+   const dataRows=rows.map(r=>[
+     r.class_rank==null?'—':`${r.class_rank}/${r.class_rank_total}`,
+     [r.first_name,r.last_name].filter(Boolean).join(' '),
+     r.admission_no||'—',
+     fmt(r.average),
+     r.complete?'Complete':'Incomplete'
+   ]);
+   out.innerHTML=`<h3>Merit Lists</h3>
+   ${kpis([
+     ['Learners',data.summary?.learners||0],
+     ['Complete',data.summary?.complete||0],
+     ['Incomplete',data.summary?.incomplete||0]
+   ])}
+   ${panel('Class merit rankings',table(headers,dataRows))}
+   <div class="za-v5-controls">
+     <button class="za-v5-btn" id="zaMeritRun">Generate merit</button>
+     <button class="za-v5-btn secondary" id="zaMeritCsv">Download CSV</button>
+     <button class="za-v5-btn secondary" id="zaMeritPrint">Print / Save PDF</button>
+   </div>
+   <p class="muted small">Calculated using the saved assessment configuration. Print / Save PDF creates a browser PDF of this preview, not the existing official merit PDF.</p>`;
+   $('zaMeritRun').onclick=merit;
+   $('zaMeritCsv').onclick=()=>csv('zelimu-weighted-merit.csv',headers,dataRows);
+   $('zaMeritPrint').onclick=()=>window.print();
+ }catch(e){
+   out.innerHTML=`<p role="alert">${esc(e.message)}</p>
+   <button class="za-v5-btn" id="zaMeritRetry">Retry Generate Merit</button>`;
+   $('zaMeritRetry').onclick=merit;
+ }
 }
 function meritControls(){return `<div class="za-v5-controls"><label>Assessment<select id="zaAssessment"><option value="">Weighted term / configured main exams</option>${options(assessments,a=>`${a.name} · ${a.assessment_type}`)}</select></label><button class="za-v5-btn" id="zaMeritRun">Generate merit</button><button class="za-v5-btn secondary" id="zaMeritPdf">Official merit PDF</button><button class="za-v5-btn secondary" id="zaMeritCsv">Export merit CSV</button></div><p class="muted small">The term result currently uses the existing merit backend. Weighting and completeness rules are under separate validation; do not treat unverified rankings as final.</p>`;}
-async function load(){const c=context();if(!c.year||!c.term){out.innerHTML='<p>Select academic year and term in the analysis filters above.</p>';return;}try{out.innerHTML='<p>Loading verified school records…</p>';await loadAssessmentOptions();if(selected==='merit'){out.innerHTML='';out.hidden=true;return;}out.hidden=false;const qs=new URLSearchParams({academic_year_id:c.year,term_id:c.term});if(c.level)qs.set('level_id',c.level);if(c.cls)qs.set('class_id',c.cls);if(c.teacher)qs.set('teacher_id',c.teacher);render(await get(`/api/communications/${sid()}/analytics?${qs}`));}catch(e){out.innerHTML=`<p role="alert">${esc(e.message)}</p><button type="button" class="za-v5-btn" id="zaRetry">Retry</button>`;$('zaRetry').onclick=load;}}
+async function load(){const c=context();if(!c.year||!c.term){out.innerHTML='<p>Select academic year and term in the analysis filters above.</p>';return;}try{out.innerHTML='<p>Loading verified school records…</p>';await loadAssessmentOptions();if(selected==='merit'){
+ out.hidden=false;
+ out.innerHTML='<h3>Merit Lists</h3>'+meritControls();
+ $('zaMeritRun').onclick=merit;
+ return;
+}out.hidden=false;const qs=new URLSearchParams({academic_year_id:c.year,term_id:c.term});if(c.level)qs.set('level_id',c.level);if(c.cls)qs.set('class_id',c.cls);if(c.teacher)qs.set('teacher_id',c.teacher);render(await get(`/api/communications/${sid()}/analytics?${qs}`));}catch(e){out.innerHTML=`<p role="alert">${esc(e.message)}</p><button type="button" class="za-v5-btn" id="zaRetry">Retry</button>`;$('zaRetry').onclick=load;}}
 const v6Panel=document.getElementById('v6WeightedPanel');
 function syncMeritPanel(){if(v6Panel)v6Panel.hidden=true;}
 syncMeritPanel();
