@@ -612,6 +612,12 @@ body, main, .main-content, .dashboard-main {
  <button type="button" class="za-tile" data-za-tool="teachers" role="tab">👩‍🏫 <strong>Teacher &amp; Department</strong><small>Assigned subject performance</small></button>
  <button type="button" class="za-tile" data-za-tool="reports" role="tab">📄 <strong>Reports &amp; Exports</strong><small>CSV, print and report cards</small></button>
  </div><div id="zaWorkspaceDetail" class="za-detail" role="tabpanel" aria-live="polite">Select a workspace above, choose year and term, then load results.</div>
+<section id="v6WeightedPanel" class="za-detail" style="margin-top:12px" aria-label="V6 weighted term merit preview">
+ <h3>V6 · Weighted Term Merit Preview</h3><p class="muted small">Independent calculation preview. Existing official merit PDFs and report cards remain unchanged. Select year, term and class using the analytics filters below.</p>
+ <div class="za-v5-controls" style="flex-wrap:wrap"><button type="button" class="za-v5-btn" id="v6LoadWeights">Load assessment weights</button><button type="button" class="za-v5-btn" id="v6LoadMerit">Preview weighted merit</button><button type="button" class="za-v5-btn secondary" id="v6Export" disabled>Export preview CSV</button></div>
+ <div id="v6Weights" class="muted small" aria-live="polite">Weights have not been loaded.</div>
+ <div id="v6Results" aria-live="polite">No weighted results loaded.</div>
+ </section>
  </div>
 <div class="analytics-toolbar grid"><label>Academic year<select id="anYear"></select></label><label>Term<select id="anTerm"></select></label><label>Grade / Level<select id="anLevel"><option value="">All grades</option></select></label><label>Class<select id="anClass"><option value="">All classes</option></select></label><label>Subject Teacher<select id="anTeacher"><option value="">All teachers</option></select></label></div>
 <div class="actions" style="display:none"><button class="btn primary" id="loadAnalytics" type="button">Run performance analysis</button></div>
@@ -2710,6 +2716,39 @@ root.addEventListener('click',e=>{const b=e.target.closest('[data-za-tool]');if(
 root.querySelector('[data-za-tool="school"]')?.setAttribute('aria-selected','true');
 out.innerHTML='<p>Select the academic year and term below to load the School Performance workspace.</p><button type="button" class="za-v5-btn" id="zaInitialLoad">Load school performance</button>';
 $('zaInitialLoad').onclick=load;
+})();
+</script>
+<script id="v6WeightedPreviewLogic">
+(function(){
+'use strict';
+const $=id=>document.getElementById(id),root=$('v6WeightedPanel');if(!root)return;
+const escapeHtml=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const user=(()=>{try{return JSON.parse(localStorage.getItem('user')||'{}')}catch{return {}}})();
+const sid=()=>user.school_id||new URLSearchParams(location.search).get('school_id');
+const admin=['SCHOOL_ADMIN','ADMIN','HEADTEACHER'].includes(user.role);
+const labels={OPENER:'Opener',CAT_1:'CAT 1',CAT_2:'CAT 2',MID_TERM:'Mid Term',END_TERM:'End Term'};
+const types=Object.keys(labels);
+const ctx=()=>({academic_year_id:$('anYear')?.value,term_id:$('anTerm')?.value,class_id:$('anClass')?.value});
+const valid=()=>{const c=ctx();if(!sid()||!c.academic_year_id||!c.term_id||!c.class_id)throw Error('Choose academic year, term and a class in the analytics filters first.');return c};
+async function request(path,opts){const r=await fetch(path,{...opts,headers:{'Authorization':'Bearer '+localStorage.getItem('token'),'Content-Type':'application/json',...(opts?.headers||{})}});const j=await r.json().catch(()=>({}));if(!r.ok)throw Error(j.error||'Request failed ('+r.status+').');return j;}
+const weights=$('v6Weights'),out=$('v6Results'),exportBtn=$('v6Export');let result=null;
+function setError(el,e){el.textContent=e.message||String(e);el.setAttribute('role','alert')}
+function profileRow(p){return '<div><b>'+escapeHtml(p.class_id?'Class override':'School default')+'</b>: '+(p.weights||[]).map(w=>escapeHtml(labels[w.assessment_type]||w.assessment_type)+': '+escapeHtml(w.weight)+'%').join(' · ')+'</div>'}
+function editor(profiles,c){if(!admin)return '';
+const chosen=profiles.find(p=>p.class_id===c.class_id)||profiles.find(p=>!p.class_id);
+const current=Object.fromEntries((chosen?.weights||[]).map(w=>[w.assessment_type,w.weight]));
+return '<div style="margin-top:10px"><h4>Administrator assessment weights</h4><label>Save for <select id="v6ProfileScope"><option value="default">School default</option><option value="class">Selected class override</option></select></label><div class="za-v5-controls" style="flex-wrap:wrap">'+types.map(t=>'<label>'+labels[t]+' (%)<input type="number" min="0" max="100" step="0.01" style="width:82px" data-v6-type="'+t+'" value="'+escapeHtml(current[t]??0)+'"></label>').join('')+'</div><p class="muted small">Set unused assessments to 0. Included assessments must total exactly 100%.</p><button type="button" class="za-v5-btn" id="v6SaveWeights">Save weights</button><span id="v6SaveStatus" aria-live="polite"></span></div>';
+}
+async function loadProfiles(){const c=valid();weights.textContent='Loading assessment weights…';const qs=new URLSearchParams({academic_year_id:c.academic_year_id,term_id:c.term_id});try{const data=await request('/api/merit-v6-profiles/'+encodeURIComponent(sid())+'?'+qs);const profiles=data.profiles||[];weights.innerHTML=(profiles.length?profiles.map(profileRow).join(''):'No weighting profiles configured for this term.')+editor(profiles,c);
+const save=$('v6SaveWeights');if(save)save.onclick=async()=>{const status=$('v6SaveStatus');const raw=types.map(t=>({assessment_type:t,weight:Number(root.querySelector('[data-v6-type="'+t+'"]').value)})).filter(w=>w.weight>0);const sum=raw.reduce((n,w)=>n+w.weight,0);if(!raw.length||Math.abs(sum-100)>0.0000001){status.textContent='Included weights must total 100%. Current total: '+sum+'%.';return;}const scope=$('v6ProfileScope').value;const payload={...c,class_id:scope==='class'?c.class_id:null,weights:raw};status.textContent='Saving…';try{await request('/api/merit-v6-profiles/'+encodeURIComponent(sid()),{method:'PUT',body:JSON.stringify(payload)});status.textContent='Saved.';await loadProfiles();}catch(e){setError(status,e)}};
+}catch(e){setError(weights,e)}}
+async function loadMerit(){let c;try{c=valid()}catch(e){setError(out,e);return;}out.textContent='Calculating weighted term merit…';exportBtn.disabled=true;result=null;try{const qs=new URLSearchParams(c);const data=await request('/api/merit-v6-term/'+encodeURIComponent(sid())+'?'+qs);result=data;const rows=data.rows||[];const fmt=v=>v==null||!Number.isFinite(Number(v))?'—':Number(v).toFixed(2)+'%';const rank=r=>r.class_rank==null?'—':String(r.class_rank)+'/'+String(r.class_rank_total??data.summary?.complete??rows.length);
+out.innerHTML='<p><b>Preview only — not an official report card or PDF.</b> Complete: '+escapeHtml(data.summary?.complete??0)+' · Incomplete: '+escapeHtml(data.summary?.incomplete??0)+'</p><div class="za-v5-scroll"><table class="za-v5-table"><thead><tr><th>Class rank</th><th>Learner</th><th>Admission</th><th>Average</th><th>Status</th></tr></thead><tbody>'+rows.map(r=>'<tr><td>'+escapeHtml(rank(r))+'</td><td>'+escapeHtml([r.first_name,r.last_name].filter(Boolean).join(' '))+'</td><td>'+escapeHtml(r.admission_no)+'</td><td>'+escapeHtml(fmt(r.average))+'</td><td>'+escapeHtml(r.complete?'Complete':r.incomplete_reason||'Incomplete')+'</td></tr>').join('')+'</tbody></table></div>';exportBtn.disabled=false;
+}catch(e){setError(out,e)}}
+function csvCell(v){return '"'+String(v??'').replace(/"/g,'""').replace(/[\r\n]/g,' ')+'"'}
+exportBtn.onclick=()=>{if(!result)return;const rows=[['Class rank','Learner','Admission','Average (%)','Status'],...(result.rows||[]).map(r=>[r.class_rank==null?'':r.class_rank,[r.first_name,r.last_name].filter(Boolean).join(' '),r.admission_no,r.average,r.complete?'Complete':r.incomplete_reason||'Incomplete'])];const blob=new Blob(['\ufeff'+rows.map(row=>row.map(csvCell).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'});const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download='zelimu-v6-weighted-term-preview.csv';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)};
+$('v6LoadWeights').onclick=()=>loadProfiles().catch(e=>setError(weights,e));$('v6LoadMerit').onclick=loadMerit;
+['anYear','anTerm','anClass'].forEach(id=>$(id)?.addEventListener('change',()=>{result=null;exportBtn.disabled=true;out.textContent='Filters changed. Load weighted merit again.';weights.textContent='Filters changed. Reload assessment weights.'}));
 })();
 </script>
 </body></html>
