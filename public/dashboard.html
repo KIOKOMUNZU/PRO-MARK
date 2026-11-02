@@ -2733,54 +2733,101 @@ if($('zaReportCards'))$('zaReportCards').onclick=()=>{const btn=document.querySe
 }
 async function merit(){
  const c=context();
+ out.hidden=false;
  if(!c.year||!c.term||!c.cls){
-   out.hidden=false;
-   out.innerHTML='<p>Select academic year, term and class before generating merit.</p>'+meritControls();
+   out.innerHTML='<p>Select academic year, term and class.</p>'+meritControls();
    $('zaMeritRun').onclick=merit;
    return;
  }
- out.hidden=false;
- out.innerHTML='<p>Generating merit rankings…</p>';
+ out.innerHTML='<p>Generating complete merit register…</p>';
  const qs=new URLSearchParams({
-   academic_year_id:c.year,
-   term_id:c.term,
-   class_id:c.cls
+   academic_year_id:c.year,term_id:c.term,class_id:c.cls
  });
  try{
-   const profile=await get(`/api/merit-flex/${sid()}/setup?${qs}`);
-   if(!profile.profile){
-     out.innerHTML='<p>No merit calculation configuration has been saved for this class and term. Open Examination Setup and save the merit configuration first.</p>';
-     return;
-   }
+   const setup=await get(`/api/merit-flex/${sid()}/setup?${qs}`);
+   if(!setup.profile)throw Error('Save the merit configuration in Examination Setup first.');
    const data=await get(`/api/merit-flex/${sid()}/preview?${qs}`);
-   const rows=data.rows||[];
-   const headers=['Rank','Learner','Admission','Average (%)','Status'];
-   const dataRows=rows.map(r=>[
-     r.class_rank==null?'—':`${r.class_rank}/${r.class_rank_total}`,
-     [r.first_name,r.last_name].filter(Boolean).join(' '),
-     r.admission_no||'—',
-     fmt(r.average),
-     r.complete?'Complete':'Incomplete'
-   ]);
+   const subjects=data.subjects||[];
+   const rows=(data.rows||[]).slice().sort((a,b)=>
+     (a.class_rank??999999)-(b.class_rank??999999)
+   );
+   const schoolName=(()=>{
+     try{return JSON.parse(localStorage.getItem('user')||'{}').school_name||'ZELIMU CBC';}
+     catch{return 'ZELIMU CBC';}
+   })();
+   const label=id=>$(id)?.selectedOptions?.[0]?.textContent?.trim()||'—';
+   const year=label('anYear'),term=label('anTerm'),cls=label('anClass');
+   const headers=['Position','Learner','Admission',
+     ...subjects.map(x=>x.name),'Total','Average (%)','Status'];
+   const dataRows=rows.map(r=>{
+     const scores=subjects.map(subject=>{
+       const result=(r.subjects||[]).find(x=>
+         String(x.subject_id)===String(subject.id));
+       return result?.score==null?'—':fmt(result.score);
+     });
+     const completeScores=(r.subjects||[])
+       .filter(x=>x.score!=null).map(x=>Number(x.score));
+     const total=r.complete
+       ?fmt(completeScores.reduce((a,b)=>a+b,0)):'—';
+     return [
+       r.class_rank==null?'—':`${r.class_rank}/${r.class_rank_total}`,
+       [r.first_name,r.last_name].filter(Boolean).join(' '),
+       r.admission_no||'—',
+       ...scores,total,fmt(r.average),
+       r.complete?'Complete':'Incomplete'
+     ];
+   });
+   const documentHtml=`<div id="zelimuMeritDocument">
+     <div style="text-align:center;margin-bottom:18px">
+       <h2 style="margin:0">${esc(schoolName)}</h2>
+       <h3 style="margin:8px 0">CLASS MERIT LIST</h3>
+       <p>Academic Year: ${esc(year)} |
+          Term: ${esc(term)} | Class: ${esc(cls)}</p>
+     </div>
+     ${kpis([
+       ['Learners',rows.length],
+       ['Ranked',data.summary?.complete||0],
+       ['Incomplete',data.summary?.incomplete||0]
+     ])}
+     ${table(headers,dataRows)}
+     <p style="margin-top:18px;font-size:12px">
+       Subject scores are weighted percentages according to the saved
+       merit configuration. A dash indicates missing or incomplete results.
+       Only learners with complete results receive a rank.
+     </p>
+   </div>`;
    out.innerHTML=`<h3>Merit Lists</h3>
-   ${kpis([
-     ['Learners',data.summary?.learners||0],
-     ['Complete',data.summary?.complete||0],
-     ['Incomplete',data.summary?.incomplete||0]
-   ])}
-   ${panel('Class merit rankings',table(headers,dataRows))}
-   <div class="za-v5-controls">
-     <button class="za-v5-btn" id="zaMeritRun">Generate merit</button>
-     <button class="za-v5-btn secondary" id="zaMeritCsv">Download CSV</button>
-     <button class="za-v5-btn secondary" id="zaMeritPrint">Print / Save PDF</button>
-   </div>
-   <p class="muted small">Calculated using the saved assessment configuration. Print / Save PDF creates a browser PDF of this preview, not the existing official merit PDF.</p>`;
+     <div class="za-v5-controls">
+       <button class="za-v5-btn" id="zaMeritRun">Generate Merit</button>
+       <button class="za-v5-btn secondary" id="zaMeritCsv">Download CSV</button>
+       <button class="za-v5-btn secondary" id="zaMeritDocument">Open Merit Document / PDF</button>
+     </div>${documentHtml}`;
    $('zaMeritRun').onclick=merit;
-   $('zaMeritCsv').onclick=()=>csv('zelimu-weighted-merit.csv',headers,dataRows);
-   $('zaMeritPrint').onclick=()=>window.print();
+   $('zaMeritCsv').onclick=()=>csv('zelimu-class-merit.csv',headers,dataRows);
+   $('zaMeritDocument').onclick=()=>{
+     const w=window.open('','_blank');
+     if(!w){alert('Allow pop-ups to open the merit document.');return;}
+     w.document.open();
+     w.document.write(`<!doctype html><html><head>
+       <title>Class Merit List</title>
+       <style>
+       body{font-family:Arial,sans-serif;color:#183b2c;margin:25px}
+       table{width:100%;border-collapse:collapse;font-size:11px}
+       th,td{border:1px solid #aaa;padding:7px;text-align:left}
+       th{background:#e8f2eb}
+       .za-v5-kpis{display:flex;gap:25px;margin:15px 0}
+       .za-v5-kpi{display:grid}
+       button{padding:10px 16px;margin-bottom:18px}
+       @page{size:A4 landscape;margin:12mm}
+       @media print{button{display:none}}
+       </style></head><body>
+       <button onclick="window.print()">Print / Save as PDF</button>
+       ${documentHtml}</body></html>`);
+     w.document.close();
+   };
  }catch(e){
    out.innerHTML=`<p role="alert">${esc(e.message)}</p>
-   <button class="za-v5-btn" id="zaMeritRetry">Retry Generate Merit</button>`;
+     <button class="za-v5-btn" id="zaMeritRetry">Retry</button>`;
    $('zaMeritRetry').onclick=merit;
  }
 }
