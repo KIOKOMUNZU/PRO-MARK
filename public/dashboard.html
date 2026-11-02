@@ -614,7 +614,8 @@ body, main, .main-content, .dashboard-main {
  <button type="button" class="za-tile" data-za-tool="teachers" role="tab">👩‍🏫 <strong>Teacher &amp; Department</strong><small>Assigned subject performance</small></button>
  <button type="button" class="za-tile" data-za-tool="reports" role="tab">📄 <strong>Reports &amp; Exports</strong><small>CSV, print and report cards</small></button>
  </div><div id="zaWorkspaceDetail" class="za-detail" role="tabpanel" aria-live="polite">Select a workspace above, choose year and term, then load results.</div>
-<section id="v6WeightedPanel" class="za-detail" style="margin-top:12px" aria-label="V6 weighted term merit preview">
+<div id="meritUnifiedMount"></div>
+<section hidden id="v6WeightedPanel" class="za-detail" style="margin-top:12px" aria-label="V6 weighted term merit preview">
  <h3>V6 · Weighted Term Merit Preview</h3><p class="muted small">Independent calculation preview. Existing official merit PDFs and report cards remain unchanged. Select year, term and class using the analytics filters above.</p>
  <div class="za-v5-controls" style="flex-wrap:wrap"><button type="button" class="za-v5-btn" id="v6LoadWeights">Load assessment weights</button><button type="button" class="za-v5-btn" id="v6LoadMerit">Preview weighted merit</button><button type="button" class="za-v5-btn secondary" id="v6Export" disabled>Export preview CSV</button></div>
  <div id="v6Weights" class="muted small" aria-live="polite">Weights have not been loaded.</div>
@@ -2775,5 +2776,5 @@ $('v6LoadWeights').onclick=()=>loadProfiles().catch(e=>setError(weights,e));$('v
 ['anYear','anTerm','anClass'].forEach(id=>$(id)?.addEventListener('change',()=>{result=null;exportBtn.disabled=true;out.textContent='Filters changed. Load weighted merit again.';weights.textContent='Filters changed. Reload assessment weights.'}));
 })();
 </script>
-<script src="/flexible-merit-ui.js" defer></script>
+<script src="/merit-unified.js" defer></script>
 </body></html>
