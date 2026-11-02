@@ -3,7 +3,8 @@
 const express=require('express');
 const db=require('../db');
 const {authenticate,schoolBoundary,roles}=require('../middleware/auth');
-const {calculateTermLearners,validateWeights}=require('../services/merit-v6-engine');
+const {validateWeights}=require('../services/merit-v6-engine');
+const {calculateClass}=require('../services/merit-v6-assessment-match');
 const router=express.Router();
 router.use(authenticate);
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -21,7 +22,7 @@ router.get('/:schoolId',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER
   const def=profiles.rows.find(p=>p.class_id===null),override=profiles.rows.find(p=>String(p.class_id)===c);
   if(!def&&!override)return res.status(409).json({error:'Configure a school or class assessment weighting profile before generating weighted term merit.'});
   const weights=validateWeights((override||def).weights);
-  const assessments=(await db.query(`SELECT id,assessment_type,class_id,max_mark FROM assessments WHERE school_id=$1 AND academic_year_id=$2 AND term_id=$3 AND (class_id IS NULL OR class_id=$4) AND subject_id IS NULL`,[sid,y,t,c])).rows;
+  const assessments=(await db.query(`SELECT id,assessment_type,class_id,subject_id,max_mark FROM assessments WHERE school_id=$1 AND academic_year_id=$2 AND term_id=$3 AND (class_id IS NULL OR class_id=$4)`,[sid,y,t,c])).rows;
   const expected=(await db.query(`SELECT DISTINCT subject_id FROM teacher_subject_assignments WHERE school_id=$1 AND academic_year_id=$2 AND class_id=$3 AND (term_id=$4 OR term_id IS NULL)`,[sid,y,c,t])).rows.map(x=>String(x.subject_id));
   if(!expected.length)return res.status(409).json({error:'No assigned subjects found for this class/year/term. Assign subjects before generating official merit.'});
   const learners=(await db.query(`SELECT l.id learner_id,l.admission_no,l.first_name,l.last_name,$3::uuid class_id,$4::uuid school_level_id FROM learners l JOIN learner_enrollments le ON le.learner_id=l.id AND le.school_id=l.school_id AND le.academic_year_id=$2 WHERE l.school_id=$1 AND le.class_id=$3 AND COALESCE(le.status,'ACTIVE') IN ('ACTIVE','COMPLETED')`,[sid,y,c,scope.rows[0].school_level_id])).rows;
@@ -29,7 +30,7 @@ router.get('/:schoolId',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER
   const byLearner=new Map();
   for(const m of marks){const id=String(m.learner_id),sub=String(m.subject_id);if(!byLearner.has(id))byLearner.set(id,new Map());const sm=byLearner.get(id);if(!sm.has(sub))sm.set(sub,[]);const max=Number(m.max_mark);sm.get(sub).push({assessment_id:m.assessment_id,percent:m.mark===null||!Number.isFinite(max)||max<=0?null:Number(m.mark)/max*100});}
   const input=learners.map(l=>({...l,subjects:expected.map(subject_id=>({subject_id,marks:byLearner.get(String(l.learner_id))?.get(subject_id)||[]}))}));
-  const result=calculateTermLearners(input,assessments,{default:weights,overrides:{}},{[c]:expected});
+  const result=calculateClass(input,assessments,weights,expected);
   // This endpoint is class-scoped. Grade-wide ranking requires a separate multi-class calculation.
   res.json({basis:'WEIGHTED_TERM_V6',scope:'CLASS',academic_year_id:y,term_id:t,class:scope.rows[0],weights,expected_subject_ids:expected,rows:result.map(r=>({...r,overall_rank:null,overall_rank_total:null})),summary:{learners:result.length,complete:result.filter(r=>r.complete).length,incomplete:result.filter(r=>!r.complete).length}});
  }catch(e){res.status(e.status||500).json({error:e.status?e.message:'Unable to calculate weighted term merit.',detail:process.env.NODE_ENV==='production'?undefined:e.message});}
