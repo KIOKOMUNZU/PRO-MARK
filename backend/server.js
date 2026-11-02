@@ -13,6 +13,7 @@ app.use("/api/people",require("./routes/people"));
 app.use("/api/assessments",require("./routes/assessments"));
 app.use("/api/grading",require("./routes/grading"));
 app.use("/api/merit",require("./routes/merit"));
+app.use("/api/merit-weight-profiles",require("./routes/merit-v6-profiles"));
 app.use("/api/reports",require("./routes/reports"));
 app.use("/api/documents",require("./routes/documents"));
 app.use("/api/communications",require("./routes/communications"));
