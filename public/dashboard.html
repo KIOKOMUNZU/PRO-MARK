@@ -2716,8 +2716,154 @@ const bars=(rows,label,value)=>rows.length?rows.slice(0,25).map(x=>`<div class="
 function csv(name,heads,rows){const q=v=>'"'+String(v??'').replace(/"/g,'""').replace(/[\r\n]+/g,' ')+'"';const text=[heads,...rows].map(row=>row.map(q).join(',')).join('\r\n');const url=URL.createObjectURL(new Blob(['\ufeff'+text],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function commonControls(){return `<div class="za-v5-controls"><button class="za-v5-btn" id="zaLoad">Load ${esc(selected==='merit'?'merit':'analysis')}</button><button class="za-v5-btn secondary" id="zaCsv">Export this view (CSV)</button></div>`;}
 async function loadAssessmentOptions(){const c=context();assessments=[];if(!c.year||!c.term)return;const raw=await get(`/api/assessments/${sid()}/${c.year}/${c.term}`);const rows=Array.isArray(raw)?raw:(raw.assessments||[]);const seen=new Set();assessments=rows.filter(a=>!c.cls||!a.class_id||String(a.class_id)===String(c.cls)).filter(a=>{const key=String(a.id);if(seen.has(key))return false;seen.add(key);return true;});}
+
+async function subjectDeviationRegister(){
+  const c=context();
+  const holder=$('zaSubjectDeviation');
+  if(!holder)return;
+
+  if(!c.cls){
+    holder.innerHTML='<p>Select a class above to view learner deviations.</p>';
+    return;
+  }
+
+  try{
+    const setup=await get(
+      `/api/merit-flex/${sid()}/setup?`+
+      new URLSearchParams({
+        academic_year_id:c.year,
+        term_id:c.term,
+        class_id:c.cls
+      })
+    );
+
+    const available=setup.assessments||[];
+    const subjectIds=[...new Set(
+      available.filter(a=>a.subject_id).map(a=>String(a.subject_id))
+    )];
+
+    const subjects=await Promise.all(subjectIds.map(async id=>{
+      const data=await get(
+        `/api/merit-flex/${sid()}/preview?`+
+        new URLSearchParams({
+          academic_year_id:c.year,
+          term_id:c.term,
+          class_id:c.cls
+        })
+      ).catch(()=>null);
+      return data?.subjects?.find(x=>String(x.id)===id)||
+        {id,name:available.find(a=>String(a.subject_id)===id)?.subject_name||id};
+    }));
+
+    const unique=new Map(subjects.map(x=>[String(x.id),x]));
+
+    holder.innerHTML=`
+      <div class="za-v5-controls">
+        <label>Subject
+          <select id="zaDevSubject">
+            ${options([...unique.values()],x=>x.name)}
+          </select>
+        </label>
+        <label>Previous examination
+          <select id="zaDevPrevious"></select>
+        </label>
+        <label>Current examination
+          <select id="zaDevCurrent"></select>
+        </label>
+        <button class="za-v5-btn" id="zaDevRun">
+          Compare examinations
+        </button>
+      </div>
+      <div id="zaDevResults"></div>`;
+
+    const subjectSelect=$('zaDevSubject');
+    const previous=$('zaDevPrevious');
+    const current=$('zaDevCurrent');
+
+    function refresh(){
+      const subject=subjectSelect.value;
+      const exams=available.filter(a=>
+        !a.subject_id||String(a.subject_id)===subject
+      ).sort((a,b)=>
+        Number(a.assessment_order??999)-
+        Number(b.assessment_order??999)
+      );
+
+      previous.innerHTML=options(exams,a=>a.name);
+      current.innerHTML=options(exams,a=>a.name);
+      if(exams.length>1){
+        previous.selectedIndex=0;
+        current.selectedIndex=1;
+      }
+    }
+
+    subjectSelect.onchange=refresh;
+    refresh();
+
+    $('zaDevRun').onclick=async()=>{
+      const results=$('zaDevResults');
+      results.textContent='Calculating learner deviations…';
+
+      try{
+        const q=new URLSearchParams({
+          academic_year_id:c.year,
+          term_id:c.term,
+          class_id:c.cls,
+          subject_id:subjectSelect.value,
+          previous_assessment_id:previous.value,
+          current_assessment_id:current.value
+        });
+
+        const data=await get(
+          `/api/subject-deviation/${sid()}?${q}`
+        );
+
+        const heads=[
+          'Admission','Learner','Previous','Current','DEV'
+        ];
+
+        const rows=(data.rows||[]).map(r=>[
+          r.admission_no||'—',
+          r.learner_name,
+          fmt(r.previous),
+          fmt(r.current),
+          r.deviation==null?'—':
+            (r.deviation>0?'+':'')+fmt(r.deviation)
+        ]);
+
+        const x=data.summary||{};
+
+        results.innerHTML=
+          kpis([
+            ['Learners',x.learners??0],
+            ['Compared',x.compared??0],
+            ['Improved',x.improved??0],
+            ['Declined',x.declined??0],
+            ['Unchanged',x.unchanged??0],
+            ['Previous mean',fmt(x.previous_mean)],
+            ['Current mean',fmt(x.current_mean)],
+            ['Mean deviation',
+              x.mean_deviation==null?'—':
+              (x.mean_deviation>0?'+':'')+fmt(x.mean_deviation)]
+          ])+
+          table(heads,rows)+
+          '<button class="za-v5-btn secondary" id="zaDevCsv">'+
+          'Download deviation CSV</button>';
+
+        $('zaDevCsv').onclick=()=>csv(
+          'zelimu-subject-deviation.csv',heads,rows
+        );
+      }catch(e){
+        results.textContent=e.message;
+      }
+    };
+  }catch(e){
+    holder.textContent=e.message;
+  }
+}
+
 function render(data){cached=data;const r=data||{},o=r.overall||{};let html='';let exportRows=[],exportHeads=[];
-if(selected==='subjects'){const rows=r.subjects||[];html=kpis([['Subjects',rows.length],['Assessed learners',o.learners??'—']])+panel('Subject averages',bars(rows,'name','average'))+panel('Learning-area breakdown',table(['Subject','Average (%)','Learners'],rows.map(x=>[x.name,fmt(x.average),x.learners??x.learner_count??'—'])))+panel('Grade distribution',table(['Learning area','Learners','Grade counts'],(r.subject_grade_distribution||[]).map(x=>[x.subject_name,x.total,Object.entries(x.grades||{}).map(([k,v])=>`${k}: ${v}`).join(' · ')])));exportHeads=['Subject','Average (%)'];exportRows=rows.map(x=>[x.name,x.average]);}
+if(selected==='subjects'){html=panel('Subject-by-subject learner deviation','<div id="zaSubjectDeviation"></div>');const rows=r.subjects||[];html=kpis([['Subjects',rows.length],['Assessed learners',o.learners??'—']])+panel('Subject averages',bars(rows,'name','average'))+panel('Learning-area breakdown',table(['Subject','Average (%)','Learners'],rows.map(x=>[x.name,fmt(x.average),x.learners??x.learner_count??'—'])))+panel('Grade distribution',table(['Learning area','Learners','Grade counts'],(r.subject_grade_distribution||[]).map(x=>[x.subject_name,x.total,Object.entries(x.grades||{}).map(([k,v])=>`${k}: ${v}`).join(' · ')])));exportHeads=['Subject','Average (%)'];exportRows=rows.map(x=>[x.name,x.average]);}
 else if(selected==='classes'){const rows=r.streams||[];html=kpis([['Classes / streams',rows.length],['Mean (%)',fmt(o.mean_mark)]])+panel('Class and stream averages',bars(rows,'class_name','average'))+panel('Comparison table',table(['Class','Stream','Average (%)'],rows.map(x=>[x.class_name,x.stream||'—',fmt(x.average)])))+panel('Class trends',table(['Class','Term','Average (%)'],(r.class_trends||[]).map(x=>[x.class_name,x.term_name,fmt(x.average)])));exportHeads=['Class','Stream','Average (%)'];exportRows=rows.map(x=>[x.class_name,x.stream,x.average]);}
 else if(selected==='school'){const rows=r.term_trends||[];html=kpis([['Learners assessed',o.learners??'—'],['School mean (%)',fmt(o.mean_mark)],['Median (%)',fmt(o.median_mark)],['Marks entered',o.mark_entries??'—']])+panel('Term-to-term school performance',table(['Term','Average (%)'],rows.map(x=>[x.term_name,fmt(x.average)])))+panel('Competency distribution',table(['Level','Learners'],Object.entries(r.proficiency_distribution||{}).map(([k,v])=>[k,v])))+panel('Gender comparison',table(['Gender','Learners','Average (%)'],(r.gender||[]).map(x=>[x.gender,x.learners,fmt(x.average)])));exportHeads=['Term','Average (%)'];exportRows=rows.map(x=>[x.term_name,x.average]);}
 else if(selected==='learners'){const rows=r.learner_trajectories||[];html=kpis([['Learner trajectories',rows.length],['Top improvers',(r.top_improvers||[]).length]])+panel('Learner term progress',table(['Learner','Class','T1','T2','T3','Change'],rows.map(x=>[x.learner_name,x.class_name,...[1,2,3].map(n=>fmt((x.terms||[]).find(t=>Number(t.term_no)===n)?.average)),fmt(x.change)])))+panel('Top improvers',table(['Learner','Class','Improvement'],(r.top_improvers||[]).map(x=>[x.learner_name,x.class_name,fmt(x.change)])))+panel('Learners requiring support',table(['Learner','Class','Change'],(r.top_decliners||[]).map(x=>[x.learner_name,x.class_name,fmt(x.change)])));exportHeads=['Learner','Class','Change'];exportRows=rows.map(x=>[x.learner_name,x.class_name,x.change]);}
@@ -2726,112 +2872,367 @@ else if(selected==='teachers'){const rows=r.teacher_performance||[];html=kpis([[
 else if(selected==='reports'){html=kpis([['Available learner trends',(r.learner_trajectories||[]).length],['Subjects',(r.subjects||[]).length]])+panel('Academic reports',`<p>Download the selected analysis as CSV, print this workspace, or open the existing official PDF report-card module.</p><div class="za-v5-controls"><button class="za-v5-btn" id="zaPrint">Print current analysis</button><button class="za-v5-btn secondary" id="zaReportCards">Open official report cards</button></div>`)+panel('Performance overview',table(['Subject','Average (%)'],(r.subjects||[]).map(x=>[x.name,fmt(x.average)])));exportHeads=['Subject','Average (%)'];exportRows=(r.subjects||[]).map(x=>[x.name,x.average]);}
 else return;
 out.innerHTML=`<h3>${esc(root.querySelector('[aria-selected="true"] strong')?.textContent||'Analytics')}</h3>${commonControls()}${html}`;
+if(selected==='subjects')subjectDeviationRegister();
 const csvBtn=$('zaCsv');if(csvBtn)csvBtn.onclick=()=>csv(`zelimu-${selected}.csv`,exportHeads,exportRows);
 $('zaLoad').onclick=load;
 if($('zaPrint'))$('zaPrint').onclick=()=>window.print();
 if($('zaReportCards'))$('zaReportCards').onclick=()=>{const btn=document.querySelector('[data-target="reports"]');if(btn)btn.click();else alert('Open Report Cards & Results from the Academic menu.');};
 }
+
+let meritExamSelection='';
+
+function meritGroups(items){
+ const groups=new Map();
+ for(const a of items){
+  const name=String(a.name||'').trim();
+  const key=name.toUpperCase().replace(/\s+/g,' ');
+  if(!key)continue;
+  if(!groups.has(key))
+   groups.set(key,{
+    key,name,
+    order:Number(a.assessment_order??999)
+   });
+ }
+ return [...groups.values()].sort((a,b)=>
+  a.order-b.order||a.name.localeCompare(b.name)
+ );
+}
+
+function meritControls(){
+ const groups=meritGroups(assessments);
+ return `<div class="za-v5-controls">
+  <label>Examination
+   <select id="zaAssessment">
+    <option value="">Overall Term Merit</option>
+    ${groups.map(g=>`<option value="${esc(g.key)}"
+     ${meritExamSelection===g.key?'selected':''}>
+     ${esc(g.name)}</option>`).join('')}
+   </select>
+  </label>
+  <button class="za-v5-btn" id="zaMeritRun">
+   Generate Merit
+  </button>
+ </div>`;
+}
+
+function meritBind(){
+ const select=$('zaAssessment');
+ if(select)select.onchange=()=>meritExamSelection=select.value;
+ const run=$('zaMeritRun');
+ if(run)run.onclick=merit;
+}
+
+function meritGrade(score,bands){
+ if(score==null)return '—';
+ const b=(bands||[]).find(x=>
+  Number(score)>=Number(x.min_mark)&&
+  Number(score)<=Number(x.max_mark)
+ );
+ return b?.label||'—';
+}
+
+function meritSubjectScore(row,id){
+ const x=(row.subjects||[]).find(s=>
+  String(s.subject_id)===String(id)
+ );
+ return x?.score==null?null:Number(x.score);
+}
+
+function meritCommonAverage(row,subjectIds){
+ if(!row)return null;
+ const scores=subjectIds.map(id=>meritSubjectScore(row,id));
+ if(!scores.length||scores.some(v=>v==null))return null;
+ return scores.reduce((a,b)=>a+b,0)/scores.length;
+}
+
 async function merit(){
  const c=context();
  out.hidden=false;
+
  if(!c.year||!c.term||!c.cls){
-   out.innerHTML='<p>Select academic year, term and class.</p>'+meritControls();
-   $('zaMeritRun').onclick=merit;
-   return;
+  out.innerHTML='<p>Select year, term and class.</p>'+
+   meritControls();
+  meritBind();
+  return;
  }
- out.innerHTML='<p>Generating complete merit register…</p>';
- const qs=new URLSearchParams({
-   academic_year_id:c.year,term_id:c.term,class_id:c.cls
- });
+
+ out.innerHTML='<p>Generating merit register…</p>';
+
  try{
-   const setup=await get(`/api/merit-flex/${sid()}/setup?${qs}`);
-   if(!setup.profile)throw Error('Save the merit configuration in Examination Setup first.');
-   const data=await get(`/api/merit-flex/${sid()}/preview?${qs}`);
-   const subjects=data.subjects||[];
-   const rows=(data.rows||[]).slice().sort((a,b)=>
-     (a.class_rank??999999)-(b.class_rank??999999)
+  const base=new URLSearchParams({
+   academic_year_id:c.year,
+   term_id:c.term,
+   class_id:c.cls
+  });
+
+  const setup=await get(
+   `/api/merit-flex/${sid()}/setup?${base}`
+  );
+
+  const all=setup.assessments||[];
+  const groups=meritGroups(all);
+
+  const selected=meritExamSelection;
+  const query=new URLSearchParams(base);
+
+  if(selected){
+   const group=groups.find(g=>g.key===selected);
+   if(!group)throw Error('Selected examination not found.');
+   query.set('assessment_name',group.name);
+  }else if(!setup.profile){
+   throw Error(
+    'Save the overall term merit configuration in Examination Setup.'
    );
-   const schoolName=(()=>{
-     try{return JSON.parse(localStorage.getItem('user')||'{}').school_name||'ZELIMU CBC';}
-     catch{return 'ZELIMU CBC';}
-   })();
-   const label=id=>$(id)?.selectedOptions?.[0]?.textContent?.trim()||'—';
-   const year=label('anYear'),term=label('anTerm'),cls=label('anClass');
-   const headers=['Position','Learner','Admission',
-     ...subjects.map(x=>x.name),'Total','Average (%)','Status'];
-   const dataRows=rows.map(r=>{
-     const scores=subjects.map(subject=>{
-       const result=(r.subjects||[]).find(x=>
-         String(x.subject_id)===String(subject.id));
-       return result?.score==null?'—':fmt(result.score);
-     });
-     const completeScores=(r.subjects||[])
-       .filter(x=>x.score!=null).map(x=>Number(x.score));
-     const total=r.complete
-       ?fmt(completeScores.reduce((a,b)=>a+b,0)):'—';
-     return [
-       r.class_rank==null?'—':`${r.class_rank}/${r.class_rank_total}`,
-       [r.first_name,r.last_name].filter(Boolean).join(' '),
-       r.admission_no||'—',
-       ...scores,total,fmt(r.average),
-       r.complete?'Complete':'Incomplete'
-     ];
-   });
-   const documentHtml=`<div id="zelimuMeritDocument">
-     <div style="text-align:center;margin-bottom:18px">
-       <h2 style="margin:0">${esc(schoolName)}</h2>
-       <h3 style="margin:8px 0">CLASS MERIT LIST</h3>
-       <p>Academic Year: ${esc(year)} |
-          Term: ${esc(term)} | Class: ${esc(cls)}</p>
-     </div>
-     ${kpis([
-       ['Learners',rows.length],
-       ['Ranked',data.summary?.complete||0],
-       ['Incomplete',data.summary?.incomplete||0]
-     ])}
-     ${table(headers,dataRows)}
-     <p style="margin-top:18px;font-size:12px">
-       Subject scores are weighted percentages according to the saved
-       merit configuration. A dash indicates missing or incomplete results.
-       Only learners with complete results receive a rank.
-     </p>
+  }
+
+  const data=await get(
+   `/api/merit-flex/${sid()}/preview?${query}`
+  );
+
+  const subjects=data.subjects||[];
+  const rows=(data.rows||[]).slice().sort((a,b)=>
+   (a.class_rank??999999)-(b.class_rank??999999)
+  );
+
+  let previous=null;
+  let previousName=null;
+
+  if(selected){
+   const index=groups.findIndex(g=>g.key===selected);
+   if(index>0){
+    previousName=groups[index-1].name;
+    const q=new URLSearchParams(base);
+    q.set('assessment_name',previousName);
+    previous=await get(
+     `/api/merit-flex/${sid()}/preview?${q}`
+    );
+   }
+  }
+
+  const previousMap=new Map(
+   (previous?.rows||[]).map(r=>[
+    String(r.learner_id),r
+   ])
+  );
+
+  const previousSubjects=new Set(
+   (previous?.subjects||[]).map(s=>String(s.id))
+  );
+
+  const commonSubjectIds=subjects
+   .map(s=>String(s.id))
+   .filter(id=>previousSubjects.has(id));
+
+  const grading=await get(
+   `/api/grading/${sid()}/systems`
+  ).catch(()=>null);
+
+  const systems=Array.isArray(grading)
+   ?grading
+   :grading?.systems||[];
+
+  const classSystem=systems.find(system=>
+   (system.target_class_ids||[]).some(id=>
+    String(id)===String(c.cls)
+   )
+  );
+
+  const bands=classSystem?.bands||[];
+
+  const headers=[
+   'POS','ADMISSION','LEARNER',
+   ...subjects.map(s=>s.code||s.name),
+   'TOTAL','MEAN','GRADE','DEV'
+  ];
+
+  const dataRows=rows.map(r=>{
+   const scores=subjects.map(s=>
+    meritSubjectScore(r,s.id)
+   );
+
+   const total=r.complete&&scores.every(x=>x!=null)
+    ?scores.reduce((a,b)=>a+b,0):null;
+
+   const old=previousMap.get(String(r.learner_id));
+
+   const currentComparable=meritCommonAverage(
+    r,commonSubjectIds
+   );
+   const previousComparable=meritCommonAverage(
+    old,commonSubjectIds
+   );
+
+   const deviation=
+    currentComparable==null||previousComparable==null
+     ?null:currentComparable-previousComparable;
+
+   return [
+    r.class_rank==null?'—':
+     `${r.class_rank}/${r.class_rank_total}`,
+    r.admission_no||'—',
+    [r.first_name,r.last_name].filter(Boolean).join(' '),
+    ...subjects.map((s,i)=>{
+     const subject=(r.subjects||[]).find(x=>
+      String(x.subject_id)===String(s.id)
+     );
+     if(scores[i]==null)return '—';
+     const grade=subject?.grade||
+      (bands.length?meritGrade(scores[i],bands):'—');
+     return `${fmt(scores[i])} ${grade==='—'?'':grade}`.trim();
+    }),
+    fmt(total),
+    fmt(r.average),
+    r.overall_grade||
+     (bands.length?meritGrade(r.average,bands):'—'),
+    deviation==null?'—':
+     `${deviation>0?'+':''}${fmt(deviation)}`
+   ];
+  });
+
+  const school=data.school||{};
+  const schoolName=school.name||'ZELIMU CBC';
+  const logo=String(school.logo_url||'');
+  const safeLogo=logo.startsWith('data:image/')
+   ?logo:'';
+
+  const title=selected
+   ?groups.find(g=>g.key===selected)?.name||selected
+   :'OVERALL TERM';
+
+  const label=id=>
+   $(id)?.selectedOptions?.[0]?.textContent?.trim()||'—';
+
+  const heading=`${title.toUpperCase()} MERIT LIST`;
+
+  const headerHtml=`
+   <div class="zelimu-merit-heading">
+    ${safeLogo?`<img class="zelimu-merit-logo"
+      src="${esc(safeLogo)}" alt="School logo">`:''}
+    <div>
+     <h2>${esc(schoolName)}</h2>
+     ${school.motto?`<p>${esc(school.motto)}</p>`:''}
+     <h3>${esc(heading)}</h3>
+     <p>${esc(label('anYear'))} |
+      ${esc(label('anTerm'))} |
+      ${esc(label('anClass'))}</p>
+    </div>
    </div>`;
-   out.innerHTML=`<h3>Merit Lists</h3>
-     <div class="za-v5-controls">
-       <button class="za-v5-btn" id="zaMeritRun">Generate Merit</button>
-       <button class="za-v5-btn secondary" id="zaMeritCsv">Download CSV</button>
-       <button class="za-v5-btn secondary" id="zaMeritDocument">Open Merit Document / PDF</button>
-     </div>${documentHtml}`;
-   $('zaMeritRun').onclick=merit;
-   $('zaMeritCsv').onclick=()=>csv('zelimu-class-merit.csv',headers,dataRows);
-   $('zaMeritDocument').onclick=()=>{
-     const w=window.open('','_blank');
-     if(!w){alert('Allow pop-ups to open the merit document.');return;}
-     w.document.open();
-     w.document.write(`<!doctype html><html><head>
-       <title>Class Merit List</title>
-       <style>
-       body{font-family:Arial,sans-serif;color:#183b2c;margin:25px}
-       table{width:100%;border-collapse:collapse;font-size:11px}
-       th,td{border:1px solid #aaa;padding:7px;text-align:left}
-       th{background:#e8f2eb}
-       .za-v5-kpis{display:flex;gap:25px;margin:15px 0}
-       .za-v5-kpi{display:grid}
-       button{padding:10px 16px;margin-bottom:18px}
-       @page{size:A4 landscape;margin:12mm}
-       @media print{button{display:none}}
-       </style></head><body>
-       <button onclick="window.print()">Print / Save as PDF</button>
-       ${documentHtml}</body></html>`);
-     w.document.close();
-   };
+
+  const note=previousName
+   ?`DEV compares ${title} with ${previousName}
+     using subjects with complete marks in both examinations.`
+   :'DEV is unavailable without a preceding comparable examination.';
+
+  const documentHtml=`
+   <div id="zelimuMeritDocument">
+    ${safeLogo&&school.watermark_enabled!==false
+      ?`<img class="zelimu-merit-watermark"
+        src="${esc(safeLogo)}" alt="">`:''}
+    ${headerHtml}
+    <p class="zelimu-merit-summary">
+     Learners: ${rows.length} |
+     Ranked: ${data.summary?.complete??0} |
+     Incomplete: ${data.summary?.incomplete??0}
+    </p>
+    ${table(headers,dataRows)}
+    <p class="zelimu-merit-note">${esc(note)}</p>
+    ${!data.grading_configured
+      ?'<p>Grading configuration unavailable; verify grades before official use.</p>'
+      :''}
+   </div>`;
+
+  out.innerHTML=`
+   <h3>Merit Lists</h3>
+   ${meritControls()}
+   <div class="za-v5-controls">
+    <button class="za-v5-btn secondary" id="zaMeritCsv">
+     Download CSV
+    </button>
+    <button class="za-v5-btn secondary" id="zaMeritDocument">
+     Open A4 Merit Document / PDF
+    </button>
+   </div>
+   ${documentHtml}`;
+
+  meritBind();
+
+  $('zaMeritCsv').onclick=()=>csv(
+   'zelimu-merit.csv',headers,dataRows
+  );
+
+  $('zaMeritDocument').onclick=()=>{
+   const w=window.open('','_blank');
+   if(!w){
+    alert('Allow pop-ups to open the merit document.');
+    return;
+   }
+
+   w.document.open();
+   w.document.write(`<!doctype html>
+    <html><head>
+    <meta charset="utf-8">
+    <title>${esc(heading)}</title>
+    <style>
+     @page{size:A4 landscape;margin:8mm}
+     *{box-sizing:border-box}
+     body{font-family:Arial,sans-serif;color:#173c2a;margin:0}
+     .zelimu-merit-heading{
+      display:flex;align-items:center;justify-content:center;
+      gap:12px;text-align:center;margin-bottom:8px
+     }
+     .zelimu-merit-heading h2{font-size:17px;margin:2px}
+     .zelimu-merit-heading h3{font-size:13px;margin:4px}
+     .zelimu-merit-heading p{font-size:10px;margin:3px}
+     .zelimu-merit-logo{width:55px;height:55px;object-fit:contain}
+     .zelimu-merit-watermark{
+      position:fixed;width:125mm;height:125mm;
+      object-fit:contain;left:75mm;top:38mm;
+      opacity:.055;z-index:-1
+     }
+     .zelimu-merit-summary{
+      text-align:center;font-size:10px;font-weight:bold
+     }
+     .za-v5-scroll{overflow:visible;max-height:none}
+     .za-v5-table{
+      width:100%;border-collapse:collapse;
+      table-layout:fixed;font-size:8px
+     }
+     .za-v5-table th,.za-v5-table td{
+      border:1px solid #8a9b90;padding:3px 2px;
+      overflow-wrap:anywhere;text-align:center
+     }
+     .za-v5-table th{
+      background:#e8f2eb;position:static
+     }
+     .za-v5-table td:nth-child(3){
+      text-align:left
+     }
+     thead{display:table-header-group}
+     tr{break-inside:avoid}
+     .zelimu-merit-note{font-size:9px;margin-top:8px}
+     .za-v5-kpis{display:none}
+     .print-button{
+      padding:9px 14px;margin-bottom:12px;
+      background:#087e51;color:white;border:0
+     }
+     @media print{.print-button{display:none}}
+    </style></head><body>
+    <button class="print-button" onclick="window.print()">
+     Print / Save as PDF
+    </button>
+    ${documentHtml}
+    </body></html>`);
+   w.document.close();
+  };
+
  }catch(e){
-   out.innerHTML=`<p role="alert">${esc(e.message)}</p>
-     <button class="za-v5-btn" id="zaMeritRetry">Retry</button>`;
-   $('zaMeritRetry').onclick=merit;
+  out.innerHTML=`
+   <p role="alert">${esc(e.message)}</p>
+   ${meritControls()}`;
+  meritBind();
  }
 }
-function meritControls(){return `<div class="za-v5-controls"><label>Assessment<select id="zaAssessment"><option value="">Weighted term / configured main exams</option>${options(assessments,a=>`${a.name} · ${a.assessment_type}`)}</select></label><button class="za-v5-btn" id="zaMeritRun">Generate merit</button><button class="za-v5-btn secondary" id="zaMeritPdf">Official merit PDF</button><button class="za-v5-btn secondary" id="zaMeritCsv">Export merit CSV</button></div><p class="muted small">The term result currently uses the existing merit backend. Weighting and completeness rules are under separate validation; do not treat unverified rankings as final.</p>`;}
+
 async function load(){const c=context();if(!c.year||!c.term){out.innerHTML='<p>Select academic year and term in the analysis filters above.</p>';return;}try{out.innerHTML='<p>Loading verified school records…</p>';await loadAssessmentOptions();if(selected==='merit'){
  out.hidden=false;
  out.innerHTML='<h3>Merit Lists</h3>'+meritControls();
