@@ -2775,4 +2775,5 @@ $('v6LoadWeights').onclick=()=>loadProfiles().catch(e=>setError(weights,e));$('v
 ['anYear','anTerm','anClass'].forEach(id=>$(id)?.addEventListener('change',()=>{result=null;exportBtn.disabled=true;out.textContent='Filters changed. Load weighted merit again.';weights.textContent='Filters changed. Reload assessment weights.'}));
 })();
 </script>
+<script src="/flexible-merit-ui.js" defer></script>
 </body></html>
