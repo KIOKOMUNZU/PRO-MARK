@@ -11,7 +11,10 @@ function validateBands(bands){
  for(let i=1;i<sorted.length;i++){
   const prev=sorted[i-1],cur=sorted[i];
   if(cur.min<=prev.max+0.0001)throw Error('Grading bands overlap');
-  if(integerBands ? cur.min!==prev.max+1 : cur.min>prev.max+0.0001)throw Error('Grading bands contain a gap');
+  if(integerBands
+      ? cur.min!==prev.max+1
+      : Math.round((cur.min-prev.max)*10)/10>0.1+0.000001
+    )throw Error('Grading bands contain a gap');
  }
  return sorted;
 }

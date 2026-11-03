@@ -237,9 +237,10 @@ router.get('/:schoolId/preview',schoolBoundary,view,async(req,res)=>{
    if(value==null || !Number.isFinite(Number(value)))
     return null;
 
+   const rounded=Math.round((Number(value)+Number.EPSILON)*10)/10;
    const band=grading.find(b=>
-    Number(value)>=Number(b.min_mark) &&
-    Number(value)<=Number(b.max_mark)
+    rounded>=Number(b.min_mark) &&
+    rounded<=Number(b.max_mark)
    );
 
    return band?.label||null;
