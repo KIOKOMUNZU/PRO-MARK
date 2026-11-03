@@ -1085,7 +1085,7 @@ function renderGradingClassChecks(){
  }
 }
 
-function initGradingEditor(){const target=$('gradingTargets'),levelTarget=$('gradingLevelTargets'),body=$('gradingBandRows');if(target){const classes=roleAllowedClasses(state.classes||[]);target.innerHTML=classes.map(x=>`<option value="${esc(x.id)}">${esc(`${x.name||''} ${x.stream||''} · ${x.level_name||''}`.trim())}</option>`).join('')||'<option disabled>No classes found for this school</option>';}if(levelTarget){const levels=(state.structure||[]);levelTarget.innerHTML=levels.map(x=>`<option value="${esc(x.level_id)}">${esc(`${x.section_name||''} · ${x.name||''}`)}</option>`).join('')||'<option disabled>No levels found</option>';}if(body&&!body.children.length)defaultGradingRows().forEach(addGradingRow);renderGradingClassChecks();}safeOn('addGradingLevel','click',()=>addGradingRow());safeOn('gradingList','click',e=>{const b=e.target.closest('.edit-grading');if(!b)return;const x=(window.pmGradingSystems||[]).find(v=>String(v.id)===String(b.dataset.gradingId));if(!x)return;const f=$('gradingForm');f.dataset.editId=x.id;f.name.value=x.name||'';f.code.value=x.code||'';if(f.description)f.description.value=x.description||'';document.querySelectorAll('#gradingTargets option').forEach(o=>o.selected=(x.target_class_ids||[]).some(id=>String(id)===String(o.value)));document.querySelectorAll('#gradingLevelTargets option').forEach(o=>o.selected=(x.target_level_ids||[]).some(id=>String(id)===String(o.value)));renderGradingClassChecks();document.getElementById('gradingBandRows').innerHTML='';(Array.isArray(x.bands)?x.bands:[]).forEach(addGradingRow);$('gradingMsg').textContent=`Editing ${x.name}. Save grading system to apply the changes.`;showSection('academic');window.scrollTo({top:document.getElementById('academic')?.offsetTop||0,behavior:'smooth'});});
+function initGradingEditor(){const target=$('gradingTargets'),levelTarget=$('gradingLevelTargets'),body=$('gradingBandRows');if(target){const classes=roleAllowedClasses(state.classes||[]);target.innerHTML=classes.map(x=>`<option value="${esc(x.id)}">${esc(`${x.name||''} ${x.stream||''} · ${x.level_name||''}`.trim())}</option>`).join('')||'<option disabled>No classes found for this school</option>';}if(levelTarget){const levels=(state.structure||[]);levelTarget.innerHTML=levels.map(x=>`<option value="${esc(x.level_id)}">${esc(`${x.section_name||''} · ${x.name||''}`)}</option>`).join('')||'<option disabled>No levels found</option>';}if(body&&!body.children.length)defaultGradingRows().forEach(addGradingRow);renderGradingClassChecks();}safeOn('addGradingLevel','click',()=>addGradingRow());safeOn('gradingList','click',e=>{const b=e.target.closest('.edit-grading');if(!b)return;const x=(window.pmGradingSystems||[]).find(v=>String(v.id)===String(b.dataset.gradingId));if(!x)return;const f=$('gradingForm');f.dataset.editId=x.id;f.name.value=x.name||'';f.code.value=x.code||'';if(f.description)f.description.value=x.description||'';document.querySelectorAll('#gradingTargets option').forEach(o=>o.selected=(x.target_class_ids||[]).some(id=>String(id)===String(o.value)));document.querySelectorAll('#gradingLevelTargets option').forEach(o=>o.selected=(x.target_level_ids||[]).some(id=>String(id)===String(o.value)));renderGradingClassChecks();document.getElementById('gradingBandRows').innerHTML='';(Array.isArray(x.bands)?x.bands:[]).forEach(addGradingRow);$('gradingMsg').textContent=`Editing ${x.name}. Save grading system to apply the changes.`;document.getElementById('gradingForm')?.scrollIntoView({behavior:'smooth',block:'start'});});
 safeOn('gradingBandRows','click',e=>{if(e.target.closest('.remove-grade-row')){const tr=e.target.closest('tr');if(tr)tr.remove();}});
 function wireAssessmentForms(){
  safeOn('createClassAssessments','click',createClassAssessments);
@@ -1121,7 +1121,7 @@ async function openProtectedPdf(url,existingPopup=null){
  try{popup.document.open();popup.document.write('<!doctype html><html><head><title>ZELIMU CBC PDF</title></head><body style="font-family:Arial,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f8fafc;color:#17365D"><div style="text-align:center"><div style="font-size:28px;font-weight:700">ZELIMU CBC</div><div style="margin-top:10px">Preparing PDF…</div><div style="margin:14px auto;width:220px;height:6px;background:#e5e7eb;border-radius:99px;overflow:hidden"><div style="width:45%;height:100%;background:#17365D"></div></div></div></body></html>');popup.document.close();}catch{}
  try{const blob=await fetchProtectedPdfBlob(url);const u=URL.createObjectURL(blob);popup.location.href=u;setTimeout(()=>URL.revokeObjectURL(u),5*60*1000);return true;}catch(e){try{popup.close();}catch{}throw new Error(e.message||'Unable to prepare PDF.');}
 }
-async function loadGradings(){const el=$('gradingList');if(!el)return;try{const r=await api(`/api/grading/${sid}/systems`);window.pmGradingSystems=r||[];el.innerHTML=(r||[]).map(x=>`<div class="item"><b>${esc(x.name)}</b> · ${esc(x.code)} <button type="button" class="btn secondary mini edit-grading" data-grading-id="${esc(x.id)}">Edit</button><br><span class="muted small">${esc(x.description||'')} · ${Array.isArray(x.bands)?x.bands.length:0} grading levels</span></div>`).join('')||'<div class="notice">No grading systems created yet.</div>';}catch(e){el.innerHTML=`<div class="notice">${esc(e.message)}</div>`;}}
+async function loadGradings(){const el=$('gradingList');if(!el)return;try{const r=await api(`/api/grading/${sid}/systems`);window.pmGradingSystems=r||[];el.innerHTML=(r||[]).map(x=>`<div class="item"><b>${esc(x.name)}</b> · ${esc(x.code)} <button type="button" class="btn secondary mini edit-grading" data-grading-id="${esc(x.id)}">Edit</button> <button type="button" class="btn secondary mini remove-grading" data-grading-id="${esc(x.id)}" style="color:#b91c1c;border-color:#b91c1c">Remove</button><br><span class="muted small">${esc(x.description||'')} · ${Array.isArray(x.bands)?x.bands.length:0} grading levels</span></div>`).join('')||'<div class="notice">No grading systems created yet.</div>';}catch(e){el.innerHTML=`<div class="notice">${esc(e.message)}</div>`;}}
 function initPromotion(){const fill=(id,arr,empty)=>opts($(id),arr,x=>`${x.name||x.class_name||x.year_label||''}${x.stream?' '+x.stream:''}`,empty);fill('promotionSourceYear',state.years,'Select source year…');fill('promotionDestinationYear',state.years,'Select destination year…');const sourceClasses=state.classes,destClasses=state.classes;fill('promotionSourceClass',sourceClasses,'Select source class…');fill('promotionDestinationClass',destClasses,'Select destination class…');const autoDestination=()=>{const sc=state.classes.find(x=>String(x.id)===String($('promotionSourceClass').value));if(!sc)return;const sourceLevel=state.classes.filter(x=>String(x.school_level_id)===String(sc.school_level_id));const levelRows=state.classes.map(x=>({id:x.school_level_id,name:x.level_name,sort:Number(x.sort_order||0)})).filter((x,i,a)=>a.findIndex(y=>String(y.id)===String(x.id))===i).sort((a,b)=>a.sort-b.sort);const idx=levelRows.findIndex(x=>String(x.id)===String(sc.school_level_id));const nextLevel=idx>=0?levelRows[idx+1]:null;let candidate=nextLevel?state.classes.filter(x=>String(x.school_level_id)===String(nextLevel.id)):[];if(sc.stream)candidate=candidate.filter(x=>String(x.stream||'').toLowerCase()===String(sc.stream||'').toLowerCase());if(!candidate.length&&nextLevel)candidate=state.classes.filter(x=>String(x.school_level_id)===String(nextLevel.id));if(candidate[0]){$('promotionDestinationClass').value=candidate[0].id;$('promotionStatus').textContent=`Suggested destination: ${candidate[0].name} ${candidate[0].stream||''}. You can change it before promoting.`;}};safeOn('promotionSourceYear','change',async()=>{const y=$('promotionSourceYear').value;if(!y)return;const next=state.years.find(x=>Number(x.year_label)===Number(state.years.find(z=>String(z.id)===String(y))?.year_label)+1);if(next)$('promotionDestinationYear').value=next.id;try{const r=await api(`/api/people/${sid}/enrollments/${y}`);state.promotionEnrollments=r;$('promotionStatus').textContent=`${r.length} learner(s) found in source year.`;$('promotionLearners').innerHTML='';autoDestination();}catch(e){$('promotionStatus').textContent=e.message;}});safeOn('promotionSourceClass','change',()=>{if(state.promotionEnrollments){const c=$('promotionSourceClass').value;const r=state.promotionEnrollments.filter(x=>String(x.class_id)===String(c));$('promotionStatus').textContent=`${r.length} learner(s) found in the selected source class.`;autoDestination();}});safeOn('loadPromotionLearners','click',async()=>{const y=$('promotionSourceYear').value,c=$('promotionSourceClass').value;if(!y||!c)return alert('Select source academic year and source class first.');try{const r=await api(`/api/people/${sid}/enrollments/${y}`);state.promotionEnrollments=r.filter(x=>String(x.class_id)===String(c));$('promotionLearners').innerHTML=state.promotionEnrollments.map((x,i)=>`<label class="item"><input type="checkbox" class="promotion-learner" value="${x.learner_id}" checked> ${i+1}. ${esc([x.first_name,x.middle_name,x.last_name].filter(Boolean).join(' '))} · ${esc(x.admission_no||'')}</label>`).join('')||'<div class="notice">No learners found.</div>';}catch(e){alert(e.message);}});safeOn('promoteSelected','click',async()=>{const ids=[...document.querySelectorAll('.promotion-learner:checked')].map(x=>x.value);const sy=$('promotionSourceYear').value,sc=$('promotionSourceClass').value,dy=$('promotionDestinationYear').value,dc=$('promotionDestinationClass').value;if(!ids.length||!sy||!sc||!dy||!dc)return alert('Select source/destination and at least one learner.');if(!confirm(`Promote ${ids.length} selected learner(s) to the destination class? Historical marks will remain in the source year.`))return;try{const r=await api(`/api/people/${sid}/promote`,{method:'POST',body:{learner_ids:ids,source_year_id:sy,source_class_id:sc,destination_year_id:dy,destination_class_id:dc}});$('promotionStatus').textContent=`Successfully promoted ${r.promoted} learner(s) into ${r.destination.class} ${r.destination.stream||''} for ${r.destination.year}.`;await load();}catch(e){alert(e.message);}});}
 
 function wireAllCore(){wireSignOut();wireNavigation();wirePeopleForms();wireAcademicForms();wireAssignmentForms();wireTeacherAssignmentManager();wireAssessmentForms();wireDynamicButtons();wireReportButtons();}
@@ -3326,5 +3326,40 @@ $('v6LoadWeights').onclick=()=>loadProfiles().catch(e=>setError(weights,e));$('v
 ['anYear','anTerm','anClass'].forEach(id=>$(id)?.addEventListener('change',()=>{result=null;exportBtn.disabled=true;out.textContent='Filters changed. Load weighted merit again.';weights.textContent='Filters changed. Reload assessment weights.'}));
 })();
 </script>
-<script src="/merit-unified.js" defer></script>
+<script src="/merit-unified.js" defer>
+/* ZELIMU GRADING REMOVE HANDLER */
+document.addEventListener('click',async function(e){
+ const button=e.target.closest('.remove-grading');
+ if(!button)return;
+
+ e.preventDefault();
+
+ const systemId=button.dataset.gradingId;
+ const system=(window.pmGradingSystems||[])
+  .find(x=>String(x.id)===String(systemId));
+
+ if(!system)return;
+
+ if(!confirm(
+  `Remove grading system "${system.name}" from active use?\n\n`+
+  'This will not delete examination marks or historical grading bands.'
+ ))return;
+
+ button.disabled=true;
+
+ try{
+  await api(`/api/grading/${sid}/systems/${systemId}`,{
+   method:'DELETE'
+  });
+
+  await loadGradings();
+
+  alert('Grading system removed from active use.');
+ }catch(err){
+  alert('Unable to remove grading system: '+err.message);
+  button.disabled=false;
+ }
+});
+
+</script>
 </body></html>
