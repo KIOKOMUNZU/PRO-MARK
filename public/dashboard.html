@@ -1046,7 +1046,46 @@ function defaultGradingRows(){return [
 ];}
 function addGradingRow(row={label:'',min_mark:'',max_mark:'',points:'',descriptor:'',remark:''}){const body=$('gradingBandRows');if(!body)return;const tr=document.createElement('tr');tr.innerHTML=`<td><input class="grade-label" value="${esc(row.label)}" placeholder="EE" required></td><td><input class="grade-min" type="number" min="0" max="100" step="0.01" value="${row.min_mark}" required></td><td><input class="grade-max" type="number" min="0" max="100" step="0.01" value="${row.max_mark}" required></td><td><input class="grade-points" type="number" min="0" step="0.01" value="${row.points}" required></td><td><input class="grade-desc" value="${esc(row.descriptor)}" placeholder="Descriptor"></td><td><input class="grade-remark" value="${esc(row.remark)}" placeholder="Remark"></td><td><button type="button" class="btn danger mini remove-grade-row">Remove</button></td>`;body.appendChild(tr);}
 function getGradingBands(){return [...document.querySelectorAll('#gradingBandRows tr')].map(tr=>({label:tr.querySelector('.grade-label')?.value.trim(),min_mark:Number(tr.querySelector('.grade-min')?.value),max_mark:Number(tr.querySelector('.grade-max')?.value),points:Number(tr.querySelector('.grade-points')?.value||0),descriptor:tr.querySelector('.grade-desc')?.value.trim()||'',remark:tr.querySelector('.grade-remark')?.value.trim()||''})).filter(x=>x.label&&Number.isFinite(x.min_mark)&&Number.isFinite(x.max_mark));}
-function initGradingEditor(){const target=$('gradingTargets'),levelTarget=$('gradingLevelTargets'),body=$('gradingBandRows');if(target){const classes=roleAllowedClasses(state.classes||[]);target.innerHTML=classes.map(x=>`<option value="${esc(x.id)}">${esc(`${x.name||''} ${x.stream||''} · ${x.level_name||''}`.trim())}</option>`).join('')||'<option disabled>No classes found for this school</option>';}if(levelTarget){const levels=(state.structure||[]);levelTarget.innerHTML=levels.map(x=>`<option value="${esc(x.level_id)}">${esc(`${x.section_name||''} · ${x.name||''}`)}</option>`).join('')||'<option disabled>No levels found</option>';}if(body&&!body.children.length)defaultGradingRows().forEach(addGradingRow);}safeOn('addGradingLevel','click',()=>addGradingRow());safeOn('gradingList','click',e=>{const b=e.target.closest('.edit-grading');if(!b)return;const x=(window.pmGradingSystems||[]).find(v=>String(v.id)===String(b.dataset.gradingId));if(!x)return;const f=$('gradingForm');f.dataset.editId=x.id;f.name.value=x.name||'';f.code.value=x.code||'';if(f.description)f.description.value=x.description||'';document.querySelectorAll('#gradingTargets option').forEach(o=>o.selected=(x.target_class_ids||[]).some(id=>String(id)===String(o.value)));document.querySelectorAll('#gradingLevelTargets option').forEach(o=>o.selected=(x.target_level_ids||[]).some(id=>String(id)===String(o.value)));document.getElementById('gradingBandRows').innerHTML='';(Array.isArray(x.bands)?x.bands:[]).forEach(addGradingRow);$('gradingMsg').textContent=`Editing ${x.name}. Save grading system to apply the changes.`;showSection('academic');window.scrollTo({top:document.getElementById('academic')?.offsetTop||0,behavior:'smooth'});});
+
+function renderGradingClassChecks(){
+ const select=document.getElementById('gradingTargets');
+ if(!select)return;
+
+ let box=document.getElementById('gradingClassChecks');
+ if(!box){
+  box=document.createElement('div');
+  box.id='gradingClassChecks';
+  box.style.cssText='display:grid;gap:9px;padding:12px;border:1px solid #cbd5d1;border-radius:10px;max-height:250px;overflow:auto';
+  select.insertAdjacentElement('afterend',box);
+ }
+
+ select.style.display='none';
+
+ box.replaceChildren();
+
+ for(const option of select.options){
+  if(option.disabled)continue;
+
+  const label=document.createElement('label');
+  label.style.cssText='display:flex;align-items:center;gap:10px;cursor:pointer';
+
+  const input=document.createElement('input');
+  input.type='checkbox';
+  input.checked=option.selected;
+  input.value=option.value;
+  input.style.cssText='width:18px;height:18px';
+
+  input.addEventListener('change',()=>{
+   option.selected=input.checked;
+   select.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+
+  label.append(input,document.createTextNode(option.textContent));
+  box.append(label);
+ }
+}
+
+function initGradingEditor(){const target=$('gradingTargets'),levelTarget=$('gradingLevelTargets'),body=$('gradingBandRows');if(target){const classes=roleAllowedClasses(state.classes||[]);target.innerHTML=classes.map(x=>`<option value="${esc(x.id)}">${esc(`${x.name||''} ${x.stream||''} · ${x.level_name||''}`.trim())}</option>`).join('')||'<option disabled>No classes found for this school</option>';}if(levelTarget){const levels=(state.structure||[]);levelTarget.innerHTML=levels.map(x=>`<option value="${esc(x.level_id)}">${esc(`${x.section_name||''} · ${x.name||''}`)}</option>`).join('')||'<option disabled>No levels found</option>';}if(body&&!body.children.length)defaultGradingRows().forEach(addGradingRow);renderGradingClassChecks();}safeOn('addGradingLevel','click',()=>addGradingRow());safeOn('gradingList','click',e=>{const b=e.target.closest('.edit-grading');if(!b)return;const x=(window.pmGradingSystems||[]).find(v=>String(v.id)===String(b.dataset.gradingId));if(!x)return;const f=$('gradingForm');f.dataset.editId=x.id;f.name.value=x.name||'';f.code.value=x.code||'';if(f.description)f.description.value=x.description||'';document.querySelectorAll('#gradingTargets option').forEach(o=>o.selected=(x.target_class_ids||[]).some(id=>String(id)===String(o.value)));document.querySelectorAll('#gradingLevelTargets option').forEach(o=>o.selected=(x.target_level_ids||[]).some(id=>String(id)===String(o.value)));renderGradingClassChecks();document.getElementById('gradingBandRows').innerHTML='';(Array.isArray(x.bands)?x.bands:[]).forEach(addGradingRow);$('gradingMsg').textContent=`Editing ${x.name}. Save grading system to apply the changes.`;showSection('academic');window.scrollTo({top:document.getElementById('academic')?.offsetTop||0,behavior:'smooth'});});
 safeOn('gradingBandRows','click',e=>{if(e.target.closest('.remove-grade-row')){const tr=e.target.closest('tr');if(tr)tr.remove();}});
 function wireAssessmentForms(){
  safeOn('createClassAssessments','click',createClassAssessments);
