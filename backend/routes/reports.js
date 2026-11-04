@@ -33,7 +33,8 @@ router.get("/:schoolId/class/:classId/:yearId/:termId/pdf",schoolBoundary,roles(
  // report engine and ordering, but sends each completed learner page immediately.
  let produced=0,skipped=0;
  const factory=async function*(){
-   const limit=6;
+    const poolMax=Number(db.pool?.options?.max)||10;
+    const limit=Math.max(1,Math.min(8,poolMax-2,learners.length));
    for(let i=0;i<learners.length;i+=limit){
      const batch=learners.slice(i,i+limit);
      const built=await Promise.all(batch.map(async l=>{

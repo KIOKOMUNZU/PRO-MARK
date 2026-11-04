@@ -276,8 +276,7 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
   ])];
   const marksBySubject=new Map();
   for(const m of marks){if(!marksBySubject.has(m.subject_id))marksBySubject.set(m.subject_id,[]);marksBySubject.get(m.subject_id).push(m);}
-  const subjects = [];
-  for (const subjectId of subjectIds) {
+  const subjects = await Promise.all(subjectIds.map(async subjectId => {
     const sm = marksBySubject.get(subjectId)||[];
     const assigned = assignedSubjects.find(x=>x.subject_id===subjectId);
     // The administrator's configured assessment records are authoritative. We do
@@ -320,7 +319,7 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
     const tf=teacher===markTeacher ? (teacher?.teacher_first_name || teacher?.entered_teacher_first_name || teacher?.entered_user_first_name) : teacher?.teacher_first_name;
     const tl=teacher===markTeacher ? (teacher?.teacher_last_name || teacher?.entered_teacher_last_name || teacher?.entered_user_last_name) : teacher?.teacher_last_name;
     const ts=teacher===markTeacher ? (teacher?.staff_no || teacher?.entered_teacher_staff_no) : teacher?.staff_no;
-    subjects.push({
+    return {
       subject_id:subjectId,subject_code:sm[0]?.subject_code||assigned?.subject_code||'',subject_name:sm[0]?.subject_name||assigned?.subject_name||'Subject',
       average:subjectAverage,grade:grade?.label||"",points:grade?.points??"",descriptor:grade?.descriptor||"",remark:grade?.remark||"",
       teacher_initials:teacher?teacherInitials(tf,tl,ts):"",
@@ -333,8 +332,8 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
       // subject result instead of repeating one generic remark for every subject.
       comment:(sm.map(x=>String(x.remark||'').trim()).find(Boolean)||autoSubjectComment({average:subjectAverage,subject_name:sm[0]?.subject_name||assigned?.subject_name||'Subject'})),
       assessments:byAssessment.map(m=>({id:m.assessment_id,name:m.assessment_name,type:m.assessment_type,mark:m.mark,max_mark:m.max_mark,percent:m.percent,weight:m.weight,include_in_term_average:m.include_in_term_average}))
-    });
-  }
+    };
+  }));
   subjects.sort((a,b)=>a.subject_name.localeCompare(b.subject_name));
   // Build the report-local subject ranking before any consumer uses it.
   // It is based on the same final subject averages used by this report.
