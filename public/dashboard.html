@@ -846,6 +846,9 @@ function showSection(id){
     if(sectionId===target)el.setAttribute('aria-current','page');
     else el.removeAttribute('aria-current');
   });
+  const display=$('zelimuWorkspaceDisplay');
+  if(display)display.scrollTop=0;
+  selected.scrollTop=0;
   const nav=$('navTabs');
   if(nav)nav.querySelectorAll('button[data-target]').forEach(b=>{
     const active=b.dataset.target===target;
@@ -2825,6 +2828,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 #analytics #zaWorkspace .za-header p{opacity:.84}
 #analytics #zaWorkspace .za-header>.pill{background:#ffffff20;border:1px solid #ffffff50;color:#fff;padding:7px 12px}
 #analytics .za-groups{padding:0 18px 4px;gap:14px}
+#analytics #zaWorkspace.za-workspace-open .za-groups{display:none!important}
 #analytics .za-groups .za-group{--za-accent:#14835b;padding:15px;border:1px solid color-mix(in srgb,var(--za-accent) 24%,white);border-top:3px solid var(--za-accent);border-radius:14px;background:linear-gradient(155deg,#fff 0%,color-mix(in srgb,var(--za-accent) 5%,white) 100%);box-shadow:0 5px 16px #1d45300c}
 #analytics .za-groups .za-group-subjects{--za-accent:#2878a8}
 #analytics .za-groups .za-group-learners{--za-accent:#7658a8}
@@ -2918,7 +2922,9 @@ function subjectTrendChart(trends,subjects){
 }
 function csv(name,heads,rows){const q=v=>'"'+String(v??'').replace(/"/g,'""').replace(/[\r\n]+/g,' ')+'"';const text=[heads,...rows].map(row=>row.map(q).join(',')).join('\r\n');const url=URL.createObjectURL(new Blob(['\ufeff'+text],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 async function excel(title,headers,rows){const response=await fetch(`/api/communications/${encodeURIComponent(sid())}/analytics-export.xlsx`,{method:'POST',headers:{Authorization:'Bearer '+localStorage.getItem('token'),'Content-Type':'application/json'},body:JSON.stringify({title,headers,rows})});if(!response.ok){let message=`Excel export failed (HTTP ${response.status}).`;try{message=(await response.json()).error||message;}catch{}throw Error(message);}const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download=`zelimu-${selected}-analytics.xlsx`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-function commonControls(){return `<div class="za-v5-controls"><button class="za-v5-btn" id="zaLoad">Load ${esc(selected==='merit'?'merit':'analysis')}</button><button class="za-v5-btn secondary" id="zaCsv">Export this view (CSV)</button><button class="za-v5-btn secondary" id="zaExcel">Export this view (Excel)</button></div>`;}
+function commonControls(){return `<div class="za-v5-controls"><button class="za-v5-btn secondary" id="zaBackWorkspaces">← All workspaces</button><button class="za-v5-btn" id="zaLoad">Refresh ${esc(selected==='merit'?'merit':'analysis')}</button><button class="za-v5-btn secondary" id="zaCsv">Export this view (CSV)</button><button class="za-v5-btn secondary" id="zaExcel">Export this view (Excel)</button></div>`;}
+function openWorkspaceDetail(){root.classList.add('za-workspace-open');out.hidden=false;}
+function returnToWorkspaces(){root.classList.remove('za-workspace-open');out.hidden=false;out.innerHTML='<p>Select one of the eight workspaces to open its analysis here.</p>';}
 async function loadAssessmentOptions(){const c=context();assessments=[];if(!c.year||!c.term)return;const raw=await get(`/api/assessments/${sid()}/${c.year}/${c.term}`);const rows=Array.isArray(raw)?raw:(raw.assessments||[]);const seen=new Set();assessments=rows.filter(a=>!c.cls||!a.class_id||String(a.class_id)===String(c.cls)).filter(a=>{const key=String(a.id);if(seen.has(key))return false;seen.add(key);return true;});}
 
 async function subjectDeviationRegister(){
@@ -3126,6 +3132,7 @@ else if(selected==='reports'){html=kpis([['Available learner trends',(r.learner_
 else return;
 out.innerHTML=`<h3>${esc(root.querySelector('[aria-selected="true"] strong')?.textContent||'Analytics')}</h3>${commonControls()}${html}`;
 const csvBtn=$('zaCsv');if(csvBtn)csvBtn.onclick=()=>csv(`zelimu-${selected}.csv`,exportHeads,exportRows);
+const backBtn=$('zaBackWorkspaces');if(backBtn)backBtn.onclick=returnToWorkspaces;
 const excelBtn=$('zaExcel');if(excelBtn)excelBtn.onclick=async()=>{excelBtn.disabled=true;try{await excel(`ZELIMU ${selected} analytics`,exportHeads,exportRows);}catch(e){alert(e.message);}finally{excelBtn.disabled=false;}};
 $('zaLoad').onclick=load;
 if($('zaSubjectAssessment'))$('zaSubjectAssessment').onchange=()=>{subjectAssessmentId=$('zaSubjectAssessment').value;load();};
@@ -3558,16 +3565,17 @@ async function merit(){
  }
 }
 
-async function load(){const c=context();if(!c.year||!c.term){out.innerHTML='<p>Select academic year and term in the analysis filters above.</p>';return;}try{out.innerHTML='<p>Loading verified school records…</p>';await loadAssessmentOptions();if(selected==='subjects'&&subjectAssessmentId&&!assessments.some(a=>String(a.id)===String(subjectAssessmentId)))subjectAssessmentId='';if(selected==='merit'){
+async function load(){openWorkspaceDetail();const c=context();if(!c.year||!c.term){out.innerHTML='<div class="za-v5-controls"><button class="za-v5-btn secondary" id="zaBackWorkspaces">← All workspaces</button></div><p>Select academic year and term in the filters above, then load the workspace again.</p>';$('zaBackWorkspaces').onclick=returnToWorkspaces;return;}try{out.innerHTML='<div class="za-v5-controls"><button class="za-v5-btn secondary" id="zaBackWorkspaces">← All workspaces</button></div><p>Loading verified school records…</p>';$('zaBackWorkspaces').onclick=returnToWorkspaces;await loadAssessmentOptions();if(selected==='subjects'&&subjectAssessmentId&&!assessments.some(a=>String(a.id)===String(subjectAssessmentId)))subjectAssessmentId='';if(selected==='merit'){
  out.hidden=false;
- out.innerHTML='<h3>Merit Lists</h3>'+meritControls();
+ out.innerHTML='<h3>Merit Lists</h3><div class="za-v5-controls"><button class="za-v5-btn secondary" id="zaBackWorkspaces">← All workspaces</button></div>'+meritControls();
+ $('zaBackWorkspaces').onclick=returnToWorkspaces;
  meritBind();
  return;
-}out.hidden=false;const qs=new URLSearchParams({academic_year_id:c.year,term_id:c.term});if(c.level)qs.set('level_id',c.level);if(c.cls)qs.set('class_id',c.cls);if(c.teacher)qs.set('teacher_id',c.teacher);if(selected==='subjects'){if(subjectAssessmentId)qs.set('assessment_id',subjectAssessmentId);render(await get(`/api/communications/${sid()}/analytics/subjects?${qs}`));}else render(await get(`/api/communications/${sid()}/analytics?${qs}`));}catch(e){out.innerHTML=`<p role="alert">${esc(e.message)}</p><button type="button" class="za-v5-btn" id="zaRetry">Retry</button>`;$('zaRetry').onclick=load;}}
+}out.hidden=false;const qs=new URLSearchParams({academic_year_id:c.year,term_id:c.term});if(c.level)qs.set('level_id',c.level);if(c.cls)qs.set('class_id',c.cls);if(c.teacher)qs.set('teacher_id',c.teacher);if(selected==='subjects'){if(subjectAssessmentId)qs.set('assessment_id',subjectAssessmentId);render(await get(`/api/communications/${sid()}/analytics/subjects?${qs}`));}else render(await get(`/api/communications/${sid()}/analytics?${qs}`));}catch(e){out.innerHTML=`<div class="za-v5-controls"><button class="za-v5-btn secondary" id="zaBackWorkspaces">← All workspaces</button><button type="button" class="za-v5-btn" id="zaRetry">Retry</button></div><p role="alert">${esc(e.message)}</p>`;$('zaBackWorkspaces').onclick=returnToWorkspaces;$('zaRetry').onclick=load;}}
 const v6Panel=document.getElementById('v6WeightedPanel');
 function syncMeritPanel(){if(v6Panel)v6Panel.hidden=true;}
 syncMeritPanel();
-root.addEventListener('click',e=>{const b=e.target.closest('[data-za-tool]');if(!b)return;selected=b.dataset.zaTool;syncMeritPanel();root.querySelectorAll('[data-za-tool]').forEach(x=>x.setAttribute('aria-selected',String(x===b)));cached=null;load();});
+root.addEventListener('click',e=>{const b=e.target.closest('[data-za-tool]');if(!b)return;selected=b.dataset.zaTool;openWorkspaceDetail();syncMeritPanel();root.querySelectorAll('[data-za-tool]').forEach(x=>x.setAttribute('aria-selected',String(x===b)));cached=null;load();});
 ['anYear','anTerm','anLevel','anClass','anTeacher'].forEach(id=>$(id)?.addEventListener('change',()=>{cached=null;if(root.querySelector('[aria-selected="true"]'))load();}));
 root.querySelector('[data-za-tool="school"]')?.setAttribute('aria-selected','true');
 out.innerHTML='<p>Select the academic year and term above to load the School Performance workspace.</p><button type="button" class="za-v5-btn" id="zaInitialLoad">Load school performance</button>';

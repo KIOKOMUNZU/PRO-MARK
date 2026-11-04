@@ -75,9 +75,9 @@ router.get('/:schoolId/:yearId/:termId',schoolBoundary,async(req,res)=>{
       LEFT JOIN classes c ON c.id=a.class_id
       LEFT JOIN subjects s ON s.id=a.subject_id
       JOIN terms t ON t.id=a.term_id
-      WHERE a.school_id=$1
-        AND a.academic_year_id=$2
-        AND a.term_id=$3
+      WHERE a.school_id=$1::uuid
+        AND a.academic_year_id=$2::uuid
+        AND a.term_id=$3::uuid
         AND (
           a.assessment_type NOT IN ('OPENER','MID_TERM','END_TERM')
           OR a.include_in_final=true
