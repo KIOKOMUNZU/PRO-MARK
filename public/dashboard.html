@@ -2817,9 +2817,14 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 #analytics .za-grid .za-tile{flex:1 1 170px;min-width:145px;padding:10px 12px;min-height:0;text-align:left}
 #analytics .za-grid .za-tile small{display:none}
 #analytics .za-grid .za-tile strong{display:inline;font-size:.88rem}
+#analytics .za-groups .za-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0}
+#analytics .za-groups .za-tile{flex:none;width:100%;min-width:0;min-height:112px;padding:14px;text-align:left}
+#analytics .za-groups .za-tile strong{display:block;font-size:.96rem}
+#analytics .za-groups .za-tile small{display:block;color:#567568;font-size:.84rem;line-height:1.4}
+#analytics .za-groups .za-tile[hidden]{display:none!important}
 #analytics #v6WeightedPanel[hidden]{display:none!important}
 #analytics #v6WeightedPanel{margin-top:14px}
-@media(max-width:640px){#analytics .za-grid .za-tile{flex-basis:calc(50% - 8px)}}
+@media(max-width:640px){#analytics .za-grid .za-tile{flex-basis:calc(50% - 8px)}#analytics .za-groups .za-grid{grid-template-columns:1fr}#analytics .za-groups .za-tile{width:100%}}
 </style>
 <script id="zaWorkspaceLogic">
 (function(){
