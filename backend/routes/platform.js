@@ -364,6 +364,8 @@ router.delete('/schools/:schoolId',async(req,res)=>{
     // This is a true permanent delete. It is deliberately explicit and
     // transactional so it cannot leave a half-deleted school behind.
     const ordered=[
+      'school_fee_payment_reversals','school_fee_payment_allocations',
+      'school_fee_payments','school_fee_charges','school_fee_structures',
       'marks','report_comments','report_document_snapshots','learner_movement_events',
       'learner_enrollments','communication_messages','class_teacher_assignments',
       'teacher_subject_assignments','assessment_configurations','assessments','merit_runs',

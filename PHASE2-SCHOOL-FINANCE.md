@@ -6,24 +6,26 @@
 - Fee structure creation by academic year and class/stream.
 - Idempotent assignment of a fee structure to active learners in the selected class.
 - Recording of learner payments with generated receipt numbers, method/reference/date/notes.
-- Allocation of payments against the learner's oldest outstanding charges; any excess is retained as unallocated credit rather than silently discarded.
-- Outstanding-charge, payment and fee-structure lists; summary totals; printable receipt view.
+- Allocation of payments against the learner's oldest outstanding charges; any excess remains a prepaid account credit and is allocated to later charges.
+- Ledger-derived learner balances: total valid charges less total valid payments, including prepaid credits.
+- Unique school-scoped payment references, generated receipt numbers, and append-only credit-note reversals.
+- Receipt updates are rejected at the database layer; correction uses a separate audited reversal record.
+- Outstanding-charge, account-balance, payment and fee-structure lists; summary totals; printable receipt view.
 - Tenant-bound API routes and school/user checks for finance writes.
-- Audit-log events for fee-structure creation and payment recording.
+- Audit-log events for fee-structure creation, payment recording and receipt reversals.
 
 ## Database migration required
 
-Apply `database/028_school_finance_core.sql` manually to the intended ZELIMU CBC database after taking a verified backup. The server does not automatically apply this migration. If the migration has not been applied, the Finance workspace reports that the schema is missing.
+For a new database, apply `database/028_school_finance_core.sql` followed by `database/033_school_fee_ledger_integrity.sql`. For an existing installation with migration 028 already applied, apply only migration 033. Take a verified backup first. These migrations are intentionally manual; startup does not apply them automatically. Migration 033 preserves existing receipts and their references, backfills unallocated payment credit against outstanding charges in chronological order, adds duplicate-reference protection for new receipts, and creates the append-only credit-note ledger.
 
 ## Current limitations (not yet implemented)
 
 - M-Pesa is currently a manually recorded payment method, not a live Daraja/STK Push integration or automated reconciliation.
 - Bank transfers are manually recorded; there is no bank feed integration.
-- Payment reversal/void workflow and controlled receipt cancellation need a separate audited workflow before use in a live accounting environment.
 - Payroll is not part of this phase.
 - SMS fee reminders and parent-facing balances are not yet connected to this ledger.
 - The first version supports KES only to prevent cross-currency payment allocation errors.
-- The first version is intended for school finance staff with `SCHOOL_ADMIN` or `ADMIN` access; dedicated finance-staff roles and granular permissions remain future work.
+- Financial writes and reversals are restricted to `SCHOOL_ADMIN` or `ADMIN`; dedicated finance-staff roles and granular permissions remain future work.
 - No live database was accessed or changed during this build.
 
 ## Checks run

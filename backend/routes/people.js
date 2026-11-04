@@ -2,6 +2,7 @@ const express=require('express'),bcrypt=require('bcryptjs'),db=require('../db'),
 const {authenticate,roles,schoolBoundary}=require('../middleware/auth');
 const {assertBelongs}=require('../services/tenant');
 const {source:assetSource}=require('../services/assets');
+const {allocateAvailablePayments}=require('../services/school-finance-ledger');
 const router=express.Router();
 const classListPdfCache=new Map();
 function getClassListPdf(key){const hit=classListPdfCache.get(key);if(hit&&hit.expires>Date.now())return hit.value;if(hit)classListPdfCache.delete(key);return null;}
@@ -711,6 +712,7 @@ if (b.academic_year_id && b.class_id) {
     b.academic_year_id,
     req.user.user_id
   ]);
+  await allocateAvailablePayments(c,sid,l.id);
 }
 
 // Admissions details and guardian are committed with the learner and enrollment.
