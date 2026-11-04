@@ -808,6 +808,13 @@ async function openLearner(id){
    $('learnerPhotoForm').addEventListener('submit',async e=>{e.preventDefault();try{const pf=new FormData(e.target),photo=pf.get('photo');if(!photo||!photo.size){$('learnerPhotoMsg').textContent='Select a photo first.';return;}const out=await api(`/api/documents/${sid}/learner/${id}/photo`,{method:'POST',body:pf});Object.assign(l,out);$('learnerPhotoMsg').textContent='Passport photo uploaded successfully.';await load();await openLearner(id);}catch(x){$('learnerPhotoMsg').textContent=x.message;}});
  }
 }
+window.zelimuOpenLearnerProfile=id=>{
+ const learner=state.learners.find(x=>String(x.id)===String(id));
+ if(!learner){alert('This learner is not available in the current dashboard records.');return;}
+ showSection('people');
+ if($('learnerFilterClass')){$('learnerFilterClass').value=learner.class_id;renderLearners();}
+ openLearner(id);
+};
 
 function safeOn(id,event,handler){const el=$(id);if(el)el.addEventListener(event,handler);return el;}
 function setBusy(btn,busy,text){if(!btn)return;btn.disabled=busy;if(busy){btn.dataset.oldText=btn.textContent;btn.textContent=text||'Working…';}else if(btn.dataset.oldText){btn.textContent=btn.dataset.oldText;delete btn.dataset.oldText;}}
@@ -2805,7 +2812,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 (function(){
 'use strict';
 const root=document.getElementById('zaWorkspace'),out=document.getElementById('zaWorkspaceDetail');if(!root||!out)return;
-let selected='school',cached=null,meritData=null,assessments=[];
+let selected='school',cached=null,meritData=null,assessments=[],subjectAssessmentId='';
 const $=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=v=>v==null||!Number.isFinite(Number(v))?'—':Number(v).toFixed(2).replace(/\.00$/,'');
 const sid=()=>{try{const u=JSON.parse(localStorage.getItem('user')||'{}');return u.school_id||new URLSearchParams(location.search).get('school_id')}catch{return null}};
@@ -2966,7 +2973,45 @@ async function subjectDeviationRegister(){
 }
 
 function render(data){cached=data;const r=data||{},o=r.overall||{};let html='';let exportRows=[],exportHeads=[];
-if(selected==='subjects'){html=panel('Subject-by-subject learner deviation','<div id="zaSubjectDeviation"></div>');const rows=r.subjects||[];html=kpis([['Subjects',rows.length],['Assessed learners',o.learners??'—']])+panel('Subject averages',bars(rows,'name','average'))+panel('Learning-area breakdown',table(['Subject','Average (%)','Learners'],rows.map(x=>[x.name,fmt(x.average),x.learners??x.learner_count??'—'])))+panel('Grade distribution',table(['Learning area','Learners','Grade counts'],(r.subject_grade_distribution||[]).map(x=>[x.subject_name,x.total,Object.entries(x.grades||{}).map(([k,v])=>`${k}: ${v}`).join(' · ')])));exportHeads=['Subject','Average (%)'];exportRows=rows.map(x=>[x.name,x.average]);}
+if(selected==='subjects'){
+ const rows=r.subjects||[],learners=r.learners||[],trends=r.trends||[],flags=r.interventions||[];
+ const selectedAssessment=assessments.some(a=>String(a.id)===String(subjectAssessmentId))?subjectAssessmentId:'';
+ const assessmentOptions=[{id:'',name:'All assessments · average available marks'},...assessments];
+ const assessmentLabel=a=>a.id?`${a.name}${a.assessment_type?' · '+a.assessment_type:''}`:a.name;
+ const gradeRows=rows.flatMap(subject=>(subject.grade_bands||[]).map(band=>{
+  const count=Number(subject.grade_counts?.[band.label]||0);
+  return [subject.name,band.label,count,subject.assessed?`${(count*100/subject.assessed).toFixed(1)}%`:'—',band.descriptor||''];
+ }));
+ const classRows=rows.flatMap(subject=>(subject.classes||[]).map(item=>[subject.name,item.class_name,item.stream||'—',fmt(item.average),item.assessed]));
+ const learnerTable=`<div class="za-v5-scroll"><table class="za-v5-table"><thead><tr>${['Learner','Admission no.','Class / stream','Subject','Mean (%)','Configured grade','Assessment marks'].map(label=>`<th>${esc(label)}</th>`).join('')}</tr></thead><tbody>${learners.length?learners.map(item=>`<tr><td><button type="button" class="zaOpenLearner" data-learner-id="${esc(item.learner_id)}">${esc(item.learner_name)}</button></td>${[item.admission_no,item.class_name+(item.stream?' · '+item.stream:''),item.subject_name,fmt(item.average),item.grade||'—',item.assessments.map(mark=>`${mark.assessment_name}: ${fmt(mark.percentage)}%`).join(' · ')].map(value=>`<td>${esc(value)}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="7">No learner subject results for this selection.</td></tr>`}</tbody></table></div>`;
+ html=`<div class="za-v5-controls"><label>Assessment
+  <select id="zaSubjectAssessment">${assessmentOptions.map(a=>`<option value="${esc(a.id)}" ${String(a.id)===String(selectedAssessment)?'selected':''}>${esc(assessmentLabel(a))}</option>`).join('')}</select>
+ </label><span class="muted small">Averages are descriptive means of the available marks; they are not weighted term merit.</span></div>`;
+ html+=kpis([
+  ['Subjects in scope',o.subjects??rows.length],
+  ['Learners with marks',o.assessed_learners??0],
+  ['Mean across learner-subject results',o.mean==null?'—':`${fmt(o.mean)}%`],
+  ['Assessment coverage',o.coverage==null?'—':`${fmt(o.coverage)}%`],
+  ['Highest subject',rows[0]?.average==null?'—':`${rows[0].name} · ${fmt(rows[0].average)}%`],
+  ['Lowest subject',rows.length&&rows[rows.length-1].average!=null?`${rows[rows.length-1].name} · ${fmt(rows[rows.length-1].average)}%`:'—'],
+  ['Subjects below target',rows.filter(x=>x.target!=null&&x.average!=null&&x.average<x.target).length]
+ ]);
+ if(rows.some(x=>x.assessed>0&&x.assessed<5))html+='<p class="notice">Small sample warning: a subject with fewer than five assessed learners should not be treated as representative of the whole grade or school.</p>';
+ html+=panel('Subject performance',table(['Subject','Mean (%)','Highest (%)','Lowest (%)','Assessed','Expected','Not assessed','Coverage','Target','Vs target'],rows.map(x=>[
+  x.name,fmt(x.average),fmt(x.highest),fmt(x.lowest),x.assessed,x.expected,x.not_assessed,x.coverage==null?'—':`${fmt(x.coverage)}%`,
+  x.target==null?'—':`${fmt(x.target)}%`,x.target_variance==null?'—':`${Number(x.target_variance)>=0?'+':''}${fmt(x.target_variance)}`
+ ])));
+ html+=panel('Subject average comparison',bars(rows.filter(x=>x.average!=null),'name','average'));
+ html+=panel('Configured achievement-level distribution',gradeRows.length?table(['Subject','Achievement level','Learners','Share of assessed','Descriptor'],gradeRows):'<p class="muted small">No applicable grading bands are configured for this selection.</p>');
+ html+=panel('Class and stream comparison',table(['Subject','Class','Stream','Mean (%)','Assessed'],classRows));
+ html+=panel('Historical term trends · all recorded assessments',table(['Academic year','Term','Subject','Mean (%)','Learners'],trends.map(x=>[x.year_label,x.term_name,x.subject_name,fmt(x.average),x.assessed])));
+ html+=panel('Learner-level subject analysis',learnerTable);
+ html+=panel('Evidence for academic follow-up',table(['Type','Subject','Observation'],flags.map(x=>[x.type.replaceAll('_',' '),x.subject_name,x.message])));
+ html+='<div class="za-v5-controls"><button class="za-v5-btn secondary" id="zaGradeCsv">Export grade distribution (CSV)</button><button class="za-v5-btn secondary" id="zaClassCsv">Export class comparison (CSV)</button><button class="za-v5-btn secondary" id="zaLearnerCsv">Export learner detail (CSV)</button><button class="za-v5-btn secondary" id="zaTrendCsv">Export trend detail (CSV)</button><button class="za-v5-btn secondary" id="zaSubjectPrint">Print / Save as PDF</button></div>';
+ subjectAssessmentId=selectedAssessment;
+ exportHeads=['Subject','Mean (%)','Highest (%)','Lowest (%)','Assessed','Expected','Not assessed','Coverage (%)','Target (%)','Difference from target'];
+ exportRows=rows.map(x=>[x.name,x.average,x.highest,x.lowest,x.assessed,x.expected,x.not_assessed,x.coverage,x.target,x.target_variance]);
+}
 else if(selected==='classes'){const rows=r.streams||[];html=kpis([['Classes / streams',rows.length],['Mean (%)',fmt(o.mean_mark)]])+panel('Class and stream averages',bars(rows,'class_name','average'))+panel('Comparison table',table(['Class','Stream','Average (%)'],rows.map(x=>[x.class_name,x.stream||'—',fmt(x.average)])))+panel('Class trends',table(['Class','Term','Average (%)'],(r.class_trends||[]).map(x=>[x.class_name,x.term_name,fmt(x.average)])));exportHeads=['Class','Stream','Average (%)'];exportRows=rows.map(x=>[x.class_name,x.stream,x.average]);}
 else if(selected==='school'){const rows=r.term_trends||[];html=kpis([['Learners assessed',o.learners??'—'],['School mean (%)',fmt(o.mean_mark)],['Median (%)',fmt(o.median_mark)],['Marks entered',o.mark_entries??'—']])+panel('Term-to-term school performance',table(['Term','Average (%)'],rows.map(x=>[x.term_name,fmt(x.average)])))+panel('Competency distribution',table(['Level','Learners'],Object.entries(r.proficiency_distribution||{}).map(([k,v])=>[k,v])))+panel('Gender comparison',table(['Gender','Learners','Average (%)'],(r.gender||[]).map(x=>[x.gender,x.learners,fmt(x.average)])));exportHeads=['Term','Average (%)'];exportRows=rows.map(x=>[x.term_name,x.average]);}
 else if(selected==='learners'){const rows=r.learner_trajectories||[];html=kpis([['Learner trajectories',rows.length],['Top improvers',(r.top_improvers||[]).length]])+panel('Learner term progress',table(['Learner','Class','T1','T2','T3','Change'],rows.map(x=>[x.learner_name,x.class_name,...[1,2,3].map(n=>fmt((x.terms||[]).find(t=>Number(t.term_no)===n)?.average)),fmt(x.change)])))+panel('Top improvers',table(['Learner','Class','Improvement'],(r.top_improvers||[]).map(x=>[x.learner_name,x.class_name,fmt(x.change)])))+panel('Learners requiring support',table(['Learner','Class','Change'],(r.top_decliners||[]).map(x=>[x.learner_name,x.class_name,fmt(x.change)])));exportHeads=['Learner','Class','Change'];exportRows=rows.map(x=>[x.learner_name,x.class_name,x.change]);}
@@ -2975,9 +3020,15 @@ else if(selected==='teachers'){const rows=r.teacher_performance||[];html=kpis([[
 else if(selected==='reports'){html=kpis([['Available learner trends',(r.learner_trajectories||[]).length],['Subjects',(r.subjects||[]).length]])+panel('Academic reports',`<p>Download the selected analysis as CSV, print this workspace, or open the existing official PDF report-card module.</p><div class="za-v5-controls"><button class="za-v5-btn" id="zaPrint">Print current analysis</button><button class="za-v5-btn secondary" id="zaReportCards">Open official report cards</button></div>`)+panel('Performance overview',table(['Subject','Average (%)'],(r.subjects||[]).map(x=>[x.name,fmt(x.average)])));exportHeads=['Subject','Average (%)'];exportRows=(r.subjects||[]).map(x=>[x.name,x.average]);}
 else return;
 out.innerHTML=`<h3>${esc(root.querySelector('[aria-selected="true"] strong')?.textContent||'Analytics')}</h3>${commonControls()}${html}`;
-if(selected==='subjects')subjectDeviationRegister();
 const csvBtn=$('zaCsv');if(csvBtn)csvBtn.onclick=()=>csv(`zelimu-${selected}.csv`,exportHeads,exportRows);
 $('zaLoad').onclick=load;
+if($('zaSubjectAssessment'))$('zaSubjectAssessment').onchange=()=>{subjectAssessmentId=$('zaSubjectAssessment').value;load();};
+out.querySelectorAll('.zaOpenLearner').forEach(button=>button.onclick=()=>typeof window.zelimuOpenLearnerProfile==='function'?window.zelimuOpenLearnerProfile(button.dataset.learnerId):alert('Learner profile is unavailable in this dashboard.'));
+if($('zaGradeCsv'))$('zaGradeCsv').onclick=()=>csv('zelimu-subject-grade-distribution.csv',['Subject','Achievement level','Learners','Share of assessed','Descriptor'],(cached?.subjects||[]).flatMap(subject=>(subject.grade_bands||[]).map(band=>{const count=Number(subject.grade_counts?.[band.label]||0);return [subject.name,band.label,count,subject.assessed?count*100/subject.assessed:'',band.descriptor||''];})));
+if($('zaClassCsv'))$('zaClassCsv').onclick=()=>csv('zelimu-subject-class-comparison.csv',['Subject','Class','Stream','Mean (%)','Assessed'],(cached?.subjects||[]).flatMap(subject=>(subject.classes||[]).map(item=>[subject.name,item.class_name,item.stream,item.average,item.assessed])));
+if($('zaLearnerCsv'))$('zaLearnerCsv').onclick=()=>csv('zelimu-subject-learner-analysis.csv',['Learner','Admission no.','Class','Subject','Mean (%)','Grade','Assessment marks'],(cached?.learners||[]).map(x=>[x.learner_name,x.admission_no,x.class_name+(x.stream?' · '+x.stream:''),x.subject_name,x.average,x.grade,(x.assessments||[]).map(a=>`${a.assessment_name}: ${a.percentage}%`).join(' · ')]));
+if($('zaTrendCsv'))$('zaTrendCsv').onclick=()=>csv('zelimu-subject-trends.csv',['Academic year','Term','Subject','Mean (%)','Learners'],(cached?.trends||[]).map(x=>[x.year_label,x.term_name,x.subject_name,x.average,x.assessed]));
+if($('zaSubjectPrint'))$('zaSubjectPrint').onclick=()=>window.print();
 if($('zaPrint'))$('zaPrint').onclick=()=>window.print();
 if($('zaReportCards'))$('zaReportCards').onclick=()=>{const btn=document.querySelector('[data-target="reports"]');if(btn)btn.click();else alert('Open Report Cards & Results from the Academic menu.');};
 }
@@ -3400,12 +3451,12 @@ async function merit(){
  }
 }
 
-async function load(){const c=context();if(!c.year||!c.term){out.innerHTML='<p>Select academic year and term in the analysis filters above.</p>';return;}try{out.innerHTML='<p>Loading verified school records…</p>';await loadAssessmentOptions();if(selected==='merit'){
+async function load(){const c=context();if(!c.year||!c.term){out.innerHTML='<p>Select academic year and term in the analysis filters above.</p>';return;}try{out.innerHTML='<p>Loading verified school records…</p>';await loadAssessmentOptions();if(selected==='subjects'&&subjectAssessmentId&&!assessments.some(a=>String(a.id)===String(subjectAssessmentId)))subjectAssessmentId='';if(selected==='merit'){
  out.hidden=false;
  out.innerHTML='<h3>Merit Lists</h3>'+meritControls();
  meritBind();
  return;
-}out.hidden=false;const qs=new URLSearchParams({academic_year_id:c.year,term_id:c.term});if(c.level)qs.set('level_id',c.level);if(c.cls)qs.set('class_id',c.cls);if(c.teacher)qs.set('teacher_id',c.teacher);render(await get(`/api/communications/${sid()}/analytics?${qs}`));}catch(e){out.innerHTML=`<p role="alert">${esc(e.message)}</p><button type="button" class="za-v5-btn" id="zaRetry">Retry</button>`;$('zaRetry').onclick=load;}}
+}out.hidden=false;const qs=new URLSearchParams({academic_year_id:c.year,term_id:c.term});if(c.level)qs.set('level_id',c.level);if(c.cls)qs.set('class_id',c.cls);if(c.teacher)qs.set('teacher_id',c.teacher);if(selected==='subjects'){if(subjectAssessmentId)qs.set('assessment_id',subjectAssessmentId);render(await get(`/api/communications/${sid()}/analytics/subjects?${qs}`));}else render(await get(`/api/communications/${sid()}/analytics?${qs}`));}catch(e){out.innerHTML=`<p role="alert">${esc(e.message)}</p><button type="button" class="za-v5-btn" id="zaRetry">Retry</button>`;$('zaRetry').onclick=load;}}
 const v6Panel=document.getElementById('v6WeightedPanel');
 function syncMeritPanel(){if(v6Panel)v6Panel.hidden=true;}
 syncMeritPanel();
