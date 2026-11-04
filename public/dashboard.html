@@ -3227,8 +3227,8 @@ async function merit(){
      .zelimu-merit-heading p{font-size:10px;margin:3px}
      .zelimu-merit-logo{width:55px;height:55px;object-fit:contain}
      .zelimu-merit-watermark{
-      position:fixed;width:125mm;height:125mm;
-      object-fit:contain;left:75mm;top:38mm;
+      position:fixed;width:42mm;height:42mm;
+      object-fit:contain;left:127.5mm;top:84mm;
       opacity:.055;z-index:-1
      }
      .zelimu-merit-summary{
@@ -3278,7 +3278,7 @@ async function merit(){
 async function load(){const c=context();if(!c.year||!c.term){out.innerHTML='<p>Select academic year and term in the analysis filters above.</p>';return;}try{out.innerHTML='<p>Loading verified school records…</p>';await loadAssessmentOptions();if(selected==='merit'){
  out.hidden=false;
  out.innerHTML='<h3>Merit Lists</h3>'+meritControls();
- $('zaMeritRun').onclick=merit;
+ meritBind();
  return;
 }out.hidden=false;const qs=new URLSearchParams({academic_year_id:c.year,term_id:c.term});if(c.level)qs.set('level_id',c.level);if(c.cls)qs.set('class_id',c.cls);if(c.teacher)qs.set('teacher_id',c.teacher);render(await get(`/api/communications/${sid()}/analytics?${qs}`));}catch(e){out.innerHTML=`<p role="alert">${esc(e.message)}</p><button type="button" class="za-v5-btn" id="zaRetry">Retry</button>`;$('zaRetry').onclick=load;}}
 const v6Panel=document.getElementById('v6WeightedPanel');
