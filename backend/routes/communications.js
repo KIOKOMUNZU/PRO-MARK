@@ -644,26 +644,28 @@ router.post('/:schoolId/result-publications/:publicationId/notifications',school
 router.post('/:schoolId/publish-grade-results',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{try{const sid=req.params.schoolId,b=req.body||{};if(!b.academic_year_id||!b.term_id||!b.level_id)return res.status(400).json({error:'Academic year, term and grade are required'});const learners=(await db.query(`SELECT DISTINCT l.id,l.first_name,l.middle_name,l.last_name FROM learner_enrollments e JOIN learners l ON l.id=e.learner_id JOIN classes c ON c.id=e.class_id WHERE e.school_id=$1 AND e.academic_year_id=$2 AND c.school_level_id=$3 AND COALESCE(e.status,'ACTIVE')='ACTIVE'`,[sid,b.academic_year_id,b.level_id])).rows;let queued=0,skipped=0,failed=0;for(const l of learners){const report=await buildTermReport(sid,l.id,b.academic_year_id,b.term_id);if(!report){skipped++;continue}const guardians=(await db.query(`SELECT pg.id,pg.phone FROM parent_guardians pg JOIN learner_guardians lg ON lg.parent_guardian_id=pg.id WHERE pg.school_id=$1 AND lg.learner_id=$2 AND pg.is_active AND pg.sms_enabled AND pg.communication_consent AND COALESCE(trim(pg.phone),'')<>''`,[sid,l.id])).rows;if(!guardians.length){skipped++;continue}const subjectSummary=(report.subjects||[]).map(x=>`${x.subject_code||x.subject_name}:${x.average==null?'—':Number(x.average).toFixed(1)}${x.grade?'/'+x.grade:''}`).join(', ');const body=String(b.message_template||`${report.school_name}: ${report.learner_name} ${report.term_name||'term'} results. Average ${report.overall_average==null?'—':Number(report.overall_average).toFixed(2)}, grade ${report.overall_grade||'—'}. Marks: ${subjectSummary||'See portal for full report.'}`).replaceAll('{learner}',report.learner_name).replaceAll('{average}',report.overall_average==null?'—':Number(report.overall_average).toFixed(2)).replaceAll('{grade}',report.overall_grade||'—').replaceAll('{marks}',subjectSummary);for(const g of guardians){let status='QUEUED',provider=process.env.SMS_PROVIDER||'UNCONFIGURED',reason=null;try{const d=await deliverSms({phone:g.phone,message:body,school_id:sid,learner_id:l.id});status=d.status;provider=d.provider;}catch(e){reason=e.message;status='FAILED';failed++;}await db.query(`INSERT INTO communication_messages(school_id,learner_id,parent_guardian_id,channel,message_type,body,status,provider,failure_reason,created_by,sent_at) VALUES($1,$2,$3,'SMS','PUBLISHED_RESULTS',$4,$5,$6,$7,$8,CASE WHEN $5='SENT' THEN now() ELSE NULL END)`,[sid,l.id,g.id,body,status,provider,reason,req.user.user_id]);if(status==='SENT'||status==='QUEUED')queued++;}}res.status(201).json({learners:learners.length,queued,skipped,failed,message:(String(process.env.SMS_PROVIDER||'').toUpperCase()==='AFRICASTALKING'&&process.env.SMS_AFRICA_TALKING_API_KEY)?"Results sent through Africa's Talking SMS.":(process.env.SMS_WEBHOOK_URL?'Results sent through the configured SMS webhook.':'Results queued safely; configure an SMS provider for live delivery.')});}catch(e){res.status(400).json({error:e.message})}});
 // Subject-level descriptive analytics. Official merit and report calculations remain separate.
 router.get('/:schoolId/analytics/subjects',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER'),async(req,res)=>{
+ let stage='authorization';
  try{
   const sid=req.params.schoolId;
   let {academic_year_id:y,term_id:t,level_id:level,class_id:cls,teacher_id:teacherId,assessment_id:assessmentId}=req.query;
   if(!y||!t)return res.status(400).json({error:'Academic year and term are required'});
   if(req.user.role==='TEACHER'){
-   const own=(await db.query(`SELECT id FROM teachers WHERE school_id=$1 AND user_id=$2 AND COALESCE(is_active,true)=true LIMIT 1`,[sid,req.user.user_id])).rows[0];
+   const own=(await db.query(`SELECT id FROM teachers WHERE school_id=$1::uuid AND user_id=$2::uuid AND COALESCE(is_active,true)=true LIMIT 1`,[sid,req.user.user_id])).rows[0];
    if(!own)return res.status(403).json({error:'No active teacher profile is linked to this account.'});
    teacherId=own.id;
   }
   if(req.user.role==='CLASS_TEACHER'){
-   const own=(await db.query(`SELECT cta.class_id FROM class_teacher_assignments cta JOIN teachers th ON th.id=cta.teacher_id WHERE cta.school_id=$1 AND th.user_id=$2 AND cta.academic_year_id=$3 AND ($4::uuid IS NULL OR cta.class_id=$4) ORDER BY cta.created_at DESC LIMIT 1`,[sid,req.user.user_id,y,cls||null])).rows[0];
+   const own=(await db.query(`SELECT cta.class_id FROM class_teacher_assignments cta JOIN teachers th ON th.id=cta.teacher_id WHERE cta.school_id=$1::uuid AND th.user_id=$2::uuid AND cta.academic_year_id=$3::uuid AND ($4::uuid IS NULL OR cta.class_id=$4::uuid) ORDER BY cta.created_at DESC LIMIT 1`,[sid,req.user.user_id,y,cls||null])).rows[0];
    if(!own)return res.status(403).json({error:'No active Class Teacher assignment found for this academic year.'});
    cls=own.class_id;
   }
-  const term=(await db.query(`SELECT id,academic_year_id FROM terms WHERE id=$1 AND school_id=$2`,[t,sid])).rows[0];
+  stage='academic term lookup';
+  const term=(await db.query(`SELECT id,academic_year_id FROM terms WHERE id=$1::uuid AND school_id=$2::uuid`,[t,sid])).rows[0];
   if(!term||String(term.academic_year_id)!==String(y))return res.status(404).json({error:'The selected term does not belong to this academic year.'});
   const classParams=[sid];
   let classFilter='';
-  if(level){classParams.push(level);classFilter+=` AND c.school_level_id=$${classParams.length}`;}
-  if(cls){classParams.push(cls);classFilter+=` AND c.id=$${classParams.length}`;}
+  if(level){classParams.push(level);classFilter+=` AND c.school_level_id=$${classParams.length}::uuid`;}
+  if(cls){classParams.push(cls);classFilter+=` AND c.id=$${classParams.length}::uuid`;}
   if(req.user.role==='TEACHER'){
    classParams.push(teacherId);
    const teacherParam=classParams.length;
@@ -671,70 +673,76 @@ router.get('/:schoolId/analytics/subjects',schoolBoundary,roles('SCHOOL_ADMIN','
    const yearParam=classParams.length;
    classParams.push(t);
    const termParam=classParams.length;
-   classFilter+=` AND EXISTS(SELECT 1 FROM teacher_subject_assignments tsa WHERE tsa.school_id=c.school_id AND tsa.class_id=c.id AND tsa.teacher_id=$${teacherParam} AND tsa.academic_year_id=$${yearParam} AND (tsa.term_id=$${termParam} OR tsa.term_id IS NULL) AND COALESCE(tsa.is_active,true)=true)`;
+   classFilter+=` AND EXISTS(SELECT 1 FROM teacher_subject_assignments tsa WHERE tsa.school_id=c.school_id AND tsa.class_id=c.id AND tsa.teacher_id=$${teacherParam}::uuid AND tsa.academic_year_id=$${yearParam}::uuid AND (tsa.term_id=$${termParam}::uuid OR tsa.term_id IS NULL) AND COALESCE(tsa.is_active,true)=true)`;
   }
+  stage='class scope lookup';
   const classes=(await db.query(`SELECT c.id,c.name,c.stream,c.school_level_id,sl.name level_name,sl.school_section_id section_id
    FROM classes c LEFT JOIN school_levels sl ON sl.id=c.school_level_id
-   WHERE c.school_id=$1 AND COALESCE(c.is_active,true)=true${classFilter} ORDER BY sl.sort_order,c.name,c.stream`,classParams)).rows;
+   WHERE c.school_id=$1::uuid AND COALESCE(c.is_active,true)=true${classFilter} ORDER BY sl.sort_order,c.name,c.stream`,classParams)).rows;
   if(cls&&!classes.length)return res.status(404).json({error:'The selected class was not found in this school or grade.'});
   if(level&&!classes.length)return res.status(404).json({error:'The selected grade was not found in this school.'});
   if(assessmentId){
-   const selected=(await db.query(`SELECT id FROM assessments WHERE id=$1 AND school_id=$2 AND academic_year_id=$3 AND term_id=$4`,[assessmentId,sid,y,t])).rows[0];
+   stage='assessment validation';
+   const selected=(await db.query(`SELECT id FROM assessments WHERE id=$1::uuid AND school_id=$2::uuid AND academic_year_id=$3::uuid AND term_id=$4::uuid`,[assessmentId,sid,y,t])).rows[0];
    if(!selected)return res.status(404).json({error:'The selected assessment was not found for this year and term.'});
   }
   const classIds=classes.map(row=>row.id);
   const levelIds=[...new Set(classes.map(row=>row.school_level_id).filter(Boolean))];
   const sectionIds=[...new Set(classes.map(row=>row.section_id).filter(Boolean))];
+  stage='learner roster lookup';
   const roster=classIds.length?(await db.query(`SELECT DISTINCT l.id,l.admission_no,CONCAT_WS(' ',l.first_name,l.middle_name,l.last_name) learner_name,e.class_id,'ENROLLMENT'::text roster_source
    FROM learner_enrollments e JOIN learners l ON l.id=e.learner_id AND l.school_id=e.school_id JOIN classes c ON c.id=e.class_id AND c.school_id=e.school_id
-   WHERE e.school_id=$1 AND e.academic_year_id=$2 AND COALESCE(e.status,'ACTIVE') IN ('ACTIVE','COMPLETED') AND c.id=ANY($3::uuid[])
+   WHERE e.school_id=$1::uuid AND e.academic_year_id=$2::uuid AND COALESCE(e.status,'ACTIVE') IN ('ACTIVE','COMPLETED') AND c.id=ANY($3::uuid[])
    UNION
    SELECT DISTINCT l.id,l.admission_no,CONCAT_WS(' ',l.first_name,l.middle_name,l.last_name) learner_name,m.class_id,'MARKS_FALLBACK'::text roster_source
    FROM marks m JOIN learners l ON l.id=m.learner_id AND l.school_id=m.school_id
     JOIN classes c ON c.id=m.class_id AND c.school_id=m.school_id
-   WHERE m.school_id=$1 AND m.academic_year_id=$2 AND m.term_id=$4 AND m.mark IS NOT NULL AND c.id=ANY($3::uuid[])
+   WHERE m.school_id=$1::uuid AND m.academic_year_id=$2::uuid AND m.term_id=$4::uuid AND m.mark IS NOT NULL AND c.id=ANY($3::uuid[])
     AND ($5::uuid IS NULL OR m.assessment_id=$5)
     AND ($6::uuid IS NULL OR EXISTS(SELECT 1 FROM teacher_subject_assignments tsa
-     WHERE tsa.school_id=m.school_id AND tsa.teacher_id=$6 AND tsa.subject_id=m.subject_id AND tsa.class_id=m.class_id
+     WHERE tsa.school_id=m.school_id AND tsa.teacher_id=$6::uuid AND tsa.subject_id=m.subject_id AND tsa.class_id=m.class_id
       AND tsa.academic_year_id=m.academic_year_id AND (tsa.term_id=m.term_id OR tsa.term_id IS NULL)
       AND COALESCE(tsa.is_active,true)=true))
     AND NOT EXISTS(SELECT 1 FROM learner_enrollments e WHERE e.school_id=m.school_id
      AND e.learner_id=m.learner_id AND e.academic_year_id=m.academic_year_id AND e.class_id=m.class_id
      AND COALESCE(e.status,'ACTIVE') IN ('ACTIVE','COMPLETED'))
    ORDER BY class_id,admission_no`,[sid,y,classIds,t,assessmentId||null,teacherId||null])).rows:[];
+  stage='subject assignment lookup';
   const assignments=classIds.length?(await db.query(`SELECT DISTINCT available.class_id,available.subject_id,available.subject_name,available.subject_code
    FROM (
     SELECT tsa.class_id,tsa.subject_id,s.name subject_name,s.code subject_code
     FROM teacher_subject_assignments tsa JOIN subjects s ON s.id=tsa.subject_id
-    WHERE tsa.school_id=$1 AND tsa.academic_year_id=$2 AND (tsa.term_id=$3 OR tsa.term_id IS NULL)
+    WHERE tsa.school_id=$1::uuid AND tsa.academic_year_id=$2::uuid AND (tsa.term_id=$3::uuid OR tsa.term_id IS NULL)
      AND COALESCE(tsa.is_active,true)=true AND tsa.class_id=ANY($4::uuid[])
-     AND ($5::uuid IS NULL OR tsa.teacher_id=$5)
+     AND ($5::uuid IS NULL OR tsa.teacher_id=$5::uuid)
      AND ($6::uuid IS NULL OR EXISTS(SELECT 1 FROM assessments a WHERE a.id=$6
       AND (a.class_id IS NULL OR a.class_id=tsa.class_id) AND (a.subject_id IS NULL OR a.subject_id=tsa.subject_id)))
     UNION
     SELECT c.id,a.subject_id,s.name subject_name,s.code subject_code
     FROM assessments a JOIN classes c ON (a.class_id IS NULL OR a.class_id=c.id)
      JOIN subjects s ON s.id=a.subject_id
-    WHERE a.school_id=$1 AND a.academic_year_id=$2 AND a.term_id=$3 AND a.subject_id IS NOT NULL
+    WHERE a.school_id=$1::uuid AND a.academic_year_id=$2::uuid AND a.term_id=$3::uuid AND a.subject_id IS NOT NULL
      AND c.id=ANY($4::uuid[]) AND ($6::uuid IS NULL OR a.id=$6)
      AND ($5::uuid IS NULL OR EXISTS(SELECT 1 FROM teacher_subject_assignments tsa
-      WHERE tsa.school_id=$1 AND tsa.academic_year_id=$2 AND (tsa.term_id=$3 OR tsa.term_id IS NULL)
-       AND tsa.class_id=c.id AND tsa.subject_id=a.subject_id AND tsa.teacher_id=$5
+      WHERE tsa.school_id=$1::uuid AND tsa.academic_year_id=$2::uuid AND (tsa.term_id=$3::uuid OR tsa.term_id IS NULL)
+       AND tsa.class_id=c.id AND tsa.subject_id=a.subject_id AND tsa.teacher_id=$5::uuid
        AND COALESCE(tsa.is_active,true)=true))
    ) available`,[sid,y,t,classIds,teacherId||null,assessmentId||null])).rows:[];
+  stage='saved marks lookup';
   const marks=classIds.length?(await db.query(`SELECT m.learner_id,m.class_id,m.subject_id,s.name subject_name,s.code subject_code,
      m.assessment_id,a.name assessment_name,a.assessment_type,m.mark,a.max_mark
    FROM marks m JOIN assessments a ON a.id=m.assessment_id AND a.school_id=m.school_id
    JOIN subjects s ON s.id=m.subject_id JOIN classes c ON c.id=m.class_id AND c.school_id=m.school_id
    JOIN learners l ON l.id=m.learner_id AND l.school_id=m.school_id
-   WHERE m.school_id=$1 AND m.academic_year_id=$2 AND m.term_id=$3 AND m.mark IS NOT NULL AND a.max_mark>0
+   WHERE m.school_id=$1::uuid AND m.academic_year_id=$2::uuid AND m.term_id=$3::uuid AND m.mark IS NOT NULL AND a.max_mark>0
     AND c.id=ANY($4::uuid[]) AND ($5::uuid IS NULL OR a.id=$5)
     AND ($6::uuid IS NULL OR EXISTS(SELECT 1 FROM teacher_subject_assignments tsa
-     WHERE tsa.school_id=m.school_id AND tsa.teacher_id=$6 AND tsa.subject_id=m.subject_id AND tsa.class_id=m.class_id
+     WHERE tsa.school_id=m.school_id AND tsa.teacher_id=$6::uuid AND tsa.subject_id=m.subject_id AND tsa.class_id=m.class_id
       AND tsa.academic_year_id=m.academic_year_id AND (tsa.term_id=m.term_id OR tsa.term_id IS NULL)
       AND COALESCE(tsa.is_active,true)=true))
    ORDER BY s.name,m.class_id,m.learner_id,a.assessment_order,a.name`,[sid,y,t,classIds,assessmentId||null,teacherId||null])).rows:[];
   const subjectIds=[...new Set([...assignments.map(row=>row.subject_id),...marks.map(row=>row.subject_id)])];
+  stage='grading configuration lookup';
   const configs=classIds.length&&subjectIds.length?(await db.query(`SELECT ac.class_id,ac.level_id,ac.section_id,ac.subject_id,ac.assessment_id,ac.target_mark,
      gs.id grading_system_id,COALESCE(json_agg(json_build_object('label',gb.label,'min_mark',gb.min_mark,'max_mark',gb.max_mark,'descriptor',gb.descriptor)
       ORDER BY gb.min_mark DESC) FILTER(WHERE gb.id IS NOT NULL),'[]') bands
@@ -746,6 +754,7 @@ router.get('/:schoolId/analytics/subjects',schoolBoundary,roles('SCHOOL_ADMIN','
     AND (ac.subject_id IS NULL OR ac.subject_id=ANY($5::uuid[]))
     AND (ac.assessment_id IS NULL OR ac.assessment_id=$6::uuid)
    GROUP BY ac.id,gs.id`,[sid,classIds,levelIds,sectionIds,subjectIds,assessmentId||null])).rows.map(row=>({...row,bands:Array.isArray(row.bands)?row.bands:[]})):[];
+  stage='historical trend lookup';
   const trends=classIds.length?(await db.query(`SELECT m.academic_year_id,ay.year_label,m.term_id,tr.name term_name,tr.term_no,
      m.subject_id,s.name subject_name,COUNT(DISTINCT m.learner_id)::int assessed,
      AVG((m.mark/NULLIF(a.max_mark,0))*100.0) average
@@ -762,7 +771,7 @@ router.get('/:schoolId/analytics/subjects',schoolBoundary,roles('SCHOOL_ADMIN','
   const {analyzeSubjectPerformance}=require('../services/subject-analytics-engine');
   const result=analyzeSubjectPerformance({classes,roster,assignments,marks,configs,trends,assessmentId:assessmentId||null});
   res.json({...result,enrollment_fallback_count:roster.filter(row=>row.roster_source==='MARKS_FALLBACK').length,context:{academic_year_id:y,term_id:t,level_id:level||null,class_id:cls||null,teacher_id:teacherId||null,assessment_id:assessmentId||null}});
- }catch(e){console.error('Unable to load subject analytics:',e);res.status(e.status||500).json({error:e.message||'Unable to load subject analytics'});}
+ }catch(e){console.error(`Unable to load subject analytics during ${stage}:`,e);res.status(e.status||500).json({error:`Subject analytics failed during ${stage}: ${e.message||'Unable to load results'}`});}
 });
 
 // Deep academic analytics for the selected grade/class context.
