@@ -127,17 +127,18 @@ Apply the additive migration `database/008_assessment_context_and_portal_sms.sql
 
 Assessments are now contextual to academic year, term, class and subject. The administrator can configure Opener, optional CATs, Mid Term and End Term. Each assessment stores its raw maximum mark (20/30/50/100/etc.) and an optional final-contribution weight so final conversion can be applied later without changing the original mark.
 
-For live parent SMS, the application supports Africa's Talking directly:
+For parent SMS, choose one server-side provider. Infobip is supported for trial and production SMS:
 
-- `SMS_PROVIDER=AFRICASTALKING`
-- `SMS_AFRICA_TALKING_USERNAME=your_app_username`
-- `SMS_AFRICA_TALKING_API_KEY=your_api_key`
-- `SMS_AFRICA_TALKING_ENV=live` (or `sandbox` while testing)
-- `SMS_AFRICA_TALKING_SENDER_ID=your_approved_sender_id` (optional until approved/required)
+- `SMS_PROVIDER=INFOBIP`
+- `SMS_INFOBIP_BASE_URL=https://your-account-base-url` (copy the unique Base URL from the Infobip portal)
+- `SMS_INFOBIP_API_KEY=your_api_key` (secret; configure only in the server environment)
+- `SMS_INFOBIP_SENDER=ServiceSMS` (optional; use the sender Infobip provides for your trial or approved sender for production)
+- `SMS_INFOBIP_TRIAL_MODE=true` while using trial credentials
+- `SMS_INFOBIP_TRIAL_RECIPIENTS=2547XXXXXXXX,2547YYYYYYYY` (comma-separated verified test numbers; only these contacts can receive trial messages)
 
-The results publication workflow only sends to guardians who are linked to the learner and have an active phone number, SMS enabled, and communication consent. Messages are recorded in `communication_messages` with delivery status/provider information.
+Infobip trials restrict delivery to verified recipient numbers; the number of trial messages and duration depend on the account and can change. In trial mode, the application skips other recipients and displays their status instead of sending to them. Test only with verified numbers. The results publication workflow sends only to guardians linked to the learner who have an active phone number, SMS enabled, and communication consent. Messages are recorded in `communication_messages` with delivery status, provider and message ID. After upgrading to production, turn off `SMS_INFOBIP_TRIAL_MODE` and configure an approved sender if required.
 
-Africa's Talking requires an account/app/API key and a sender ID or shortcode for production messaging. See the official getting-started and SMS guidance before enabling live sending.
+Africa's Talking is also supported using `SMS_PROVIDER=AFRICASTALKING`, `SMS_AFRICA_TALKING_USERNAME`, and `SMS_AFRICA_TALKING_API_KEY`; its optional environment and sender settings are `SMS_AFRICA_TALKING_ENV` and `SMS_AFRICA_TALKING_SENDER_ID`. Keep provider credentials out of browser code and Git, and configure them only in the hosting provider's environment settings.
 
 ## 3.8 Portal identity, compact administration and SMS delivery tracking
 

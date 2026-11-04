@@ -467,7 +467,7 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
     stream_rank: rankFor?Number(rankFor.stream_rank):null,
     stream_rank_total: rankFor?Number(rankFor.stream_count):null,
     class_rank_total: rankFor?Number(rankFor.class_count):null,
-    previous_year_deviations: [...new Map(priorRows.map(p=>p.year_label)).values()].map(year_label=>{const vals=subjects.flatMap(s=>(s.previous_years||[]).filter(p=>p.year_label===year_label).map(p=>({current:s.average,previous:p.average}))).filter(x=>x.current!=null);return {year_label,deviation:vals.length?vals.reduce((a,x)=>a+(x.current-x.previous),0)/vals.length:null};}).filter(x=>x.deviation!=null).sort((a,b)=>String(b.year_label).localeCompare(String(a.year_label))),
+    previous_year_deviations: [...new Set(priorRows.map(p=>p.year_label))].map(year_label=>{const vals=subjects.flatMap(s=>(s.previous_years||[]).filter(p=>p.year_label===year_label).map(p=>({current:s.average,previous:p.average}))).filter(x=>x.current!=null);return {year_label,deviation:vals.length?vals.reduce((a,x)=>a+(x.current-x.previous),0)/vals.length:null};}).filter(x=>x.deviation!=null).sort((a,b)=>String(b.year_label).localeCompare(String(a.year_label))),
     assessments,
     // Assessment columns are driven entirely by what the administrator configured
     // for this class/term. Term 3 is NOT hard-coded to two exams: if Opener, Mid

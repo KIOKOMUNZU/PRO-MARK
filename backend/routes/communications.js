@@ -4,13 +4,84 @@ const {authenticate,roles,schoolBoundary}=require('../middleware/auth');
 const router=express.Router();
 const analyticsResponseCache=new Map();
 router.use(authenticate);
+function normalizedPhone(phone){
+ return String(phone||'').replace(/[\s()+-]/g,'');
+}
+function infobipTrialConfiguration(){
+ const trialMode=String(process.env.SMS_INFOBIP_TRIAL_MODE||'').toLowerCase()==='true';
+ const recipients=[...new Set(String(process.env.SMS_INFOBIP_TRIAL_RECIPIENTS||'')
+  .split(',').map(normalizedPhone).filter(Boolean))];
+ return {trialMode,recipients};
+}
+function smsDeliveryConfiguration(){
+ const provider=String(process.env.SMS_PROVIDER||'').toUpperCase();
+ const infobipBaseUrl=String(process.env.SMS_INFOBIP_BASE_URL||'').trim();
+ const infobipApiKey=process.env.SMS_INFOBIP_API_KEY;
+ if(provider==='INFOBIP'&&infobipBaseUrl&&infobipApiKey){
+  const trial=infobipTrialConfiguration();
+  try{
+   if(new URL(infobipBaseUrl).protocol==='https:'&&(!trial.trialMode||trial.recipients.length))
+    return {configured:true,provider:'INFOBIP',trial_mode:trial.trialMode,trial_recipient_count:trial.recipients.length};
+  }catch{}
+  return {configured:false,provider:'INFOBIP',trial_mode:trial.trialMode,trial_recipient_count:trial.recipients.length};
+ }
+ const username=process.env.SMS_AFRICASTALKING_USERNAME||process.env.SMS_AFRICA_TALKING_USERNAME;
+ const apiKey=process.env.SMS_AFRICA_TALKING_API_KEY||process.env.SMS_AFRICASTALKING_API_KEY;
+ if(provider==='AFRICASTALKING'&&username&&apiKey)
+  return {configured:true,provider:'AFRICASTALKING'};
+ if(process.env.SMS_WEBHOOK_URL)return {configured:true,provider:'WEBHOOK'};
+ return {configured:false,provider:null};
+}
 async function deliverSms({phone,message,school_id,learner_id}){
   const provider=String(process.env.SMS_PROVIDER||'').toUpperCase();
-  if(provider==='AFRICASTALKING' && process.env.SMS_AFRICA_TALKING_USERNAME && process.env.SMS_AFRICA_TALKING_API_KEY){
-    const base=String(process.env.SMS_AFRICA_TALKING_ENV||'live').toLowerCase()==='sandbox'?'https://api.sandbox.africastalking.com':'https://api.africastalking.com';
-    const form=new URLSearchParams({username:process.env.SMS_AFRICA_TALKING_USERNAME,to:String(phone),message:String(message)});
-    if(process.env.SMS_AFRICA_TALKING_SENDER_ID)form.set('from',process.env.SMS_AFRICA_TALKING_SENDER_ID);
-    const rr=await fetch(`${base}/version1/messaging`,{method:'POST',headers:{Accept:'application/json','Content-Type':'application/x-www-form-urlencoded',apiKey:process.env.SMS_AFRICA_TALKING_API_KEY},body:form});
+  if(provider==='INFOBIP'){
+    const baseUrl=String(process.env.SMS_INFOBIP_BASE_URL||'').trim().replace(/\/+$/,'');
+    const apiKey=process.env.SMS_INFOBIP_API_KEY;
+    if(!baseUrl||!apiKey)throw new Error('Infobip is not configured. Set SMS_INFOBIP_BASE_URL and SMS_INFOBIP_API_KEY on the server.');
+    const trial=infobipTrialConfiguration();
+    if(trial.trialMode&&!trial.recipients.includes(normalizedPhone(phone)))
+      throw new Error('Not sent: recipient is not in the configured Infobip trial verified-number list.');
+    let endpoint;
+    try{
+      endpoint=new URL(`${baseUrl}/sms/3/messages`);
+      if(endpoint.protocol!=='https:')throw new Error('The Infobip base URL must use HTTPS.');
+    }catch(e){throw new Error(`Invalid Infobip base URL: ${e.message}`);}
+    const smsMessage={
+      destinations:[{to:normalizedPhone(phone)}],
+      content:{text:String(message)}
+    };
+    const sender=String(process.env.SMS_INFOBIP_SENDER||'').trim();
+    if(sender)smsMessage.sender=sender;
+    const response=await fetch(endpoint,{method:'POST',
+      headers:{Accept:'application/json','Content-Type':'application/json',Authorization:`App ${apiKey}`},
+      body:JSON.stringify({messages:[smsMessage]})});
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok){
+      const description=data?.description||data?.requestError?.serviceException?.text||`Infobip returned ${response.status}`;
+      throw new Error(description);
+    }
+    const messageResult=data?.messages?.[0];
+    if(!messageResult)throw new Error('Infobip accepted no message; check the account response in Infobip.');
+    const statusName=String(messageResult.status?.name||'').toUpperCase();
+    const groupName=String(messageResult.status?.groupName||'').toUpperCase();
+    if(groupName==='REJECTED'||statusName.includes('REJECT'))
+      throw new Error(messageResult.status?.description||messageResult.status?.name||'Infobip rejected the message.');
+    return {
+      status:groupName==='PENDING'?'QUEUED':'SENT',
+      provider:'INFOBIP',
+      providerMessageId:messageResult.messageId||null,
+      response:data
+    };
+  }
+  const username=process.env.SMS_AFRICASTALKING_USERNAME||process.env.SMS_AFRICA_TALKING_USERNAME;
+  const apiKey=process.env.SMS_AFRICA_TALKING_API_KEY||process.env.SMS_AFRICASTALKING_API_KEY;
+  const environment=process.env.SMS_AFRICASTALKING_ENV||process.env.SMS_AFRICA_TALKING_ENV||'live';
+  const senderId=process.env.SMS_AFRICASTALKING_SENDER_ID||process.env.SMS_AFRICA_TALKING_SENDER_ID;
+  if(provider==='AFRICASTALKING' && username && apiKey){
+    const base=String(environment).toLowerCase()==='sandbox'?'https://api.sandbox.africastalking.com':'https://api.africastalking.com';
+    const form=new URLSearchParams({username,to:String(phone),message:String(message)});
+    if(senderId)form.set('from',senderId);
+    const rr=await fetch(`${base}/version1/messaging`,{method:'POST',headers:{Accept:'application/json','Content-Type':'application/x-www-form-urlencoded',apiKey},body:form});
     const data=await rr.json().catch(()=>({}));
     if(!rr.ok)throw new Error(`Africa's Talking returned ${rr.status}`);
     const recipient=data?.SMSMessageData?.Recipients?.[0];
@@ -119,7 +190,7 @@ async function publicationRoster(sid,yearId,termId,levelIds,classIds){
   LEFT JOIN learner_guardians lg ON lg.learner_id=l.id
   LEFT JOIN parent_guardians pg ON pg.id=lg.parent_guardian_id AND pg.school_id=e.school_id
   WHERE e.school_id=$1 AND e.academic_year_id=$2
-    AND COALESCE(e.status,'ACTIVE')='ACTIVE'
+    AND COALESCE(e.status,'ACTIVE') IN ('ACTIVE','COMPLETED')
     AND COALESCE(l.is_active,true)=true
     AND (
       (cardinality($4::uuid[])=0 AND cardinality($5::uuid[])=0)
@@ -329,7 +400,7 @@ router.get('/:schoolId/result-publications',schoolBoundary,roles('SCHOOL_ADMIN',
    sms_failed:out.sms_failed+Number(row.sms_failed||0),
    sms_skipped:out.sms_skipped+Number(row.sms_skipped||0)
   }),{publications:0,learners:0,sms_sent:0,sms_queued:0,sms_sending:0,sms_failed:0,sms_skipped:0});
-  res.json({publications:rows.rows,summary});
+  res.json({publications:rows.rows,summary,sms_delivery:smsDeliveryConfiguration()});
  }catch(e){res.status(e.status||400).json({error:e.message})}
 });
 router.post('/:schoolId/result-publications',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{
@@ -439,6 +510,11 @@ router.post('/:schoolId/result-publications/:publicationId/notifications',school
    'SELECT * FROM result_publications WHERE id=$1 AND school_id=$2',[publicationId,sid]
   )).rows[0];
   if(!publication)return res.status(404).json({error:'Publication not found.'});
+  const deliveryConfiguration=smsDeliveryConfiguration();
+  if(!deliveryConfiguration.configured)
+   return res.status(503).json({error:deliveryConfiguration.provider==='INFOBIP'
+    ?'Infobip is not fully configured. Set its HTTPS base URL and API key; in trial mode, add your verified recipient numbers to SMS_INFOBIP_TRIAL_RECIPIENTS.'
+    :'SMS delivery is not configured. Add provider credentials to the server before sending notifications.'});
   const retryFailedOnly=req.body?.retry_failed_only===true;
   const records=(await db.query(`
    SELECT id,learner_id,result_snapshot FROM result_publication_records
@@ -461,12 +537,36 @@ router.post('/:schoolId/result-publications/:publicationId/notifications',school
     .replaceAll('{average}',report.overall_average==null?'—':Number(report.overall_average).toFixed(2))
     .replaceAll('{grade}',report.overall_grade||'—');
    for(const guardian of guardians){
+    const trial=infobipTrialConfiguration();
+    if(deliveryConfiguration.provider==='INFOBIP'&&trial.trialMode&&
+       !trial.recipients.includes(normalizedPhone(guardian.phone))){
+     const existing=(await db.query(`
+      SELECT id,status FROM communication_messages
+      WHERE result_publication_record_id=$1 AND parent_guardian_id=$2
+        AND message_type='PUBLISHED_RESULTS' LIMIT 1
+     `,[record.id,guardian.id])).rows[0];
+     if(existing?.status==='SENT'||existing?.status==='SENDING'||existing?.status==='QUEUED'){skipped++;continue;}
+     if(existing)await db.query(`
+      UPDATE communication_messages SET status='SKIPPED',failure_reason=$2
+      WHERE id=$1
+     `,[existing.id,'Not sent: recipient is not in the configured Infobip trial verified-number list.']);
+     else await db.query(`
+      INSERT INTO communication_messages(
+       school_id,learner_id,parent_guardian_id,channel,message_type,body,status,provider,
+       failure_reason,created_by,academic_year_id,term_id,result_publication_id,result_publication_record_id
+      ) VALUES($1,$2,$3,'SMS','PUBLISHED_RESULTS',$4,'SKIPPED','INFOBIP',$5,$6,$7,$8,$9,$10)
+      ON CONFLICT DO NOTHING
+     `,[sid,record.learner_id,guardian.id,message,
+       'Not sent: recipient is not in the configured Infobip trial verified-number list.',
+       req.user.user_id,publication.academic_year_id,publication.term_id,publication.id,record.id]);
+     skipped++;continue;
+    }
     let existing=(await db.query(`
      SELECT id,status FROM communication_messages
      WHERE result_publication_record_id=$1 AND parent_guardian_id=$2
        AND message_type='PUBLISHED_RESULTS' LIMIT 1
     `,[record.id,guardian.id])).rows[0];
-    if(existing?.status==='SENT'||(retryFailedOnly&&existing?.status!=='FAILED')){skipped++;continue;}
+    if(['SENT','SENDING','QUEUED'].includes(existing?.status)||(retryFailedOnly&&existing?.status!=='FAILED')){skipped++;continue;}
     let messageId=existing?.id;
     if(!existing){
      const inserted=await db.query(`
@@ -483,19 +583,20 @@ router.post('/:schoolId/result-publications/:publicationId/notifications',school
      const claimed=await db.query(`
       UPDATE communication_messages SET status='SENDING',body=$2,failure_reason=NULL,
        provider=COALESCE(NULLIF($3,''),provider)
-      WHERE id=$1 AND status IN ('FAILED','QUEUED') RETURNING id
+       WHERE id=$1 AND status IN ('FAILED','QUEUED','SKIPPED') RETURNING id
      `,[existing.id,message,process.env.SMS_PROVIDER||'UNCONFIGURED']);
      if(!claimed.rowCount){skipped++;continue;}
     }
-    let status='QUEUED',provider=process.env.SMS_PROVIDER||'UNCONFIGURED',failure=null;
+    let status='QUEUED',provider=process.env.SMS_PROVIDER||'UNCONFIGURED',failure=null,providerMessageId=null;
     try{
      const delivery=await deliverSms({phone:guardian.phone,message,school_id:sid,learner_id:record.learner_id});
-     status=delivery.status;provider=delivery.provider||provider;
+     status=delivery.status;provider=delivery.provider||provider;providerMessageId=delivery.providerMessageId||null;
     }catch(e){status='FAILED';failure=e.message;}
     await db.query(`
      UPDATE communication_messages SET status=$2,provider=$3,failure_reason=$4,
-       sent_at=CASE WHEN $2='SENT' THEN now() ELSE NULL END WHERE id=$1
-    `,[messageId,status,provider,failure]);
+       provider_message_id=COALESCE($5,provider_message_id),
+       sent_at=CASE WHEN $2 IN ('SENT','QUEUED') THEN now() ELSE NULL END WHERE id=$1
+    `,[messageId,status,provider,failure,providerMessageId]);
     if(status==='SENT')sent++;else if(status==='QUEUED')queued++;else failed++;
     details.push({
      learner_id:record.learner_id,learner:learnerName,
