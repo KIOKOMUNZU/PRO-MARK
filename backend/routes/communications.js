@@ -644,10 +644,23 @@ router.get('/:schoolId/analytics/subjects',schoolBoundary,roles('SCHOOL_ADMIN','
   const classIds=classes.map(row=>row.id);
   const levelIds=[...new Set(classes.map(row=>row.school_level_id).filter(Boolean))];
   const sectionIds=[...new Set(classes.map(row=>row.section_id).filter(Boolean))];
-  const roster=classIds.length?(await db.query(`SELECT DISTINCT l.id,l.admission_no,CONCAT_WS(' ',l.first_name,l.middle_name,l.last_name) learner_name,e.class_id
-   FROM learner_enrollments e JOIN learners l ON l.id=e.learner_id JOIN classes c ON c.id=e.class_id
-   WHERE e.school_id=$1 AND e.academic_year_id=$2 AND COALESCE(e.status,'ACTIVE')='ACTIVE' AND c.id=ANY($3::uuid[])
-   ORDER BY e.class_id,l.admission_no`,[sid,y,classIds])).rows:[];
+  const roster=classIds.length?(await db.query(`SELECT DISTINCT l.id,l.admission_no,CONCAT_WS(' ',l.first_name,l.middle_name,l.last_name) learner_name,e.class_id,'ENROLLMENT'::text roster_source
+   FROM learner_enrollments e JOIN learners l ON l.id=e.learner_id AND l.school_id=e.school_id JOIN classes c ON c.id=e.class_id AND c.school_id=e.school_id
+   WHERE e.school_id=$1 AND e.academic_year_id=$2 AND COALESCE(e.status,'ACTIVE') IN ('ACTIVE','COMPLETED') AND c.id=ANY($3::uuid[])
+   UNION
+   SELECT DISTINCT l.id,l.admission_no,CONCAT_WS(' ',l.first_name,l.middle_name,l.last_name) learner_name,m.class_id,'MARKS_FALLBACK'::text roster_source
+   FROM marks m JOIN learners l ON l.id=m.learner_id AND l.school_id=m.school_id
+    JOIN classes c ON c.id=m.class_id AND c.school_id=m.school_id
+   WHERE m.school_id=$1 AND m.academic_year_id=$2 AND m.term_id=$4 AND m.mark IS NOT NULL AND c.id=ANY($3::uuid[])
+    AND ($5::uuid IS NULL OR m.assessment_id=$5)
+    AND ($6::uuid IS NULL OR EXISTS(SELECT 1 FROM teacher_subject_assignments tsa
+     WHERE tsa.school_id=m.school_id AND tsa.teacher_id=$6 AND tsa.subject_id=m.subject_id AND tsa.class_id=m.class_id
+      AND tsa.academic_year_id=m.academic_year_id AND (tsa.term_id=m.term_id OR tsa.term_id IS NULL)
+      AND COALESCE(tsa.is_active,true)=true))
+    AND NOT EXISTS(SELECT 1 FROM learner_enrollments e WHERE e.school_id=m.school_id
+     AND e.learner_id=m.learner_id AND e.academic_year_id=m.academic_year_id AND e.class_id=m.class_id
+     AND COALESCE(e.status,'ACTIVE') IN ('ACTIVE','COMPLETED'))
+   ORDER BY class_id,admission_no`,[sid,y,classIds,t,assessmentId||null,teacherId||null])).rows:[];
   const assignments=classIds.length?(await db.query(`SELECT DISTINCT available.class_id,available.subject_id,available.subject_name,available.subject_code
    FROM (
     SELECT tsa.class_id,tsa.subject_id,s.name subject_name,s.code subject_code
@@ -671,11 +684,10 @@ router.get('/:schoolId/analytics/subjects',schoolBoundary,roles('SCHOOL_ADMIN','
   const marks=classIds.length?(await db.query(`SELECT m.learner_id,m.class_id,m.subject_id,s.name subject_name,s.code subject_code,
      m.assessment_id,a.name assessment_name,a.assessment_type,m.mark,a.max_mark
    FROM marks m JOIN assessments a ON a.id=m.assessment_id AND a.school_id=m.school_id
-   JOIN subjects s ON s.id=m.subject_id JOIN classes c ON c.id=m.class_id
+   JOIN subjects s ON s.id=m.subject_id JOIN classes c ON c.id=m.class_id AND c.school_id=m.school_id
+   JOIN learners l ON l.id=m.learner_id AND l.school_id=m.school_id
    WHERE m.school_id=$1 AND m.academic_year_id=$2 AND m.term_id=$3 AND m.mark IS NOT NULL AND a.max_mark>0
     AND c.id=ANY($4::uuid[]) AND ($5::uuid IS NULL OR a.id=$5)
-    AND EXISTS(SELECT 1 FROM learner_enrollments e WHERE e.school_id=m.school_id AND e.learner_id=m.learner_id
-     AND e.class_id=m.class_id AND e.academic_year_id=m.academic_year_id AND COALESCE(e.status,'ACTIVE')='ACTIVE')
     AND ($6::uuid IS NULL OR EXISTS(SELECT 1 FROM teacher_subject_assignments tsa
      WHERE tsa.school_id=m.school_id AND tsa.teacher_id=$6 AND tsa.subject_id=m.subject_id AND tsa.class_id=m.class_id
       AND tsa.academic_year_id=m.academic_year_id AND (tsa.term_id=m.term_id OR tsa.term_id IS NULL)
@@ -708,7 +720,7 @@ router.get('/:schoolId/analytics/subjects',schoolBoundary,roles('SCHOOL_ADMIN','
     ORDER BY ay.year_label,tr.term_no,s.name`,[sid,classIds,teacherId||null])).rows:[];
   const {analyzeSubjectPerformance}=require('../services/subject-analytics-engine');
   const result=analyzeSubjectPerformance({classes,roster,assignments,marks,configs,trends,assessmentId:assessmentId||null});
-  res.json({...result,context:{academic_year_id:y,term_id:t,level_id:level||null,class_id:cls||null,teacher_id:teacherId||null,assessment_id:assessmentId||null}});
+  res.json({...result,enrollment_fallback_count:roster.filter(row=>row.roster_source==='MARKS_FALLBACK').length,context:{academic_year_id:y,term_id:t,level_id:level||null,class_id:cls||null,teacher_id:teacherId||null,assessment_id:assessmentId||null}});
  }catch(e){console.error('Unable to load subject analytics:',e);res.status(e.status||500).json({error:e.message||'Unable to load subject analytics'});}
 });
 

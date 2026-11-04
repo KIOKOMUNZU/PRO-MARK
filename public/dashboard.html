@@ -3063,6 +3063,8 @@ if(selected==='subjects'){
   ['Lowest subject',rows.length&&rows[rows.length-1].average!=null?`${rows[rows.length-1].name} · ${fmt(rows[rows.length-1].average)}%`:'—'],
   ['Subjects below target',rows.filter(x=>x.target!=null&&x.average!=null&&x.average<x.target).length]
  ]);
+ if(Number(r.enrollment_fallback_count)>0)html+=`<p class="notice">Historical enrollment records were missing for ${Number(r.enrollment_fallback_count)} learner(s). Their saved marks are included, but coverage can only be calculated against the learners evidenced by enrollments or marks.</p>`;
+ if(!learners.length&&rows.length)html+='<p class="notice">No saved marks or active historical enrollment records were found for this selection. Confirm the academic year, term, and assessment before concluding that marks are missing.</p>';
  if(rows.some(x=>x.assessed>0&&x.assessed<5))html+='<p class="notice">Small sample warning: a subject with fewer than five assessed learners should not be treated as representative of the whole grade or school.</p>';
  html+=panel('Subject performance',table(['Subject','Mean (%)','Highest (%)','Lowest (%)','Assessed','Expected','Not assessed','Coverage','Target','Vs target'],rows.map(x=>[
   x.name,fmt(x.average),fmt(x.highest),fmt(x.lowest),x.assessed,x.expected,x.not_assessed,x.coverage==null?'—':`${fmt(x.coverage)}%`,

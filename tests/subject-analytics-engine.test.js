@@ -21,7 +21,7 @@ const result = analyzeSubjectPerformance({
     section_id: 'section-primary'
   }],
   roster: [
-    {id: 'learner-1', class_id: 'class-1', learner_name: 'A Learner', admission_no: 'A1'},
+    {id: 'learner-1', class_id: 'class-1', learner_name: 'A Learner', admission_no: 'A1', roster_source: 'MARKS_FALLBACK'},
     {id: 'learner-2', class_id: 'class-1', learner_name: 'B Learner', admission_no: 'B1'}
   ],
   assignments: [
@@ -75,6 +75,7 @@ assert.equal(result.overall.assessed_learners, 1);
 assert.equal(result.overall.expected_subject_learners, 4);
 assert.equal(result.overall.coverage, 50);
 assert.equal(result.overall.mean, 80);
+assert.equal(result.enrollment_fallback_count, 1);
 
 const math = result.subjects.find(subject => subject.id === 'math');
 assert.equal(math.average, 90);

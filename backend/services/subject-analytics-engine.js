@@ -201,6 +201,7 @@ function analyzeSubjectPerformance({classes, roster, assignments, marks, configs
 
   const assessedCount = new Set(learnerSubjectRows.map(row => row.learner_id)).size;
   const assessedPairs = learnerSubjectRows.length;
+  const enrollmentFallbackCount = roster.filter(row => row.roster_source === 'MARKS_FALLBACK').length;
   const allValues = learnerSubjectRows.map(row => row.average);
   const trendGroups = new Map();
   for (const row of trends) {
@@ -265,6 +266,7 @@ function analyzeSubjectPerformance({classes, roster, assignments, marks, configs
     learners: learnerSubjectRows.sort((a, b) =>
       a.subject_name.localeCompare(b.subject_name) || a.learner_name.localeCompare(b.learner_name)
     ),
+    enrollment_fallback_count: enrollmentFallbackCount,
     trends: trendRows,
     interventions: flags
   };
