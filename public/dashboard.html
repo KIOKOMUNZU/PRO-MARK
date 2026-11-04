@@ -2792,6 +2792,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 .za-v5-table{width:100%;border-collapse:collapse;font-size:.91rem}.za-v5-table th,.za-v5-table td{padding:10px;border-bottom:1px solid #dce9e1;text-align:left}.za-v5-table th{background:#e9f5ee;color:#174c32;position:sticky;top:0}
 .za-v5-scroll{overflow:auto;max-height:540px}.za-v5-panel{margin-top:15px;border:1px solid #dae8df;border-radius:10px;padding:14px}
 .za-v5-panel h4{margin:0 0 12px}.za-v5-bar{display:flex;gap:8px;align-items:center;margin:8px 0}.za-v5-bar span{width:180px;max-width:35%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.za-v5-bar i{display:block;background:#15945c;height:13px;border-radius:8px}.za-v5-bar b{margin-left:auto}
+.za-chart{display:block;width:100%;height:auto;overflow:visible}.za-chart text{font-family:inherit;fill:#496457;font-size:12px}.za-chart .za-chart-grid{stroke:#dbe8df;stroke-width:1}.za-chart .za-chart-axis{stroke:#91aa9c;stroke-width:1}.za-chart .za-chart-bar{fill:#12845a}.za-chart .za-chart-target{stroke:#d68128;stroke-width:2;stroke-dasharray:4 3}.za-chart .za-chart-line{fill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.za-chart .za-chart-point{stroke:white;stroke-width:2}.za-chart-legend{display:flex;gap:8px 16px;flex-wrap:wrap;margin:8px 0 0}.za-chart-legend span{display:inline-flex;gap:6px;align-items:center;font-size:.86rem}.za-chart-legend i{width:11px;height:11px;border-radius:3px;display:inline-block}.za-chart-note{font-size:.84rem;color:#60766a;margin:8px 0 0}
 @media(max-width:640px){.za-v5-controls{display:grid;grid-template-columns:1fr}.za-v5-controls label{min-width:0}#zaWorkspace .za-detail{padding:10px}}
 
 /* Unified analytics navigation and context */
@@ -2812,7 +2813,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 (function(){
 'use strict';
 const root=document.getElementById('zaWorkspace'),out=document.getElementById('zaWorkspaceDetail');if(!root||!out)return;
-let selected='school',cached=null,meritData=null,assessments=[],subjectAssessmentId='';
+let selected='school',cached=null,meritData=null,assessments=[],subjectAssessmentId='',classChartSubjectId='';
 const $=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=v=>v==null||!Number.isFinite(Number(v))?'—':Number(v).toFixed(2).replace(/\.00$/,'');
 const sid=()=>{try{const u=JSON.parse(localStorage.getItem('user')||'{}');return u.school_id||new URLSearchParams(location.search).get('school_id')}catch{return null}};
@@ -2823,6 +2824,64 @@ const table=(headers,rows)=>`<div class="za-v5-scroll"><table class="za-v5-table
 const kpis=arr=>`<div class="za-v5-kpis">${arr.map(([k,v])=>`<div class="za-v5-kpi"><small>${esc(k)}</small><strong>${esc(v)}</strong></div>`).join('')}</div>`;
 const panel=(title,html)=>`<section class="za-v5-panel"><h4>${esc(title)}</h4>${html}</section>`;
 const bars=(rows,label,value)=>rows.length?rows.slice(0,25).map(x=>`<div class="za-v5-bar"><span title="${esc(x[label])}">${esc(x[label])}</span><div style="flex:1;background:#e3efe7;border-radius:8px"><i style="width:${Math.max(0,Math.min(100,Number(x[value])||0))}%"></i></div><b>${fmt(x[value])}%</b></div>`).join(''):'No verified results available.';
+const chartColors=['#12845a','#3b82c4','#d68128','#8a61b5','#d05050','#259a9a','#768b3d','#cb6b9b'];
+function subjectBarChart(rows,key='average',targetKey='target'){
+ const items=rows.filter(row=>row[key]!=null&&Number.isFinite(Number(row[key]))).slice(0,18);
+ if(!items.length)return '<p class="muted small">No measured subject results to chart.</p>';
+ const width=900,left=190,right=90,top=22,rowHeight=34,bottom=34,plotWidth=width-left-right,height=top+items.length*rowHeight+bottom;
+ const grid=[0,25,50,75,100].map(value=>{const x=left+plotWidth*value/100;return `<line class="za-chart-grid" x1="${x}" y1="${top-6}" x2="${x}" y2="${height-bottom}"/><text x="${x}" y="${height-8}" text-anchor="middle">${value}%</text>`;}).join('');
+ const bars=items.map((row,index)=>{
+  const y=top+index*rowHeight,x=left,mean=Math.max(0,Math.min(100,Number(row[key]))),barWidth=plotWidth*mean/100;
+  const target=row[targetKey]==null?NaN:Number(row[targetKey]),targetX=left+plotWidth*Math.max(0,Math.min(100,target))/100;
+  const targetMark=Number.isFinite(target)?`<line class="za-chart-target" x1="${targetX}" y1="${y+2}" x2="${targetX}" y2="${y+rowHeight-5}"><title>${esc(row.name)} target: ${fmt(target)}%</title></line>`:'';
+  return `<text x="${left-10}" y="${y+18}" text-anchor="end"><title>${esc(row.name)}</title>${esc(row.name.length>25?row.name.slice(0,23)+'…':row.name)}</text><rect class="za-chart-bar" x="${x}" y="${y+3}" width="${barWidth}" height="19" rx="5"><title>${esc(row.name)} mean: ${fmt(mean)}%</title></rect>${targetMark}<text x="${Math.min(left+plotWidth+5,left+barWidth+7)}" y="${y+18}">${fmt(mean)}%</text>`;
+ }).join('');
+ return `<svg class="za-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Horizontal bar chart of subject averages from zero to one hundred percent">${grid}${bars}</svg><p class="za-chart-note"><span style="color:#12845a">■ Mean</span> &nbsp; <span style="color:#d68128">┊ Target, where configured</span></p>`;
+}
+function coverageChart(rows){
+ const items=rows.filter(row=>row.coverage!=null&&Number.isFinite(Number(row.coverage))).slice(0,18);
+ if(!items.length)return '<p class="muted small">No enrollment and assignment coverage data to chart.</p>';
+ const width=900,left=190,right=90,top=22,rowHeight=34,bottom=34,plotWidth=width-left-right,height=top+items.length*rowHeight+bottom;
+ const grid=[0,25,50,75,100].map(value=>{const x=left+plotWidth*value/100;return `<line class="za-chart-grid" x1="${x}" y1="${top-6}" x2="${x}" y2="${height-bottom}"/><text x="${x}" y="${height-8}" text-anchor="middle">${value}%</text>`;}).join('');
+ const bars=items.map((row,index)=>{const y=top+index*rowHeight,coverage=Math.max(0,Math.min(100,Number(row.coverage))),barWidth=plotWidth*coverage/100;return `<text x="${left-10}" y="${y+18}" text-anchor="end"><title>${esc(row.name)}</title>${esc(row.name.length>25?row.name.slice(0,23)+'…':row.name)}</text><rect x="${left}" y="${y+3}" width="${barWidth}" height="19" rx="5" fill="#3b82c4"><title>${esc(row.name)} coverage: ${fmt(coverage)}%; ${row.assessed} assessed of ${row.expected}</title></rect><text x="${Math.min(left+plotWidth+5,left+barWidth+7)}" y="${y+18}">${fmt(coverage)}%</text>`;}).join('');
+ return `<svg class="za-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Horizontal bar chart of assessment coverage from zero to one hundred percent">${grid}${bars}</svg>`;
+}
+function gradeDistributionChart(rows){
+ const items=rows.filter(row=>row.assessed>0&&row.grade_bands?.length);
+ if(!items.length)return '<p class="muted small">No configured achievement bands with assessed learners are available for this selection.</p>';
+ const bands=[...new Map(items.flatMap(row=>row.grade_bands).map(band=>[band.label,band])).values()];
+ const width=900,left=190,right=18,top=24,rowHeight=34,bottom=36,plotWidth=width-left-right,height=top+items.length*rowHeight+bottom;
+ const grid=[0,25,50,75,100].map(value=>{const x=left+plotWidth*value/100;return `<line class="za-chart-grid" x1="${x}" y1="${top-7}" x2="${x}" y2="${height-bottom}"/><text x="${x}" y="${height-8}" text-anchor="middle">${value}%</text>`;}).join('');
+ const chartRows=items.map((row,index)=>{let offset=0;const y=top+index*rowHeight;const segments=bands.map((band,bandIndex)=>{const count=Number(row.grade_counts?.[band.label]||0),share=count/row.assessed*100,x=left+plotWidth*offset/100;offset+=share;if(!share)return '';return `<rect x="${x}" y="${y+3}" width="${Math.max(.5,plotWidth*share/100)}" height="20" fill="${chartColors[bandIndex%chartColors.length]}"><title>${esc(row.name)} · ${esc(band.label)}: ${count} learner(s), ${share.toFixed(1)}%</title></rect>${share>=12?`<text x="${x+plotWidth*share/200}" y="${y+17}" text-anchor="middle" style="fill:white;font-size:10px">${esc(band.label)}</text>`:''}`;}).join('');const graded=bands.reduce((sum,band)=>sum+Number(row.grade_counts?.[band.label]||0),0),ungraded=Math.max(0,row.assessed-graded),share=ungraded/row.assessed*100,x=left+plotWidth*offset/100;const ungradedSegment=share?`<rect x="${x}" y="${y+3}" width="${Math.max(.5,plotWidth*share/100)}" height="20" fill="#9aa9a1"><title>${esc(row.name)} · Ungraded / outside bands: ${ungraded} learner(s), ${share.toFixed(1)}%</title></rect>${share>=12?`<text x="${x+plotWidth*share/200}" y="${y+17}" text-anchor="middle" style="fill:white;font-size:10px">Ungraded</text>`:''}`:'';return `<text x="${left-10}" y="${y+18}" text-anchor="end"><title>${esc(row.name)} · ${row.assessed} assessed</title>${esc(row.name.length>25?row.name.slice(0,23)+'…':row.name)}</text>${segments}${ungradedSegment}`;}).join('');
+ const legend=bands.map((band,index)=>`<span><i style="background:${chartColors[index%chartColors.length]}"></i>${esc(band.label)}</span>`).join('')+'<span><i style="background:#9aa9a1"></i>Ungraded / outside bands</span>';
+ return `<svg class="za-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="One hundred percent stacked chart of configured achievement levels by subject">${grid}${chartRows}</svg><div class="za-chart-legend">${legend}</div>`;
+}
+function classComparisonChart(subject){
+ const items=(subject?.classes||[]).filter(row=>row.average!=null&&Number.isFinite(Number(row.average))).slice(0,18);
+ if(!items.length)return '<p class="muted small">No class results to compare for this subject.</p>';
+ const width=900,left=210,right=90,top=22,rowHeight=34,bottom=34,plotWidth=width-left-right,height=top+items.length*rowHeight+bottom;
+ const grid=[0,25,50,75,100].map(value=>{const x=left+plotWidth*value/100;return `<line class="za-chart-grid" x1="${x}" y1="${top-6}" x2="${x}" y2="${height-bottom}"/><text x="${x}" y="${height-8}" text-anchor="middle">${value}%</text>`;}).join('');
+ const bars=items.map((row,index)=>{const y=top+index*rowHeight,mean=Math.max(0,Math.min(100,Number(row.average))),barWidth=plotWidth*mean/100,label=`${row.class_name}${row.stream?' · '+row.stream:''}`;return `<text x="${left-10}" y="${y+18}" text-anchor="end"><title>${esc(label)}</title>${esc(label.length>28?label.slice(0,26)+'…':label)}</text><rect x="${left}" y="${y+3}" width="${barWidth}" height="19" rx="5" fill="${chartColors[index%chartColors.length]}"><title>${esc(label)}: ${fmt(mean)}%, ${row.assessed} learner(s)</title></rect><text x="${Math.min(left+plotWidth+5,left+barWidth+7)}" y="${y+18}">${fmt(mean)}%</text>`;}).join('');
+ return `<svg class="za-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(subject.name)} average by class and stream">${grid}${bars}</svg>`;
+}
+function subjectTrendChart(trends,subjects){
+ const candidates=subjects.filter(subject=>trends.some(row=>String(row.subject_id)===String(subject.id))).slice(0,6);
+ if(!candidates.length)return '<p class="muted small">No historical subject records are available for the selected classes.</p>';
+ const periods=[...new Map(trends.map(row=>[`${row.academic_year_id}:${row.term_id}`,row])).values()].sort((a,b)=>String(a.year_label).localeCompare(String(b.year_label),undefined,{numeric:true})||Number(a.term_no)-Number(b.term_no)).slice(-8);
+ if(!periods.length)return '<p class="muted small">No historical periods are available.</p>';
+ const width=900,height=330,left=55,right=24,top=20,bottom=64,plotWidth=width-left-right,plotHeight=height-top-bottom;
+ const grid=[0,25,50,75,100].map(value=>{const y=top+plotHeight*(1-value/100);return `<line class="za-chart-grid" x1="${left}" y1="${y}" x2="${width-right}" y2="${y}"/><text x="${left-9}" y="${y+4}" text-anchor="end">${value}%</text>`;}).join('');
+ const xAt=index=>periods.length===1?left+plotWidth/2:left+plotWidth*index/(periods.length-1);
+ const periodLabels=periods.map((period,index)=>`<text x="${xAt(index)}" y="${height-bottom+19}" text-anchor="middle"><title>${esc(period.year_label)} ${esc(period.term_name)}</title>${esc(`${period.year_label} ${String(period.term_name||'').replace(/term\s*/i,'T')}`)}</text>`).join('');
+ const series=candidates.map((subject,seriesIndex)=>{
+  const color=chartColors[seriesIndex%chartColors.length],values=periods.map(period=>trends.find(row=>String(row.subject_id)===String(subject.id)&&String(row.term_id)===String(period.term_id)));
+  let path='',started=false;
+  const points=values.map((row,index)=>{if(!row||row.average==null){started=false;return '';}const x=xAt(index),y=top+plotHeight*(1-Math.max(0,Math.min(100,Number(row.average)))/100);path+=`${started?'L':'M'}${x},${y} `;started=true;return `<circle class="za-chart-point" cx="${x}" cy="${y}" r="5" fill="${color}"><title>${esc(subject.name)} · ${esc(periods[index].year_label)} ${esc(periods[index].term_name)}: ${fmt(row.average)}% (${row.assessed} learner(s))</title></circle>`;}).join('');
+  return `<path class="za-chart-line" d="${path}" stroke="${color}"/>${points}`;
+ }).join('');
+ const legend=candidates.map((subject,index)=>`<span><i style="background:${chartColors[index%chartColors.length]}"></i>${esc(subject.name)}</span>`).join('');
+ return `<svg class="za-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Historical term-average trends for up to six subjects">${grid}${periodLabels}${series}</svg><div class="za-chart-legend">${legend}</div><p class="za-chart-note">Term averages combine available marks across assessments; missing periods are left blank. Showing up to six subjects and the latest eight terms.</p>`;
+}
 function csv(name,heads,rows){const q=v=>'"'+String(v??'').replace(/"/g,'""').replace(/[\r\n]+/g,' ')+'"';const text=[heads,...rows].map(row=>row.map(q).join(',')).join('\r\n');const url=URL.createObjectURL(new Blob(['\ufeff'+text],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function commonControls(){return `<div class="za-v5-controls"><button class="za-v5-btn" id="zaLoad">Load ${esc(selected==='merit'?'merit':'analysis')}</button><button class="za-v5-btn secondary" id="zaCsv">Export this view (CSV)</button></div>`;}
 async function loadAssessmentOptions(){const c=context();assessments=[];if(!c.year||!c.term)return;const raw=await get(`/api/assessments/${sid()}/${c.year}/${c.term}`);const rows=Array.isArray(raw)?raw:(raw.assessments||[]);const seen=new Set();assessments=rows.filter(a=>!c.cls||!a.class_id||String(a.class_id)===String(c.cls)).filter(a=>{const key=String(a.id);if(seen.has(key))return false;seen.add(key);return true;});}
@@ -2976,12 +3035,20 @@ function render(data){cached=data;const r=data||{},o=r.overall||{};let html='';l
 if(selected==='subjects'){
  const rows=r.subjects||[],learners=r.learners||[],trends=r.trends||[],flags=r.interventions||[];
  const selectedAssessment=assessments.some(a=>String(a.id)===String(subjectAssessmentId))?subjectAssessmentId:'';
+ const selectedClassSubject=rows.find(subject=>String(subject.id)===String(classChartSubjectId))||rows[0]||null;
+ classChartSubjectId=selectedClassSubject?.id||'';
  const assessmentOptions=[{id:'',name:'All assessments · average available marks'},...assessments];
  const assessmentLabel=a=>a.id?`${a.name}${a.assessment_type?' · '+a.assessment_type:''}`:a.name;
- const gradeRows=rows.flatMap(subject=>(subject.grade_bands||[]).map(band=>{
-  const count=Number(subject.grade_counts?.[band.label]||0);
-  return [subject.name,band.label,count,subject.assessed?`${(count*100/subject.assessed).toFixed(1)}%`:'—',band.descriptor||''];
- }));
+ const gradeRows=rows.flatMap(subject=>{
+  const rowsForSubject=(subject.grade_bands||[]).map(band=>{
+   const count=Number(subject.grade_counts?.[band.label]||0);
+   return [subject.name,band.label,count,subject.assessed?`${(count*100/subject.assessed).toFixed(1)}%`:'—',band.descriptor||''];
+  });
+  const graded=(subject.grade_bands||[]).reduce((sum,band)=>sum+Number(subject.grade_counts?.[band.label]||0),0);
+  const ungraded=Math.max(0,Number(subject.assessed||0)-graded);
+  if(ungraded)rowsForSubject.push([subject.name,'Ungraded / outside bands',ungraded,subject.assessed?`${(ungraded*100/subject.assessed).toFixed(1)}%`:'']);
+  return rowsForSubject;
+ });
  const classRows=rows.flatMap(subject=>(subject.classes||[]).map(item=>[subject.name,item.class_name,item.stream||'—',fmt(item.average),item.assessed]));
  const learnerTable=`<div class="za-v5-scroll"><table class="za-v5-table"><thead><tr>${['Learner','Admission no.','Class / stream','Subject','Mean (%)','Configured grade','Assessment marks'].map(label=>`<th>${esc(label)}</th>`).join('')}</tr></thead><tbody>${learners.length?learners.map(item=>`<tr><td><button type="button" class="zaOpenLearner" data-learner-id="${esc(item.learner_id)}">${esc(item.learner_name)}</button></td>${[item.admission_no,item.class_name+(item.stream?' · '+item.stream:''),item.subject_name,fmt(item.average),item.grade||'—',item.assessments.map(mark=>`${mark.assessment_name}: ${fmt(mark.percentage)}%`).join(' · ')].map(value=>`<td>${esc(value)}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="7">No learner subject results for this selection.</td></tr>`}</tbody></table></div>`;
  html=`<div class="za-v5-controls"><label>Assessment
@@ -3001,10 +3068,11 @@ if(selected==='subjects'){
   x.name,fmt(x.average),fmt(x.highest),fmt(x.lowest),x.assessed,x.expected,x.not_assessed,x.coverage==null?'—':`${fmt(x.coverage)}%`,
   x.target==null?'—':`${fmt(x.target)}%`,x.target_variance==null?'—':`${Number(x.target_variance)>=0?'+':''}${fmt(x.target_variance)}`
  ])));
- html+=panel('Subject average comparison',bars(rows.filter(x=>x.average!=null),'name','average'));
- html+=panel('Configured achievement-level distribution',gradeRows.length?table(['Subject','Achievement level','Learners','Share of assessed','Descriptor'],gradeRows):'<p class="muted small">No applicable grading bands are configured for this selection.</p>');
- html+=panel('Class and stream comparison',table(['Subject','Class','Stream','Mean (%)','Assessed'],classRows));
- html+=panel('Historical term trends · all recorded assessments',table(['Academic year','Term','Subject','Mean (%)','Learners'],trends.map(x=>[x.year_label,x.term_name,x.subject_name,fmt(x.average),x.assessed])));
+ html+=panel('Subject averages · mean and target',subjectBarChart(rows));
+ html+=panel('Assessment coverage · assessed learners / expected',coverageChart(rows));
+ html+=panel('Achievement levels by subject',gradeDistributionChart(rows))+panel('Grade distribution details',gradeRows.length?table(['Subject','Achievement level','Learners','Share of assessed','Descriptor'],gradeRows):'<p class="muted small">No applicable grading bands are configured for this selection.</p>');
+ html+=panel('Class and stream comparison',`<div class="za-v5-controls"><label>Subject<select id="zaClassChartSubject">${rows.map(subject=>`<option value="${esc(subject.id)}" ${String(subject.id)===String(classChartSubjectId)?'selected':''}>${esc(subject.name)}</option>`).join('')}</select></label></div>${classComparisonChart(selectedClassSubject)}${table(['Subject','Class','Stream','Mean (%)','Assessed'],classRows)}`);
+ html+=panel('Historical performance trends · all recorded assessments',subjectTrendChart(trends,rows)+table(['Academic year','Term','Subject','Mean (%)','Learners'],trends.map(x=>[x.year_label,x.term_name,x.subject_name,fmt(x.average),x.assessed])));
  html+=panel('Learner-level subject analysis',learnerTable);
  html+=panel('Evidence for academic follow-up',table(['Type','Subject','Observation'],flags.map(x=>[x.type.replaceAll('_',' '),x.subject_name,x.message])));
  html+='<div class="za-v5-controls"><button class="za-v5-btn secondary" id="zaGradeCsv">Export grade distribution (CSV)</button><button class="za-v5-btn secondary" id="zaClassCsv">Export class comparison (CSV)</button><button class="za-v5-btn secondary" id="zaLearnerCsv">Export learner detail (CSV)</button><button class="za-v5-btn secondary" id="zaTrendCsv">Export trend detail (CSV)</button><button class="za-v5-btn secondary" id="zaSubjectPrint">Print / Save as PDF</button></div>';
@@ -3023,6 +3091,7 @@ out.innerHTML=`<h3>${esc(root.querySelector('[aria-selected="true"] strong')?.te
 const csvBtn=$('zaCsv');if(csvBtn)csvBtn.onclick=()=>csv(`zelimu-${selected}.csv`,exportHeads,exportRows);
 $('zaLoad').onclick=load;
 if($('zaSubjectAssessment'))$('zaSubjectAssessment').onchange=()=>{subjectAssessmentId=$('zaSubjectAssessment').value;load();};
+if($('zaClassChartSubject'))$('zaClassChartSubject').onchange=()=>{classChartSubjectId=$('zaClassChartSubject').value;render(cached);};
 out.querySelectorAll('.zaOpenLearner').forEach(button=>button.onclick=()=>typeof window.zelimuOpenLearnerProfile==='function'?window.zelimuOpenLearnerProfile(button.dataset.learnerId):alert('Learner profile is unavailable in this dashboard.'));
 if($('zaGradeCsv'))$('zaGradeCsv').onclick=()=>csv('zelimu-subject-grade-distribution.csv',['Subject','Achievement level','Learners','Share of assessed','Descriptor'],(cached?.subjects||[]).flatMap(subject=>(subject.grade_bands||[]).map(band=>{const count=Number(subject.grade_counts?.[band.label]||0);return [subject.name,band.label,count,subject.assessed?count*100/subject.assessed:'',band.descriptor||''];})));
 if($('zaClassCsv'))$('zaClassCsv').onclick=()=>csv('zelimu-subject-class-comparison.csv',['Subject','Class','Stream','Mean (%)','Assessed'],(cached?.subjects||[]).flatMap(subject=>(subject.classes||[]).map(item=>[subject.name,item.class_name,item.stream,item.average,item.assessed])));

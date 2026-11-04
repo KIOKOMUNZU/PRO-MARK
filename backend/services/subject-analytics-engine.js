@@ -210,6 +210,7 @@ function analyzeSubjectPerformance({classes, roster, assignments, marks, configs
       year_label: row.year_label,
       term_id: row.term_id,
       term_name: row.term_name,
+      term_no: row.term_no ?? Number((/(\d+)/.exec(String(row.term_name || '')) || [])[1] || 0),
       subject_id: row.subject_id,
       subject_name: row.subject_name,
       values: [],
@@ -227,13 +228,14 @@ function analyzeSubjectPerformance({classes, roster, assignments, marks, configs
     year_label: row.year_label,
     term_id: row.term_id,
     term_name: row.term_name,
+    term_no: row.term_no,
     subject_id: row.subject_id,
     subject_name: row.subject_name,
     average: row.values.length ? row.values.reduce((sum, value) => sum + value, 0) / row.values.length : null,
     assessed: row.assessed
   })).sort((a, b) =>
     String(a.year_label).localeCompare(String(b.year_label), undefined, {numeric: true}) ||
-    String(a.term_name).localeCompare(String(b.term_name))
+    Number(a.term_no || 0) - Number(b.term_no || 0)
   );
 
   const flags = [];

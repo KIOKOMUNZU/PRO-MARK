@@ -52,10 +52,21 @@ const result = analyzeSubjectPerformance({
     year_label: '2027',
     term_id: 'term-1',
     term_name: 'Term 1',
+    term_no: 1,
     subject_id: 'math',
     subject_name: 'Mathematics',
     average: 75,
     assessed: 2
+  }, {
+    academic_year_id: 'year-1',
+    year_label: '2027',
+    term_id: 'term-2',
+    term_name: 'Term 2',
+    term_no: 2,
+    subject_id: 'math',
+    subject_name: 'Mathematics',
+    average: 80,
+    assessed: 1
   }]
 });
 
@@ -81,4 +92,6 @@ assert.ok(result.interventions.some(flag => flag.type === 'MISSING_MARKS'));
 
 assert.equal(result.trends[0].average, 75);
 assert.equal(result.trends[0].assessed, 2);
+assert.equal(result.trends[1].term_no, 2);
+assert.equal(result.trends[1].average, 80);
 console.log('Subject analytics tests passed');

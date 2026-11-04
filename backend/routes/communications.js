@@ -693,10 +693,9 @@ router.get('/:schoolId/analytics/subjects',schoolBoundary,roles('SCHOOL_ADMIN','
     AND (ac.subject_id IS NULL OR ac.subject_id=ANY($5::uuid[]))
     AND (ac.assessment_id IS NULL OR ac.assessment_id=$6::uuid)
    GROUP BY ac.id,gs.id`,[sid,classIds,levelIds,sectionIds,subjectIds,assessmentId||null])).rows.map(row=>({...row,bands:Array.isArray(row.bands)?row.bands:[]})):[];
-  const trends=classIds.length?(await db.query(`SELECT p.academic_year_id,p.year_label,p.term_id,p.term_name,p.subject_id,p.subject_name,
-     p.learner_id,AVG(p.percentage) average
-   FROM (SELECT m.academic_year_id,ay.year_label,m.term_id,tr.name term_name,m.subject_id,s.name subject_name,m.learner_id,
-     AVG((m.mark/NULLIF(a.max_mark,0))*100.0) percentage
+  const trends=classIds.length?(await db.query(`SELECT m.academic_year_id,ay.year_label,m.term_id,tr.name term_name,tr.term_no,
+     m.subject_id,s.name subject_name,COUNT(DISTINCT m.learner_id)::int assessed,
+     AVG((m.mark/NULLIF(a.max_mark,0))*100.0) average
     FROM marks m JOIN assessments a ON a.id=m.assessment_id JOIN subjects s ON s.id=m.subject_id
     JOIN academic_years ay ON ay.id=m.academic_year_id JOIN terms tr ON tr.id=m.term_id
     JOIN classes c ON c.id=m.class_id
@@ -705,9 +704,8 @@ router.get('/:schoolId/analytics/subjects',schoolBoundary,roles('SCHOOL_ADMIN','
       WHERE tsa.school_id=m.school_id AND tsa.teacher_id=$3 AND tsa.subject_id=m.subject_id AND tsa.class_id=m.class_id
        AND tsa.academic_year_id=m.academic_year_id AND (tsa.term_id=m.term_id OR tsa.term_id IS NULL)
        AND COALESCE(tsa.is_active,true)=true))
-    GROUP BY m.academic_year_id,ay.year_label,m.term_id,tr.name,m.subject_id,s.name,m.learner_id) p
-   GROUP BY p.academic_year_id,p.year_label,p.term_id,p.term_name,p.subject_id,p.subject_name,p.learner_id
-   ORDER BY p.year_label,p.term_name`,[sid,classIds,teacherId||null])).rows:[];
+    GROUP BY m.academic_year_id,ay.year_label,m.term_id,tr.name,tr.term_no,m.subject_id,s.name
+    ORDER BY ay.year_label,tr.term_no,s.name`,[sid,classIds,teacherId||null])).rows:[];
   const {analyzeSubjectPerformance}=require('../services/subject-analytics-engine');
   const result=analyzeSubjectPerformance({classes,roster,assignments,marks,configs,trends,assessmentId:assessmentId||null});
   res.json({...result,context:{academic_year_id:y,term_id:t,level_id:level||null,class_id:cls||null,teacher_id:teacherId||null,assessment_id:assessmentId||null}});
