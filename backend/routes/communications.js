@@ -660,13 +660,18 @@ router.get('/:schoolId/analytics/subjects',schoolBoundary,roles('SCHOOL_ADMIN','
   }
   const term=(await db.query(`SELECT id,academic_year_id FROM terms WHERE id=$1 AND school_id=$2`,[t,sid])).rows[0];
   if(!term||String(term.academic_year_id)!==String(y))return res.status(404).json({error:'The selected term does not belong to this academic year.'});
-  const classParams=[sid,y,t];
+  const classParams=[sid];
   let classFilter='';
   if(level){classParams.push(level);classFilter+=` AND c.school_level_id=$${classParams.length}`;}
   if(cls){classParams.push(cls);classFilter+=` AND c.id=$${classParams.length}`;}
   if(req.user.role==='TEACHER'){
    classParams.push(teacherId);
-   classFilter+=` AND EXISTS(SELECT 1 FROM teacher_subject_assignments tsa WHERE tsa.school_id=c.school_id AND tsa.class_id=c.id AND tsa.teacher_id=$${classParams.length} AND tsa.academic_year_id=$2 AND (tsa.term_id=$3 OR tsa.term_id IS NULL) AND COALESCE(tsa.is_active,true)=true)`;
+   const teacherParam=classParams.length;
+   classParams.push(y);
+   const yearParam=classParams.length;
+   classParams.push(t);
+   const termParam=classParams.length;
+   classFilter+=` AND EXISTS(SELECT 1 FROM teacher_subject_assignments tsa WHERE tsa.school_id=c.school_id AND tsa.class_id=c.id AND tsa.teacher_id=$${teacherParam} AND tsa.academic_year_id=$${yearParam} AND (tsa.term_id=$${termParam} OR tsa.term_id IS NULL) AND COALESCE(tsa.is_active,true)=true)`;
   }
   const classes=(await db.query(`SELECT c.id,c.name,c.stream,c.school_level_id,sl.name level_name,sl.school_section_id section_id
    FROM classes c LEFT JOIN school_levels sl ON sl.id=c.school_level_id

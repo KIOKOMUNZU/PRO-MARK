@@ -631,19 +631,19 @@ body, main, .main-content, .dashboard-main {
 <div id="zaWorkspace" class="za-v5" aria-label="Performance Analytics modules">
  <div class="za-header"><div><h3>Academic Performance &amp; Merit</h3><p>Eight focused workspaces · one shared academic context</p></div><span class="pill">ZELIMU CBC</span></div>
  <div class="za-groups" role="tablist" aria-label="Analytics workspaces">
-  <section class="za-group"><h4>Results</h4><div class="za-grid">
+  <section class="za-group za-group-results"><h4><span class="za-group-number">01</span> Results</h4><div class="za-grid">
    <button type="button" class="za-tile" data-za-tool="merit" role="tab"><strong>Merit Lists</strong><small>Official configured ranking; completeness and class position</small></button>
    <button type="button" class="za-tile" data-za-tool="exams" role="tab"><strong>Exam Comparison</strong><small>Compare assessment outcomes and participation</small></button>
   </div></section>
-  <section class="za-group"><h4>Subjects &amp; Classes</h4><div class="za-grid">
+  <section class="za-group za-group-subjects"><h4><span class="za-group-number">02</span> Subjects &amp; Classes</h4><div class="za-grid">
    <button type="button" class="za-tile" data-za-tool="subjects" role="tab"><strong>Subject Analytics</strong><small>Means, coverage, configured grades, targets and learners</small></button>
    <button type="button" class="za-tile" data-za-tool="classes" role="tab"><strong>Class &amp; Stream</strong><small>Compare class learning areas, cohort size and trends</small></button>
   </div></section>
-  <section class="za-group"><h4>Learners &amp; Staff</h4><div class="za-grid">
+  <section class="za-group za-group-learners"><h4><span class="za-group-number">03</span> Learners &amp; Staff</h4><div class="za-grid">
    <button type="button" class="za-tile" data-za-tool="learners" role="tab"><strong>Learner Progress</strong><small>Term trajectory, subject strengths and support needs</small></button>
    <button type="button" class="za-tile" data-za-tool="teachers" role="tab"><strong>Teacher &amp; Department</strong><small>Assignment coverage and academic supervision evidence</small></button>
   </div></section>
-  <section class="za-group"><h4>Leadership &amp; Outputs</h4><div class="za-grid">
+  <section class="za-group za-group-leadership"><h4><span class="za-group-number">04</span> Leadership &amp; Outputs</h4><div class="za-grid">
    <button type="button" class="za-tile" data-za-tool="school" role="tab"><strong>School Performance</strong><small>Leadership overview, targets and term movement</small></button>
    <button type="button" class="za-tile" data-za-tool="reports" role="tab"><strong>Reports &amp; Exports</strong><small>Filtered CSV, print/PDF and official report cards</small></button>
   </div></section>
@@ -705,6 +705,7 @@ function applyRoleView(){
   document.querySelectorAll('.class-teacher-only').forEach(x=>x.classList.toggle('role-hidden',!isClassTeacher));
   ['results','merit','reports'].forEach(id=>{const x=$(id);if(x)x.classList.toggle('role-hidden',!(isAdmin||isLeadership||isClassTeacher));});
   document.querySelectorAll('#zaWorkspace [data-za-tool]').forEach(button=>{button.hidden=isSubjectTeacher&&button.dataset.zaTool!=='subjects';});
+  document.querySelectorAll('#zaWorkspace .za-group').forEach(group=>{group.hidden=!Array.from(group.querySelectorAll('[data-za-tool]')).some(button=>!button.hidden);});
   const people=$('people');if(people)people.classList.toggle('role-hidden',!(isAdmin||isClassTeacher||isLeadership));
   const leadership=$('leadership');if(leadership)leadership.classList.toggle('role-hidden',!isAdmin);
   const nav=$('navTabs');
@@ -2817,14 +2818,30 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 #analytics .za-grid .za-tile{flex:1 1 170px;min-width:145px;padding:10px 12px;min-height:0;text-align:left}
 #analytics .za-grid .za-tile small{display:none}
 #analytics .za-grid .za-tile strong{display:inline;font-size:.88rem}
-#analytics .za-groups .za-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0}
-#analytics .za-groups .za-tile{flex:none;width:100%;min-width:0;min-height:112px;padding:14px;text-align:left}
-#analytics .za-groups .za-tile strong{display:block;font-size:.96rem}
-#analytics .za-groups .za-tile small{display:block;color:#567568;font-size:.84rem;line-height:1.4}
+#analytics #zaWorkspace{overflow:hidden;padding:0;background:linear-gradient(145deg,#f5fbf7 0%,#eef6ff 55%,#fff8ed 100%);border-color:#d6e5df;box-shadow:0 12px 34px #153d2a12}
+#analytics #zaWorkspace .za-header{margin:0 0 16px;padding:18px 22px;background:linear-gradient(110deg,#064d37 0%,#087858 62%,#16946b 100%);color:#fff}
+#analytics #zaWorkspace .za-header h3,#analytics #zaWorkspace .za-header p{color:#fff}
+#analytics #zaWorkspace .za-header h3{font-size:1.28rem}
+#analytics #zaWorkspace .za-header p{opacity:.84}
+#analytics #zaWorkspace .za-header>.pill{background:#ffffff20;border:1px solid #ffffff50;color:#fff;padding:7px 12px}
+#analytics .za-groups{padding:0 18px 4px;gap:14px}
+#analytics .za-groups .za-group{--za-accent:#14835b;padding:15px;border:1px solid color-mix(in srgb,var(--za-accent) 24%,white);border-top:3px solid var(--za-accent);border-radius:14px;background:linear-gradient(155deg,#fff 0%,color-mix(in srgb,var(--za-accent) 5%,white) 100%);box-shadow:0 5px 16px #1d45300c}
+#analytics .za-groups .za-group-subjects{--za-accent:#2878a8}
+#analytics .za-groups .za-group-learners{--za-accent:#7658a8}
+#analytics .za-groups .za-group-leadership{--za-accent:#ad7623}
+#analytics .za-groups .za-group h4{display:flex;align-items:center;gap:9px;margin:0 0 12px;color:#243d32;font-size:.96rem}
+#analytics .za-group-number{display:inline-grid;width:26px;height:26px;place-items:center;border-radius:8px;background:color-mix(in srgb,var(--za-accent) 13%,white);color:var(--za-accent);font-size:.72rem;font-weight:800}
+#analytics .za-groups .za-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:0}
+#analytics .za-groups .za-tile{position:relative;flex:none;width:100%;min-width:0;min-height:112px;padding:15px;text-align:left;border:1px solid #e1e9e4;border-left:3px solid color-mix(in srgb,var(--za-accent) 65%,white);border-radius:11px;background:linear-gradient(135deg,#fff 0%,color-mix(in srgb,var(--za-accent) 4%,white) 100%);box-shadow:0 2px 6px #193a2808;transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease}
+#analytics .za-groups .za-tile:hover,#analytics .za-groups .za-tile:focus-visible{transform:translateY(-2px);border-color:color-mix(in srgb,var(--za-accent) 50%,white);box-shadow:0 8px 18px color-mix(in srgb,var(--za-accent) 15%,transparent)}
+#analytics .za-groups .za-tile strong{display:block;color:#173b2a;font-size:.96rem}
+#analytics .za-groups .za-tile small{display:block;color:#5a6e63;font-size:.83rem;line-height:1.45}
+#analytics .za-groups .za-tile[aria-selected="true"]{border:1px solid var(--za-accent);border-left:4px solid var(--za-accent);background:linear-gradient(135deg,#fff 0%,color-mix(in srgb,var(--za-accent) 10%,white) 100%);box-shadow:0 5px 14px color-mix(in srgb,var(--za-accent) 17%,transparent)}
+#analytics #zaWorkspaceDetail{margin:12px 18px 18px;padding:20px;min-height:190px;border-color:#d7e5dc;box-shadow:0 3px 12px #193a2808}
 #analytics .za-groups .za-tile[hidden]{display:none!important}
 #analytics #v6WeightedPanel[hidden]{display:none!important}
 #analytics #v6WeightedPanel{margin-top:14px}
-@media(max-width:640px){#analytics .za-grid .za-tile{flex-basis:calc(50% - 8px)}#analytics .za-groups .za-grid{grid-template-columns:1fr}#analytics .za-groups .za-tile{width:100%}}
+@media(max-width:640px){#analytics .za-grid .za-tile{flex-basis:calc(50% - 8px)}#analytics #zaWorkspace{padding:0}#analytics #zaWorkspace .za-header{padding:15px}#analytics .za-groups{grid-template-columns:1fr;padding:0 12px}#analytics .za-groups .za-grid{grid-template-columns:1fr}#analytics .za-groups .za-tile{width:100%}#analytics #zaWorkspaceDetail{margin:10px 12px 12px;padding:13px}}
 </style>
 <script id="zaWorkspaceLogic">
 (function(){
