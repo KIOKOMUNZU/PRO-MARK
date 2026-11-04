@@ -57,6 +57,15 @@ async function ensurePublicationSchema(){
  if(Number(result.rows[0]?.context_columns)!==2||!result.rows[0]?.duplicate_guard)
   throw Object.assign(new Error('Apply database migration 021_parent_publish_and_duplicate_guard.sql before previewing or publishing results.'),{status:503});
 }
+async function ensureResultsCentreSchema(){
+ await ensurePublicationSchema();
+ const result=await db.query(`
+  SELECT to_regclass('result_publications') IS NOT NULL publications,
+         to_regclass('result_publication_records') IS NOT NULL records
+ `);
+ if(!result.rows[0]?.publications||!result.rows[0]?.records)
+  throw Object.assign(new Error('Apply database migration 022_results_publication_centre.sql before using the Results Publishing Centre.'),{status:503});
+}
 async function validatePublicationScope(sid,yearId,termId,levelIds,classIds){
  if(!yearId||!termId)throw Object.assign(new Error('Academic year and term are required.'),{status:400});
  const period=await db.query(
@@ -92,6 +101,11 @@ async function publicationRoster(sid,yearId,termId,levelIds,classIds){
     COALESCE(pg.sms_enabled,false) sms_enabled,
     COALESCE(pg.communication_consent,false) communication_consent,
     EXISTS(
+      SELECT 1 FROM result_publication_records r
+      WHERE r.school_id=$1 AND r.learner_id=l.id
+        AND r.academic_year_id=$2 AND r.term_id=$3
+    ) result_published,
+    EXISTS(
       SELECT 1 FROM communication_messages cm
       WHERE cm.school_id=$1 AND cm.learner_id=l.id
         AND cm.parent_guardian_id=pg.id
@@ -122,7 +136,8 @@ async function publicationRoster(sid,yearId,termId,levelIds,classIds){
     learner_id:row.learner_id,admission_no:row.admission_no,
     first_name:row.first_name,middle_name:row.middle_name,last_name:row.last_name,
     class_id:row.class_id,class_name:row.class_name,class_stream:row.stream,
-    level_id:row.level_id,level_name:row.level_name,parents:[]
+   level_id:row.level_id,level_name:row.level_name,
+   previously_published:Boolean(row.result_published),parents:[]
    };
    learners.set(row.learner_id,learner);
   }
@@ -140,23 +155,49 @@ async function publicationRoster(sid,yearId,termId,levelIds,classIds){
  return [...learners.values()].map(learner=>({
   ...learner,
   eligible_recipients:learner.parents.filter(p=>p.eligible&&!p.already_published).length,
-  previously_published:learner.parents.some(p=>p.already_published)
+  previously_published:learner.previously_published
  }));
+}
+function hasPublishableResults(report){
+ return Boolean(report&&Array.isArray(report.subjects)&&
+  report.subjects.some(subject=>subject.average!==null&&subject.average!==undefined));
+}
+async function publicationReportPreview(sid,learners,yearId,termId){
+ const result=new Array(learners.length);let next=0;
+ const worker=async()=>{
+  while(next<learners.length){
+   const index=next++,learner=learners[index];
+   try{
+    const report=await buildTermReport(sid,learner.learner_id,yearId,termId);
+    result[index]=hasPublishableResults(report)?{
+     ready:true,average:report.overall_average,grade:report.overall_grade||null,
+     subjects:(report.subjects||[]).length
+    }:{ready:false,reason:'No saved subject marks are available for this learner and term.'};
+   }catch(e){result[index]={ready:false,reason:`Unable to prepare result: ${e.message}`};}
+  }
+ };
+ await Promise.all(Array.from({length:Math.min(12,learners.length)},worker));
+ return result;
 }
 router.get('/:schoolId/publication-preview',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{
  try{
   const sid=req.params.schoolId,yearId=String(req.query.academic_year_id||''),termId=String(req.query.term_id||'');
   const levelIds=publicationIds(req.query.level_ids),classIds=publicationIds(req.query.class_ids);
-  await ensurePublicationSchema();
+  await ensureResultsCentreSchema();
   await validatePublicationScope(sid,yearId,termId,levelIds,classIds);
   const learners=await publicationRoster(sid,yearId,termId,levelIds,classIds);
-  const recipients=learners.reduce((sum,l)=>sum+l.eligible_recipients,0);
+  const reports=await publicationReportPreview(sid,learners,yearId,termId);
+  const previewLearners=learners.map((learner,index)=>({...learner,result:reports[index]}));
+  const recipients=learners.reduce((sum,l,index)=>sum+(reports[index]?.ready&&!l.previously_published?l.eligible_recipients:0),0);
   const duplicateCount=learners.reduce((sum,l)=>sum+l.parents.filter(p=>p.already_published).length,0);
   res.json({
-   learners,summary:{
+   learners:previewLearners,summary:{
     learners:learners.length,eligible_recipients:recipients,
     no_eligible_contact:learners.filter(l=>!l.parents.some(p=>p.eligible)).length,
-    already_published:duplicateCount
+    already_published:duplicateCount,
+    results_ready:reports.filter((r,index)=>r?.ready&&!learners[index].previously_published).length,
+    results_unavailable:reports.filter(r=>!r?.ready).length,
+    results_already_published:reports.filter((r,index)=>r?.ready&&learners[index].previously_published).length
    }
   });
  }catch(e){res.status(e.status||400).json({error:e.message})}
@@ -254,6 +295,223 @@ router.post('/:schoolId/publish-school-results',schoolBoundary,roles('SCHOOL_ADM
     :(process.env.SMS_WEBHOOK_URL?'Results sent through the configured SMS webhook.':'Results queued safely; configure an SMS provider for live delivery.')
   });
  }catch(e){res.status(e.status||400).json({error:e.message})}
+});
+router.get('/:schoolId/result-publications',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{
+ try{
+  const sid=req.params.schoolId,yearId=String(req.query.academic_year_id||''),termId=String(req.query.term_id||'');
+  await ensureResultsCentreSchema();
+  const rows=await db.query(`
+   SELECT p.id,p.academic_year_id,p.term_id,p.audience_scope,p.level_ids,p.class_ids,
+     p.status,p.learner_count,p.created_at,
+     CONCAT_WS(' ',u.first_name,u.last_name) created_by_name,
+     COUNT(DISTINCT r.id)::int published_learners,
+     COUNT(m.id)::int sms_total,
+     COUNT(m.id) FILTER(WHERE m.status='SENT')::int sms_sent,
+     COUNT(m.id) FILTER(WHERE m.status='QUEUED')::int sms_queued,
+     COUNT(m.id) FILTER(WHERE m.status='SENDING')::int sms_sending,
+     COUNT(m.id) FILTER(WHERE m.status='FAILED')::int sms_failed,
+     COUNT(m.id) FILTER(WHERE m.status='SKIPPED')::int sms_skipped
+   FROM result_publications p
+   LEFT JOIN users u ON u.id=p.created_by
+   LEFT JOIN result_publication_records r ON r.publication_id=p.id
+   LEFT JOIN communication_messages m ON m.result_publication_record_id=r.id AND m.message_type='PUBLISHED_RESULTS'
+   WHERE p.school_id=$1 AND ($2::uuid IS NULL OR p.academic_year_id=$2)
+     AND ($3::uuid IS NULL OR p.term_id=$3)
+   GROUP BY p.id,u.first_name,u.last_name
+   ORDER BY p.created_at DESC LIMIT 100
+  `,[sid,yearId||null,termId||null]);
+  const summary=rows.rows.reduce((out,row)=>({
+   publications:out.publications+1,
+   learners:out.learners+Number(row.published_learners||0),
+   sms_sent:out.sms_sent+Number(row.sms_sent||0),
+   sms_queued:out.sms_queued+Number(row.sms_queued||0),
+   sms_sending:out.sms_sending+Number(row.sms_sending||0),
+   sms_failed:out.sms_failed+Number(row.sms_failed||0),
+   sms_skipped:out.sms_skipped+Number(row.sms_skipped||0)
+  }),{publications:0,learners:0,sms_sent:0,sms_queued:0,sms_sending:0,sms_failed:0,sms_skipped:0});
+  res.json({publications:rows.rows,summary});
+ }catch(e){res.status(e.status||400).json({error:e.message})}
+});
+router.post('/:schoolId/result-publications',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{
+ let client;
+ try{
+  const sid=req.params.schoolId,b=req.body||{};
+  const yearId=String(b.academic_year_id||''),termId=String(b.term_id||'');
+  const levelIds=publicationIds(b.level_ids),classIds=publicationIds(b.class_ids);
+  await ensureResultsCentreSchema();
+  await validatePublicationScope(sid,yearId,termId,levelIds,classIds);
+  const learners=await publicationRoster(sid,yearId,termId,levelIds,classIds),prepared=[],skipped=[];
+  for(const learner of learners){
+   const exists=await db.query(`
+    SELECT 1 FROM result_publication_records
+    WHERE school_id=$1 AND learner_id=$2 AND academic_year_id=$3 AND term_id=$4 LIMIT 1
+   `,[sid,learner.learner_id,yearId,termId]);
+   if(exists.rowCount){skipped.push({learner_id:learner.learner_id,reason:'Results have already been published for this learner and term.'});continue;}
+   let report;
+   try{report=await buildTermReport(sid,learner.learner_id,yearId,termId);}
+   catch(e){skipped.push({learner_id:learner.learner_id,reason:`Result preparation failed: ${e.message}`});continue;}
+   if(!hasPublishableResults(report)){skipped.push({learner_id:learner.learner_id,reason:'No saved subject marks are available to publish.'});continue;}
+   prepared.push({learner,report});
+  }
+  if(!prepared.length)return res.status(409).json({error:'No new learner results are ready to publish for this audience.',skipped:skipped.length});
+  client=await db.pool.connect();
+  await client.query('BEGIN');
+  const publication=(await client.query(`
+   INSERT INTO result_publications(
+    school_id,academic_year_id,term_id,audience_scope,level_ids,class_ids,learner_count,created_by
+   ) VALUES($1,$2,$3,$4,$5::uuid[],$6::uuid[],$7,$8)
+   RETURNING id,school_id,academic_year_id,term_id,audience_scope,level_ids,class_ids,status,learner_count,created_at
+  `,[sid,yearId,termId,levelIds.length||classIds.length?'SELECTED':'WHOLE_SCHOOL',levelIds,classIds,prepared.length,req.user.user_id])).rows[0];
+  let published=0;
+  for(const item of prepared){
+   const inserted=await client.query(`
+    INSERT INTO result_publication_records(
+     publication_id,school_id,academic_year_id,term_id,learner_id,result_snapshot
+    ) VALUES($1,$2,$3,$4,$5,$6::jsonb)
+    ON CONFLICT(school_id,learner_id,academic_year_id,term_id) DO NOTHING
+    RETURNING id
+   `,[publication.id,sid,yearId,termId,item.learner.learner_id,JSON.stringify(item.report)]);
+   published+=inserted.rowCount;
+   if(!inserted.rowCount)skipped.push({learner_id:item.learner.learner_id,reason:'Results were published by another request before this publication completed.'});
+  }
+  if(!published){await client.query('ROLLBACK');return res.status(409).json({error:'Results have already been published for all learners in this audience.',skipped:skipped.length});}
+  await client.query('UPDATE result_publications SET learner_count=$2 WHERE id=$1',[publication.id,published]);
+  await client.query('COMMIT');
+  res.status(201).json({
+   publication:{...publication,learner_count:published},published,skipped:skipped.length,
+   sms_sent:0,sms_queued:0,sms_failed:0,
+   message:'Results are published and saved. Parent SMS has not been sent; use Send notifications when ready.'
+  });
+ }catch(e){
+  if(client)try{await client.query('ROLLBACK')}catch(rollbackError){
+   console.error('Failed to roll back results publication transaction:',rollbackError);
+  }
+  if(e.code==='42P01'||e.code==='42703')return res.status(503).json({error:'Apply database migrations 021_parent_publish_and_duplicate_guard.sql and 022_results_publication_centre.sql before publishing results.'});
+  res.status(e.status||400).json({error:e.message});
+ }finally{client?.release();}
+});
+router.get('/:schoolId/result-publications/:publicationId',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{
+ try{
+  const sid=req.params.schoolId,publicationId=req.params.publicationId;
+  await ensureResultsCentreSchema();
+  const publication=(await db.query(`
+   SELECT p.*,CONCAT_WS(' ',u.first_name,u.last_name) created_by_name
+   FROM result_publications p LEFT JOIN users u ON u.id=p.created_by
+   WHERE p.id=$1 AND p.school_id=$2
+  `,[publicationId,sid])).rows[0];
+  if(!publication)return res.status(404).json({error:'Publication not found.'});
+  const records=await db.query(`
+   SELECT r.id,r.learner_id,r.result_snapshot,r.created_at,
+     CONCAT_WS(' ',l.first_name,l.middle_name,l.last_name) learner_name,l.admission_no,
+     c.name class_name,c.stream
+   FROM result_publication_records r
+   JOIN learners l ON l.id=r.learner_id
+   LEFT JOIN learner_enrollments e ON e.learner_id=l.id
+     AND e.school_id=r.school_id AND e.academic_year_id=r.academic_year_id
+   LEFT JOIN classes c ON c.id=e.class_id
+   WHERE r.publication_id=$1 AND r.school_id=$2
+   ORDER BY c.name,c.stream,l.last_name,l.first_name
+  `,[publicationId,sid]);
+  const messages=await db.query(`
+   SELECT m.id,m.result_publication_record_id,m.parent_guardian_id,
+     CONCAT_WS(' ',pg.first_name,pg.last_name) parent_name,pg.phone,
+     m.status,m.provider,m.failure_reason,m.created_at,m.sent_at
+   FROM communication_messages m
+   LEFT JOIN parent_guardians pg ON pg.id=m.parent_guardian_id
+   WHERE m.result_publication_id=$1 AND m.school_id=$2 AND m.message_type='PUBLISHED_RESULTS'
+   ORDER BY m.created_at,m.id
+  `,[publicationId,sid]);
+  const byRecord=new Map();
+  for(const message of messages.rows){
+   const list=byRecord.get(message.result_publication_record_id)||[];
+   list.push(message);byRecord.set(message.result_publication_record_id,list);
+  }
+  res.json({publication,records:records.rows.map(record=>({
+   ...record,notifications:byRecord.get(record.id)||[]
+  })),notifications:messages.rows});
+ }catch(e){res.status(e.status||400).json({error:e.message})}
+});
+router.post('/:schoolId/result-publications/:publicationId/notifications',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{
+ try{
+  const sid=req.params.schoolId,publicationId=req.params.publicationId;
+  await ensureResultsCentreSchema();
+  const publication=(await db.query(
+   'SELECT * FROM result_publications WHERE id=$1 AND school_id=$2',[publicationId,sid]
+  )).rows[0];
+  if(!publication)return res.status(404).json({error:'Publication not found.'});
+  const retryFailedOnly=req.body?.retry_failed_only===true;
+  const records=(await db.query(`
+   SELECT id,learner_id,result_snapshot FROM result_publication_records
+   WHERE publication_id=$1 AND school_id=$2 ORDER BY created_at,id
+  `,[publicationId,sid])).rows;
+  let sent=0,queued=0,failed=0,skipped=0;
+  const details=[];
+  for(const record of records){
+   const guardians=(await db.query(`
+    SELECT pg.id,pg.first_name,pg.last_name,pg.phone
+    FROM parent_guardians pg JOIN learner_guardians lg ON lg.parent_guardian_id=pg.id
+    WHERE pg.school_id=$1 AND lg.learner_id=$2
+      AND COALESCE(pg.is_active,false)=true AND COALESCE(pg.sms_enabled,false)=true
+      AND COALESCE(pg.communication_consent,false)=true AND COALESCE(trim(pg.phone),'')<>''
+   `,[sid,record.learner_id])).rows;
+   if(!guardians.length){skipped++;continue;}
+   const report=record.result_snapshot||{},learnerName=report.learner_name||'Learner';
+   const message=String(req.body?.message_template||`${report.school_name||'School'}: ${learnerName} ${report.term_name||'term'} results. Average ${report.overall_average==null?'—':Number(report.overall_average).toFixed(2)}, grade ${report.overall_grade||'—'}. Log in to view the full report.`)
+    .replaceAll('{learner}',learnerName)
+    .replaceAll('{average}',report.overall_average==null?'—':Number(report.overall_average).toFixed(2))
+    .replaceAll('{grade}',report.overall_grade||'—');
+   for(const guardian of guardians){
+    let existing=(await db.query(`
+     SELECT id,status FROM communication_messages
+     WHERE result_publication_record_id=$1 AND parent_guardian_id=$2
+       AND message_type='PUBLISHED_RESULTS' LIMIT 1
+    `,[record.id,guardian.id])).rows[0];
+    if(existing?.status==='SENT'||(retryFailedOnly&&existing?.status!=='FAILED')){skipped++;continue;}
+    let messageId=existing?.id;
+    if(!existing){
+     const inserted=await db.query(`
+      INSERT INTO communication_messages(
+       school_id,learner_id,parent_guardian_id,channel,message_type,body,status,provider,
+       created_by,academic_year_id,term_id,result_publication_id,result_publication_record_id
+      ) VALUES($1,$2,$3,'SMS','PUBLISHED_RESULTS',$4,'SENDING',$5,$6,$7,$8,$9,$10)
+      ON CONFLICT DO NOTHING RETURNING id
+     `,[sid,record.learner_id,guardian.id,message,process.env.SMS_PROVIDER||'UNCONFIGURED',
+       req.user.user_id,publication.academic_year_id,publication.term_id,publication.id,record.id]);
+     messageId=inserted.rows[0]?.id;
+     if(!messageId){skipped++;continue;}
+    }else{
+     const claimed=await db.query(`
+      UPDATE communication_messages SET status='SENDING',body=$2,failure_reason=NULL,
+       provider=COALESCE(NULLIF($3,''),provider)
+      WHERE id=$1 AND status IN ('FAILED','QUEUED') RETURNING id
+     `,[existing.id,message,process.env.SMS_PROVIDER||'UNCONFIGURED']);
+     if(!claimed.rowCount){skipped++;continue;}
+    }
+    let status='QUEUED',provider=process.env.SMS_PROVIDER||'UNCONFIGURED',failure=null;
+    try{
+     const delivery=await deliverSms({phone:guardian.phone,message,school_id:sid,learner_id:record.learner_id});
+     status=delivery.status;provider=delivery.provider||provider;
+    }catch(e){status='FAILED';failure=e.message;}
+    await db.query(`
+     UPDATE communication_messages SET status=$2,provider=$3,failure_reason=$4,
+       sent_at=CASE WHEN $2='SENT' THEN now() ELSE NULL END WHERE id=$1
+    `,[messageId,status,provider,failure]);
+    if(status==='SENT')sent++;else if(status==='QUEUED')queued++;else failed++;
+    details.push({
+     learner_id:record.learner_id,learner:learnerName,
+     parent:`${guardian.first_name||''} ${guardian.last_name||''}`.trim(),
+     phone:guardian.phone,status,failure_reason:failure
+    });
+   }
+  }
+  res.json({
+   publication_id:publicationId,sent,queued,failed,skipped,details,
+   message:retryFailedOnly?'Failed notifications retry completed.':'Notification delivery attempted; published results remain saved regardless of SMS status.'
+  });
+ }catch(e){
+  if(e.code==='42P01'||e.code==='42703')return res.status(503).json({error:'Apply database migrations 021_parent_publish_and_duplicate_guard.sql and 022_results_publication_centre.sql before sending notifications.'});
+  res.status(e.status||400).json({error:e.message});
+ }
 });
 router.post('/:schoolId/publish-grade-results',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{try{const sid=req.params.schoolId,b=req.body||{};if(!b.academic_year_id||!b.term_id||!b.level_id)return res.status(400).json({error:'Academic year, term and grade are required'});const learners=(await db.query(`SELECT DISTINCT l.id,l.first_name,l.middle_name,l.last_name FROM learner_enrollments e JOIN learners l ON l.id=e.learner_id JOIN classes c ON c.id=e.class_id WHERE e.school_id=$1 AND e.academic_year_id=$2 AND c.school_level_id=$3 AND COALESCE(e.status,'ACTIVE')='ACTIVE'`,[sid,b.academic_year_id,b.level_id])).rows;let queued=0,skipped=0,failed=0;for(const l of learners){const report=await buildTermReport(sid,l.id,b.academic_year_id,b.term_id);if(!report){skipped++;continue}const guardians=(await db.query(`SELECT pg.id,pg.phone FROM parent_guardians pg JOIN learner_guardians lg ON lg.parent_guardian_id=pg.id WHERE pg.school_id=$1 AND lg.learner_id=$2 AND pg.is_active AND pg.sms_enabled AND pg.communication_consent AND COALESCE(trim(pg.phone),'')<>''`,[sid,l.id])).rows;if(!guardians.length){skipped++;continue}const subjectSummary=(report.subjects||[]).map(x=>`${x.subject_code||x.subject_name}:${x.average==null?'—':Number(x.average).toFixed(1)}${x.grade?'/'+x.grade:''}`).join(', ');const body=String(b.message_template||`${report.school_name}: ${report.learner_name} ${report.term_name||'term'} results. Average ${report.overall_average==null?'—':Number(report.overall_average).toFixed(2)}, grade ${report.overall_grade||'—'}. Marks: ${subjectSummary||'See portal for full report.'}`).replaceAll('{learner}',report.learner_name).replaceAll('{average}',report.overall_average==null?'—':Number(report.overall_average).toFixed(2)).replaceAll('{grade}',report.overall_grade||'—').replaceAll('{marks}',subjectSummary);for(const g of guardians){let status='QUEUED',provider=process.env.SMS_PROVIDER||'UNCONFIGURED',reason=null;try{const d=await deliverSms({phone:g.phone,message:body,school_id:sid,learner_id:l.id});status=d.status;provider=d.provider;}catch(e){reason=e.message;status='FAILED';failed++;}await db.query(`INSERT INTO communication_messages(school_id,learner_id,parent_guardian_id,channel,message_type,body,status,provider,failure_reason,created_by,sent_at) VALUES($1,$2,$3,'SMS','PUBLISHED_RESULTS',$4,$5,$6,$7,$8,CASE WHEN $5='SENT' THEN now() ELSE NULL END)`,[sid,l.id,g.id,body,status,provider,reason,req.user.user_id]);if(status==='SENT'||status==='QUEUED')queued++;}}res.status(201).json({learners:learners.length,queued,skipped,failed,message:(String(process.env.SMS_PROVIDER||'').toUpperCase()==='AFRICASTALKING'&&process.env.SMS_AFRICA_TALKING_API_KEY)?"Results sent through Africa's Talking SMS.":(process.env.SMS_WEBHOOK_URL?'Results sent through the configured SMS webhook.':'Results queued safely; configure an SMS provider for live delivery.')});}catch(e){res.status(400).json({error:e.message})}});
 // Deep academic analytics for the selected grade/class context.
