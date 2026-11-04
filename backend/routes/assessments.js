@@ -115,12 +115,7 @@ router.get('/:schoolId/:yearId/:termId',schoolBoundary,async(req,res)=>{
         ||String(a.id).localeCompare(String(b.id));
     });
 
-    res.json(chosen.map(a=>({...a,
-      canonical_name:
-        String(a.assessment_type||'').toUpperCase()==='OPENER'?'Opener':
-        String(a.assessment_type||'').toUpperCase()==='MID_TERM'?'Mid Term':
-        String(a.assessment_type||'').toUpperCase()==='END_TERM'?'End Term':a.name
-    })));
+    res.json(chosen.map(a=>({...a,canonical_name:a.name})));
   }catch(e){
     console.error('Assessment list load failed:',e);
     res.status(e.status||400).json({error:e.message||'Unable to load assessments'});
@@ -148,30 +143,34 @@ router.get('/:schoolId/:yearId/:termId/class/:classId/subjects',schoolBoundary,r
 
 // Create the administrator-selected assessment set for every subject assigned to a class.
 router.post('/:schoolId/:yearId/:termId/class-bulk',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{
-  const b=req.body||{}, sid=req.params.schoolId, classId=b.class_id;
-  const rawTypes=Array.isArray(b.assessment_types)?b.assessment_types.map(x=>String(x).toUpperCase()):[];
-  const types=rawTypes.filter(x=>['OPENER','CAT1','CAT2','MID_TERM','END_TERM'].includes(x));
+  const b=req.body||{},sid=req.params.schoolId,classId=b.class_id;
+  const definitions=Array.isArray(b.assessments)?b.assessments:[];
   const subjectIds=Array.isArray(b.subject_ids)?b.subject_ids.filter(Boolean):[];
   if(!classId)return res.status(400).json({error:'Select a class first.'});
-  if(!types.length)return res.status(400).json({error:'Select at least one assessment to add.'});
+  if(!definitions.length||definitions.length>30)return res.status(400).json({error:'Add between 1 and 30 exams or CATs.'});
   try{
     await assertBelongs('academic_years',req.params.yearId,sid);
     await assertBelongs('terms',req.params.termId,sid);
     await assertBelongs('classes',classId,sid);
-    const termRow=(await db.query(`SELECT term_no FROM terms WHERE id=$1 AND school_id=$2`,[req.params.termId,sid])).rows[0];
-    if(!termRow)return res.status(404).json({error:'Term not found.'});
-    const allowedMain=new Set(['OPENER','MID_TERM','END_TERM']);
-    const mainTypes=types.filter(x=>allowedMain.has(x));
-    const catTypes=types.filter(x=>x.startsWith('CAT'));
-    const termNo=Number(termRow.term_no);
-    if((termNo===1||termNo===2) && !['OPENER','MID_TERM','END_TERM'].every(x=>mainTypes.includes(x))){
-      return res.status(400).json({error:`Terms 1 and 2 require Opener + Mid Term + End Term.`});
-    }
-    if(termNo===3 && !(mainTypes.includes('OPENER')&&mainTypes.includes('END_TERM'))){
-      return res.status(400).json({error:`Term 3 requires at least Opener + End Term; Mid Term is optional.`});
-    }
-    const filteredTypes=types.filter(x=>x.startsWith('CAT')||allowedMain.has(x));
-    if(!filteredTypes.length)return res.status(400).json({error:`No valid assessments selected for Term ${termNo}.`});
+    const seenNames=new Set();
+    const normalized=definitions.map((item,index)=>{
+      const name=String(item?.name||'').trim();
+      const kind=String(item?.kind||'MAIN').trim().toUpperCase();
+      const max=Number(item?.max_mark);
+      const key=name.toLocaleLowerCase();
+      if(!name||name.length>60)throw Object.assign(new Error(`Exam ${index+1} must have a name of 1–60 characters.`),{status:400});
+      if(!['MAIN','CAT'].includes(kind))throw Object.assign(new Error(`Invalid kind for ${name}.`),{status:400});
+      if(!Number.isFinite(max)||max<=0||max>10000)throw Object.assign(new Error(`Maximum mark for ${name} must be greater than 0 and no more than 10000.`),{status:400});
+      if(seenNames.has(key))throw Object.assign(new Error(`Exam/CAT names must be unique in this setup: ${name}.`),{status:400});
+      seenNames.add(key);
+      const canonical=key.replace(/[-_]+/g,' ').replace(/\s+/g,' ');
+      const type=kind==='CAT'?'CAT':({
+        opener:'OPENER',
+        'mid term':'MID_TERM',
+        'end term':'END_TERM'
+      }[canonical]||'CUSTOM');
+      return {name,kind,type,max,order:(index+1)*10};
+    });
     let subjects=(await db.query(`
       SELECT DISTINCT s.id,s.code,s.name
       FROM teacher_subject_assignments tsa JOIN subjects s ON s.id=tsa.subject_id
@@ -181,22 +180,29 @@ router.post('/:schoolId/:yearId/:termId/class-bulk',schoolBoundary,roles('SCHOOL
     `,[sid,classId,req.params.yearId])).rows;
     if(subjectIds.length)subjects=subjects.filter(s=>subjectIds.includes(s.id));
     if(!subjects.length)return res.status(400).json({error:'No subjects are assigned to this class for the selected academic year/term.'});
-    const maxMarks=b.max_marks||{}, weights=b.weights||{}, client=await db.pool.connect(), created=[], skipped=[];
+    const client=await db.pool.connect(),created=[],skipped=[];
     try{
       await client.query('BEGIN');
-      for(const s of subjects){
-        await client.query(`UPDATE assessments SET include_in_final=CASE WHEN assessment_type = ANY($6::text[]) THEN true ELSE false END WHERE school_id=$1 AND academic_year_id=$2 AND term_id=$3 AND class_id=$4 AND subject_id=$5 AND assessment_type IN ('OPENER','MID_TERM','END_TERM')`,[sid,req.params.yearId,req.params.termId,classId,s.id,mainTypes]);
-        for(const type of filteredTypes){
-          const typeDb=type.startsWith('CAT')?'CAT':type;
-          const name=type==='CAT1'?'CAT 1':type==='CAT2'?'CAT 2':({OPENER:'Opener',MID_TERM:'Mid Term',END_TERM:'End Term'}[type]||String(b.names?.[type]||type));
-          const exists=await client.query(`SELECT id FROM assessments WHERE school_id=$1 AND academic_year_id=$2 AND term_id=$3 AND class_id=$4 AND subject_id=$5 AND assessment_type=$6 AND lower(name)=lower($7) LIMIT 1`,[sid,req.params.yearId,req.params.termId,classId,s.id,typeDb,name]);
-          if(exists.rows.length){skipped.push({subject_id:s.id,assessment_type:type,name});continue;}
-          const max=Number(maxMarks[type]||100), weight=Number(weights[type]||0);
-          if(!Number.isFinite(max)||max<=0)throw new Error(`Invalid maximum mark for ${name}.`);
-          const q=await client.query(`INSERT INTO assessments(school_id,academic_year_id,term_id,name,assessment_type,max_mark,weight,include_in_final,combine_group,assessment_order,status,class_id,subject_id,cat_enabled,final_conversion_weight)
-            VALUES($1,$2,$3,$4,$5,$6,$7,true,$8,$9,'OPEN',$10,$11,$12,$13) RETURNING *`,
-            [sid,req.params.yearId,req.params.termId,name,typeDb,max,weight,type.startsWith('CAT')?'CATS':null,{OPENER:1,CAT1:2,CAT2:3,MID_TERM:4,END_TERM:5}[type]||9,classId,s.id,type.startsWith('CAT'),weight]);
-          created.push(q.rows);
+      for(const definition of normalized){
+        for(const subject of subjects){
+          const exists=await client.query(`
+            SELECT id FROM assessments
+            WHERE school_id=$1 AND academic_year_id=$2 AND term_id=$3
+              AND class_id=$4 AND subject_id=$5 AND assessment_type=$6
+              AND lower(name)=lower($7) LIMIT 1`,
+          [sid,req.params.yearId,req.params.termId,classId,subject.id,definition.type,definition.name]);
+          if(exists.rowCount){skipped.push({subject_id:subject.id,assessment_type:definition.type,name:definition.name});continue;}
+          const q=await client.query(`
+            INSERT INTO assessments(
+              school_id,academic_year_id,term_id,name,assessment_type,max_mark,weight,
+              include_in_final,combine_group,assessment_order,status,class_id,subject_id,
+              cat_enabled,final_conversion_weight
+            ) VALUES($1,$2,$3,$4,$5,$6,0,$7,$8,$9,'OPEN',$10,$11,$12,0)
+            RETURNING *`,
+          [sid,req.params.yearId,req.params.termId,definition.name,definition.type,definition.max,
+           definition.kind!=='CAT',definition.kind==='CAT'?'CATS':null,definition.order,
+           classId,subject.id,definition.kind==='CAT']);
+          created.push(q.rows[0]);
         }
       }
       await client.query('COMMIT');
@@ -478,7 +484,7 @@ router.patch('/:schoolId/:yearId/:termId/:assessmentId',schoolBoundary,roles('SC
     // The administrator may correct an assessment that was created with the wrong
     // maximum mark, name, weight or inclusion setting without recreating it.
     let nextName=current.name;
-    if(b.name!==undefined){ nextName=String(b.name||'').trim(); if(!nextName)return res.status(400).json({error:'Assessment name is required.'}); }
+    if(b.name!==undefined){ nextName=String(b.name||'').trim(); if(!nextName||nextName.length>60)return res.status(400).json({error:'Assessment name must be between 1 and 60 characters.'}); }
     let nextMax=Number(current.max_mark);
     if(b.max_mark!==undefined){ nextMax=Number(b.max_mark); if(!Number.isFinite(nextMax)||nextMax<=0)return res.status(400).json({error:'Maximum mark must be greater than 0.'}); }
     let nextWeight=Number(current.weight||0);
@@ -497,55 +503,90 @@ router.patch('/:schoolId/:yearId/:termId/:assessmentId',schoolBoundary,roles('SC
       deadline=current.deadline_at||null;
     }
 
-    // Deadline/close control is class-wide for the selected assessment type:
-    // one Opener/Mid Term/End Term deadline applies to every subject in that class.
-    // If no class is supplied, preserve the legacy single-assessment behaviour.
-    const scopeClass=requestedClassId || String(current.class_id||'').trim();
-    let q;
-    if(scopeClass){
-      const type=String(current.assessment_type||'').trim().toUpperCase();
-      const standard=['OPENER','MID_TERM','END_TERM','CAT','CAT1','CAT2'].includes(type);
-      if(standard){
-        q=await db.query(`
+    if(requestedClassId&&current.class_id&&String(current.class_id)!==requestedClassId)
+      return res.status(400).json({error:'Selected assessment does not belong to the requested class.'});
+    const classWide=Boolean(requestedClassId&&current.class_id&&String(current.class_id)===requestedClassId);
+    if(b.max_mark!==undefined){
+      const excessive=classWide
+        ?(await db.query(`
+          SELECT COUNT(*)::int count FROM marks m
+          JOIN assessments a ON a.id=m.assessment_id
+          WHERE a.school_id=$1 AND a.academic_year_id=$2 AND a.term_id=$3
+            AND a.class_id=$4 AND a.assessment_type=$5
+            AND lower(a.name)=lower($6) AND m.mark>$7
+        `,[sid,yearId,termId,requestedClassId,current.assessment_type,current.name,nextMax])).rows[0]
+        :(await db.query('SELECT COUNT(*)::int count FROM marks WHERE assessment_id=$1 AND mark>$2',[assessmentId,nextMax])).rows[0];
+      if(Number(excessive?.count)>0)return res.status(409).json({error:`The new maximum mark is below ${excessive.count} existing mark(s). Correct those marks before lowering the maximum.`});
+    }
+    if(b.name!==undefined&&nextName.toLocaleLowerCase()!==String(current.name||'').toLocaleLowerCase()&&!classWide){
+      const duplicate=(await db.query(`
+        SELECT 1 FROM assessments
+        WHERE school_id=$1 AND academic_year_id=$2 AND term_id=$3
+          AND class_id IS NOT DISTINCT FROM $4::uuid
+          AND subject_id IS NOT DISTINCT FROM $5::uuid
+          AND lower(name)=lower($6) AND id<>$7 LIMIT 1
+      `,[sid,yearId,termId,current.class_id,current.subject_id,nextName,assessmentId])).rowCount;
+      if(duplicate)return res.status(409).json({error:'Another assessment with that name already exists for this class and subject.'});
+    }
+    if(b.name!==undefined&&nextName.toLocaleLowerCase()!==String(current.name||'').toLocaleLowerCase()&&classWide){
+      const duplicate=(await db.query(`
+        SELECT 1 FROM assessments target
+        WHERE target.school_id=$1 AND target.academic_year_id=$2 AND target.term_id=$3
+          AND target.class_id=$4 AND target.assessment_type=$5
+          AND lower(target.name)=lower($6)
+          AND EXISTS(
+            SELECT 1 FROM assessments other
+            WHERE other.school_id=target.school_id
+              AND other.academic_year_id=target.academic_year_id
+              AND other.term_id=target.term_id
+              AND other.class_id=target.class_id
+              AND other.subject_id IS NOT DISTINCT FROM target.subject_id
+              AND lower(other.name)=lower($7) AND other.id<>target.id
+          )
+        LIMIT 1
+      `,[sid,yearId,termId,requestedClassId,current.assessment_type,current.name,nextName])).rowCount;
+      if(duplicate)return res.status(409).json({error:'Another assessment with the new name already exists in one or more subjects.'});
+    }
+
+    const client=await db.pool.connect();
+    try{
+      await client.query('BEGIN');
+      const updateSql=classWide?`
+        UPDATE assessments
+        SET name=$1,max_mark=$2,weight=$3,include_in_final=$4,
+            assessment_order=$5,deadline_at=$6,status=$7
+        WHERE school_id=$8 AND academic_year_id=$9 AND term_id=$10
+          AND class_id=$11 AND assessment_type=$12
+          AND lower(name)=lower($13)
+        RETURNING *
+      `:`
+        UPDATE assessments
+        SET name=$1,max_mark=$2,weight=$3,include_in_final=$4,
+            assessment_order=$5,deadline_at=$6,status=$7
+        WHERE id=$8 AND school_id=$9 AND academic_year_id=$10 AND term_id=$11
+        RETURNING *
+      `;
+      const params=classWide
+        ?[nextName,nextMax,nextWeight,nextInclude,nextOrder,deadline,status,sid,yearId,termId,requestedClassId,current.assessment_type,current.name]
+        :[nextName,nextMax,nextWeight,nextInclude,nextOrder,deadline,status,assessmentId,sid,yearId,termId];
+      const q=await client.query(updateSql,params);
+      let updatedCount=q.rowCount;
+      if(requestedClassId&&(b.deadline_at!==undefined||b.status!==undefined)){
+        const type=String(current.assessment_type||'').toUpperCase();
+        const standard=['OPENER','MID_TERM','END_TERM'].includes(type);
+        const peers=await client.query(`
           UPDATE assessments
-          SET deadline_at=$1,status=$2,
-              max_mark=CASE WHEN $8::boolean THEN $9::numeric ELSE max_mark END,
-              weight=CASE WHEN $10::boolean THEN $11::numeric ELSE weight END,
-              include_in_final=CASE WHEN $12::boolean THEN $13::boolean ELSE include_in_final END,
-              assessment_order=CASE WHEN $14::boolean THEN $15::integer ELSE assessment_order END
+          SET deadline_at=$1,status=$2
           WHERE school_id=$3 AND academic_year_id=$4 AND term_id=$5
             AND assessment_type=$6
             AND (class_id=$7 OR class_id IS NULL)
-            AND ($16::text IS NULL OR lower(name)=lower($16))
-          RETURNING *
-        `,[deadline,status,sid,yearId,termId,type,scopeClass,
-           b.max_mark!==undefined,nextMax,b.weight!==undefined,nextWeight,
-           b.include_in_final!==undefined,nextInclude,b.assessment_order!==undefined,nextOrder,
-           type==='CAT'?String(current.name||''):null]);
-      }else{
-        q=await db.query(`
-          UPDATE assessments
-          SET deadline_at=$1,status=$2,
-              max_mark=CASE WHEN $8::boolean THEN $9::numeric ELSE max_mark END,
-              weight=CASE WHEN $10::boolean THEN $11::numeric ELSE weight END,
-              include_in_final=CASE WHEN $12::boolean THEN $13::boolean ELSE include_in_final END,
-              assessment_order=CASE WHEN $14::boolean THEN $15::integer ELSE assessment_order END
-          WHERE school_id=$3 AND academic_year_id=$4 AND term_id=$5
-            AND name=$6 AND (class_id=$7 OR class_id IS NULL)
-          RETURNING *
-        `,[deadline,status,sid,yearId,termId,nextName,scopeClass,
-           b.max_mark!==undefined,nextMax,b.weight!==undefined,nextWeight,
-           b.include_in_final!==undefined,nextInclude,b.assessment_order!==undefined,nextOrder]);
+            AND ($8::boolean OR lower(name)=lower($9))
+        `,[deadline,status,sid,yearId,termId,type,requestedClassId,standard,String(current.name||'')]);
+        updatedCount=Math.max(1,peers.rowCount);
       }
-    }else{
-      q=await db.query(`
-        UPDATE assessments
-        SET name=$1,max_mark=$2,weight=$3,include_in_final=$4,assessment_order=$5,deadline_at=$6,status=$7
-        WHERE id=$8 AND school_id=$9 AND academic_year_id=$10 AND term_id=$11
-        RETURNING *
-      `,[nextName,nextMax,nextWeight,nextInclude,nextOrder,deadline,status,assessmentId,sid,yearId,termId]);
-    }
-    res.json({...(q.rows[0]||current),updated_count:q.rowCount,deadline_at:deadline,status});
+      await client.query('COMMIT');
+      res.json({...(q.rows[0]||current),updated_count:updatedCount,deadline_at:deadline,status});
+    }catch(e){await client.query('ROLLBACK');throw e}finally{client.release();}
   }catch(e){
     console.error('Assessment control update failed:',e);
     res.status(e.status||400).json({error:e.message||'Unable to update assessment.'});
@@ -637,12 +678,7 @@ router.get('/:schoolId/assignment/:assignmentId/roster',schoolBoundary,roles('SC
       SELECT a.id,a.name,a.assessment_type,a.max_mark,a.weight,a.status,a.deadline_at,
              a.class_id,a.subject_id,a.academic_year_id,a.term_id,a.assessment_order,a.created_at,
              COUNT(m.id)::int AS mark_count,
-             CASE
-               WHEN a.assessment_type='OPENER' THEN 'Opener'
-               WHEN a.assessment_type='MID_TERM' THEN 'Mid Term'
-               WHEN a.assessment_type='END_TERM' THEN 'End Term'
-               ELSE a.name
-             END AS canonical_name
+             a.name AS canonical_name
       FROM assessments a
       LEFT JOIN marks m
         ON m.assessment_id=a.id

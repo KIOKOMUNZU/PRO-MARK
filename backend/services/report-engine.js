@@ -1,5 +1,4 @@
 const db = require("../db");
-const {canonicalAssessmentName}=require("./assessment-utils");
 
 function finite(n) { const x = Number(n); return Number.isFinite(x) ? x : null; }
 function avg(values) {
@@ -102,23 +101,21 @@ function autoSubjectComment(s){
   return `The learner needs additional support and practice in ${s.subject_name}.`;
 }
 function configuredMainAssessments(assessments,classId,subjectId=null){
-  let main=(assessments||[]).filter(a=>a.include_in_final!==false && ['OPENER','MID_TERM','END_TERM'].includes(String(a.assessment_type||'').toUpperCase()) &&
+  const isIncluded=a=>a.include_in_final!==false&&!String(a.assessment_type||'').toUpperCase().startsWith('CAT')&&
     (a.class_id==null || String(a.class_id)===String(classId)) &&
-    (subjectId==null || a.subject_id==null || String(a.subject_id)===String(subjectId)));
-  // Legacy records sometimes predate class/subject scoping. If no scoped record
-  // exists, fall back to the school's term-level main assessments rather than
-  // inventing a Term 3 two-exam structure.
-  if(!main.length) main=(assessments||[]).filter(a=>a.include_in_final!==false && ['OPENER','MID_TERM','END_TERM'].includes(String(a.assessment_type||'').toUpperCase()) && (subjectId==null || a.subject_id==null || String(a.subject_id)===String(subjectId)));
+    (subjectId==null || a.subject_id==null || String(a.subject_id)===String(subjectId));
+  let main=(assessments||[]).filter(isIncluded);
   const byType=new Map();
   for(const a of main){
     const type=String(a.assessment_type||'').toUpperCase();
+    const key=['OPENER','MID_TERM','END_TERM'].includes(type)?type:String(a.id);
     const score=(Number(a.mark_count||0)>0?100000+Number(a.mark_count):0)+(a.subject_id!=null&&subjectId!=null&&String(a.subject_id)===String(subjectId)?4000:0)+(a.class_id!=null&&String(a.class_id)===String(classId)?2000:0);
-    const current=byType.get(type);const currentScore=current?.__specificity??-1;
+    const current=byType.get(key);const currentScore=current?.__specificity??-1;
     if(!current || score>currentScore || (score===currentScore && (Number(a.assessment_order||0)<Number(current.assessment_order||0) || (Number(a.assessment_order||0)===Number(current.assessment_order||0) && String(a.created_at||'')>String(current.created_at||''))))){
-      byType.set(type,{...a,__specificity:score});
+      byType.set(key,{...a,__specificity:score});
     }
   }
-  return [...byType.values()].sort((a,b)=>Number(a.assessment_order||0)-Number(b.assessment_order||0)||String(a.created_at||'').localeCompare(String(b.created_at||''))).map(({__specificity,...a})=>{if(['OPENER','MID_TERM','END_TERM'].includes(String(a.assessment_type||'').toUpperCase()))a.name=canonicalAssessmentName(a.assessment_type);return a;});
+  return [...byType.values()].sort((a,b)=>Number(a.assessment_order||0)-Number(b.assessment_order||0)||String(a.created_at||'').localeCompare(String(b.created_at||''))).map(({__specificity,...a})=>a);
 }
 
 
