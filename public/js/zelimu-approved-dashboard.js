@@ -307,7 +307,7 @@ function make(){
   };
   const renderFinance=(data,loadError)=>{
    const summary=data?.summary;
-   if(!summary){$('z7FeeRate').innerHTML='—<small>Collection rate</small>';$('z7FeeSummary').textContent='Finance data is unavailable for this account.';showEmpty('z7FinanceChart',loadError?`Finance data could not be loaded: ${loadError}`:'Finance data is unavailable for this account.',true);return null;}
+   if(!summary){$('z7FeeRate').innerHTML='—<small>Collection rate</small>';const message=loadError?`Finance could not load: ${loadError}`:'Finance overview is not available for this account role.';$('z7FeeSummary').textContent=message;showEmpty('z7FinanceChart',message,true);return null;}
    const charged=number(summary.charged),collected=number(summary.collected),rate=charged?Math.min(100,collected/charged*100):0;
    $('z7FeeRate').innerHTML=`${rate.toFixed(0)}%<small>Collection rate</small>`;
    $('z7FeeRing').style.background=`conic-gradient(#00825c ${rate}%, #e5eee9 ${rate}% 100%)`;
