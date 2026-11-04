@@ -356,6 +356,15 @@ body, main, .main-content, .dashboard-main {
 #zaWorkspace .za-tile strong{font-size:.95rem}#zaWorkspace .za-tile small{color:#567568;line-height:1.4}
 #zaWorkspace .za-detail{margin-top:14px;padding:13px 15px;background:white;border:1px solid #d4e5db;border-radius:10px;color:#2c5340}
 @media(max-width:900px){#zaWorkspace .za-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){#zaWorkspace .za-grid{grid-template-columns:1fr}#zaWorkspace{padding:12px}}
+
+#zaWorkspaceDetail .zelimu-merit-logo {
+  width: 48px !important;
+  height: 48px !important;
+  object-fit: contain;
+}
+#zaWorkspaceDetail .zelimu-merit-watermark {
+  display: none !important;
+}
 </style>
 </head>
 <body><main class="page">
@@ -3038,16 +3047,74 @@ async function merit(){
 
   let previous=null;
   let previousName=null;
+  let noBaselineReason=null;
 
   if(selected){
    const index=groups.findIndex(g=>g.key===selected);
+
    if(index>0){
     previousName=groups[index-1].name;
     const q=new URLSearchParams(base);
     q.set('assessment_name',previousName);
-    previous=await get(
-     `/api/merit-flex/${sid()}/preview?${q}`
+    previous=await get('/api/merit-flex/'+encodeURIComponent(sid())+'/preview?'+q);
+   }else{
+    const years=await get('/api/school/'+encodeURIComponent(sid())+'/academic-years');
+    if(!Array.isArray(years)){
+     throw Error('Unable to determine the previous academic term.');
+    }
+
+    const yearOrder=year=>{
+     const match=String(year.year_label||'').match(/\\d{4}/);
+     if(match)return Number(match[0]);
+     const date=Date.parse(year.start_date||'');
+     return Number.isNaN(date)?0:date;
+    };
+
+    const periods=[];
+    for(const year of years){
+     const terms=await get('/api/school/'+encodeURIComponent(sid())+'/terms/'+encodeURIComponent(year.id));
+     if(!Array.isArray(terms)){
+      throw Error('Unable to load terms for the previous academic year.');
+     }
+     for(const term of terms)periods.push({year,term});
+    }
+
+    periods.sort((a,b)=>
+     yearOrder(a.year)-yearOrder(b.year)||
+     Number(a.term.term_no)-Number(b.term.term_no)
     );
+
+    const currentIndex=periods.findIndex(period=>
+     String(period.year.id)===String(c.year)&&
+     String(period.term.id)===String(c.term)
+    );
+    const prior=currentIndex>0?periods[currentIndex-1]:null;
+
+    if(!prior){
+     noBaselineReason='DEV is unavailable because there is no earlier term with results.';
+    }else{
+     const priorQuery=new URLSearchParams({
+      academic_year_id:prior.year.id,
+      term_id:prior.term.id,
+      class_id:c.cls
+     });
+     const response=await fetch(
+      '/api/merit-flex/'+encodeURIComponent(sid())+'/preview?'+priorQuery,
+      {headers:{Authorization:'Bearer '+localStorage.getItem('token')}}
+     );
+     const priorData=await response.json().catch(()=>({}));
+
+     if(response.status===409){
+      noBaselineReason='DEV is unavailable because the previous term has no saved overall merit configuration.';
+     }else if(!response.ok){
+      throw Error(priorData.error||'Unable to load previous-term merit results.');
+     }else{
+      previous=priorData;
+      previousName=String(prior.year.year_label||'')+' '+
+       String(prior.term.name||('Term '+prior.term.term_no))+
+       ' overall merit';
+     }
+    }
    }
   }
 
@@ -3160,10 +3227,10 @@ async function merit(){
     </div>
    </div>`;
 
-  const note=previousName
+  const note=previous&&previousName
    ?`DEV compares ${title} with ${previousName}
-     using subjects with complete marks in both examinations.`
-   :'DEV is unavailable without a preceding comparable examination.';
+     using subjects with complete marks in both results.`
+   :noBaselineReason||'DEV is unavailable without a preceding comparable result.';
 
   const documentHtml=`
    <div id="zelimuMeritDocument">
