@@ -39,8 +39,9 @@ router.post('/:schoolId/structures',schoolBoundary,roles(...FINANCE_ROLES),async
  let c;
  try{
   const sid=req.params.schoolId,b=req.body||{};
-  const name=String(b.name||'').trim(),amount=Number(b.amount);
+  const name=String(b.name||'').trim(),amount=Number(b.amount),printNotes=String(b.print_notes||'');
   if(!name||!validMoney(b.amount))return res.status(400).json({error:'Fee name and an amount greater than zero are required.'});
+  if(name.length>120||printNotes.length>2000)return res.status(400).json({error:'Fee name must be 120 characters or fewer and printed notes must be 2,000 characters or fewer.'});
   if(!validDate(b.due_on))
     return res.status(400).json({error:'Invalid fee due date.'});
   const currency=String(b.currency||'KES').trim().toUpperCase();if(currency!=='KES')return res.status(400).json({error:'This first school-finance release supports KES only so payments cannot be allocated across different currencies.'});
@@ -48,11 +49,68 @@ router.post('/:schoolId/structures',schoolBoundary,roles(...FINANCE_ROLES),async
   if(b.class_id){const q=await db.query('SELECT 1 FROM classes WHERE id=$1 AND school_id=$2',[b.class_id,sid]);if(!q.rowCount)return res.status(400).json({error:'Class does not belong to this school.'});}
   c=await db.pool.connect();
   await c.query('BEGIN');
-  const q=await c.query(`INSERT INTO school_fee_structures(school_id,name,academic_year_id,class_id,amount,currency,due_on,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,[sid,name,b.academic_year_id||null,b.class_id||null,money(amount),currency,b.due_on||null,req.user.user_id]);
-  await c.query(`INSERT INTO audit_log(school_id,user_id,action,entity_type,entity_id,details) VALUES($1,$2,'SCHOOL_FEE_STRUCTURE_CREATED','school_fee_structure',$3,$4::jsonb)`,[sid,req.user.user_id,q.rows[0].id,JSON.stringify({name,amount,currency,class_id:b.class_id||null,academic_year_id:b.academic_year_id||null})]);
+  const q=await c.query(`INSERT INTO school_fee_structures(school_id,name,academic_year_id,class_id,amount,currency,due_on,print_notes,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,[sid,name,b.academic_year_id||null,b.class_id||null,money(amount),currency,b.due_on||null,printNotes,req.user.user_id]);
+  await c.query(`INSERT INTO audit_log(school_id,user_id,action,entity_type,entity_id,details) VALUES($1,$2,'SCHOOL_FEE_STRUCTURE_CREATED','school_fee_structure',$3,$4::jsonb)`,[sid,req.user.user_id,q.rows[0].id,JSON.stringify({name,amount,currency,class_id:b.class_id||null,academic_year_id:b.academic_year_id||null,print_notes:printNotes})]);
   await c.query('COMMIT');
   res.status(201).json(q.rows[0]);
- }catch(e){if(c)await c.query('ROLLBACK').catch(()=>{});console.error('Create fee structure failed:',e);res.status(500).json({error:'Could not create fee structure. Ensure migrations 028_school_finance_core.sql and 033_school_fee_ledger_integrity.sql have been applied.'});}
+ }catch(e){if(c)await c.query('ROLLBACK').catch(()=>{});console.error('Create fee structure failed:',e);res.status(500).json({error:'Could not create fee structure. Ensure migrations 028_school_finance_core.sql, 033_school_fee_ledger_integrity.sql, and 034_school_fee_structure_print_notes.sql have been applied.'});}
+ finally{if(c)c.release();}
+});
+
+router.patch('/:schoolId/structures/:structureId',schoolBoundary,roles(...FINANCE_ROLES),async(req,res)=>{
+ let c;
+ try{
+  const sid=req.params.schoolId,b=req.body||{};
+  if(typeof b.is_active!=='undefined'&&typeof b.is_active!=='boolean')
+   return res.status(400).json({error:'Fee structure status must be active or archived.'});
+  if(typeof b.print_notes!=='undefined'&&(typeof b.print_notes!=='string'||b.print_notes.length>2000))
+   return res.status(400).json({error:'Printed notes must be 2,000 characters or fewer.'});
+  c=await db.pool.connect();
+  await c.query('BEGIN');
+  const current=(await c.query('SELECT * FROM school_fee_structures WHERE id=$1 AND school_id=$2 FOR UPDATE',[req.params.structureId,sid])).rows[0];
+  if(!current){await c.query('ROLLBACK');return res.status(404).json({error:'Fee structure not found in this school.'});}
+  const name=String(b.name===undefined?current.name:b.name).trim();
+  const amount=b.amount===undefined?Number(current.amount):Number(b.amount);
+  const dueOn=b.due_on===undefined?current.due_on:b.due_on;
+  const printNotes=b.print_notes===undefined?current.print_notes:String(b.print_notes);
+  if(!name||name.length>120||!validMoney(amount)||!validDate(dueOn)){
+   await c.query('ROLLBACK');
+   return res.status(400).json({error:'Provide a fee name, a valid amount greater than zero, and a valid due date.'});
+  }
+  const updated=(await c.query(`
+   UPDATE school_fee_structures
+   SET name=$3,amount=$4,due_on=$5,print_notes=$6,is_active=COALESCE($7,is_active),updated_at=now()
+   WHERE id=$1 AND school_id=$2
+   RETURNING *
+  `,[current.id,sid,name,money(amount),dueOn||null,printNotes,b.is_active??null])).rows[0];
+  await c.query(`INSERT INTO audit_log(school_id,user_id,action,entity_type,entity_id,details) VALUES($1,$2,'SCHOOL_FEE_STRUCTURE_UPDATED','school_fee_structure',$3,$4::jsonb)`,[sid,req.user.user_id,current.id,JSON.stringify({name,amount:money(amount),due_on:dueOn||null,print_notes:printNotes,is_active:updated.is_active})]);
+  await c.query('COMMIT');
+  res.json(updated);
+ }catch(e){if(c)await c.query('ROLLBACK').catch(()=>{});console.error('Update fee structure failed:',e);res.status(500).json({error:'Could not update fee structure. Ensure migration 034_school_fee_structure_print_notes.sql has been applied.'});}
+ finally{if(c)c.release();}
+});
+
+router.delete('/:schoolId/structures/:structureId',schoolBoundary,roles(...FINANCE_ROLES),async(req,res)=>{
+ let c;
+ try{
+  const sid=req.params.schoolId;
+  c=await db.pool.connect();
+  await c.query('BEGIN');
+  const structure=(await c.query('SELECT id,name,is_active FROM school_fee_structures WHERE id=$1 AND school_id=$2 FOR UPDATE',[req.params.structureId,sid])).rows[0];
+  if(!structure){await c.query('ROLLBACK');return res.status(404).json({error:'Fee structure not found in this school.'});}
+  const count=Number((await c.query('SELECT count(*)::int count FROM school_fee_charges WHERE school_id=$1 AND fee_structure_id=$2',[sid,structure.id])).rows[0].count);
+  let action;
+  if(count){
+   await c.query('UPDATE school_fee_structures SET is_active=false,updated_at=now() WHERE id=$1 AND school_id=$2',[structure.id,sid]);
+   action='ARCHIVED';
+  }else{
+   await c.query('DELETE FROM school_fee_structures WHERE id=$1 AND school_id=$2',[structure.id,sid]);
+   action='DELETED';
+  }
+  await c.query(`INSERT INTO audit_log(school_id,user_id,action,entity_type,entity_id,details) VALUES($1,$2,$3,'school_fee_structure',$4,$5::jsonb)`,[sid,req.user.user_id,action==='ARCHIVED'?'SCHOOL_FEE_STRUCTURE_ARCHIVED':'SCHOOL_FEE_STRUCTURE_DELETED',structure.id,JSON.stringify({name:structure.name,existing_charges:count})]);
+  await c.query('COMMIT');
+  res.json({ok:true,action,existing_charges:count});
+ }catch(e){if(c)await c.query('ROLLBACK').catch(()=>{});console.error('Remove fee structure failed:',e);res.status(500).json({error:'Could not remove fee structure.'});}
  finally{if(c)c.release();}
 });
 

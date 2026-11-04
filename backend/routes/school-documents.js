@@ -15,8 +15,55 @@ function line(p,k,v){p.font('Helvetica-Bold').fontSize(10).fillColor('#243449').
 router.get('/:schoolId/fee-structures/:id/pdf',schoolBoundary,roles(...VIEW),async(req,res)=>{try{
  const sid=req.params.schoolId;if(!uuid.test(req.params.id))return res.status(400).json({error:'Invalid fee structure ID'});
  const q=await db.query(`SELECT f.*,a.year_label,c.name class_name,c.stream FROM school_fee_structures f LEFT JOIN academic_years a ON a.id=f.academic_year_id AND a.school_id=f.school_id LEFT JOIN classes c ON c.id=f.class_id AND c.school_id=f.school_id WHERE f.school_id=$1 AND f.id=$2`,[sid,req.params.id]);if(!q.rows[0])return res.status(404).json({error:'Fee structure not found'});
- const f=q.rows[0],s=await school(sid),p=pdfStart(res,'fee-structure-'+f.id+'.pdf');header(p,s,'OFFICIAL FEE STRUCTURE');line(p,'Fee item:',f.name);line(p,'Academic year:',f.year_label||'Not specified');line(p,'Class / stream:',[f.class_name,f.stream].filter(Boolean).join(' ')||'Not specified');line(p,'Due date:',f.due_on?String(f.due_on).slice(0,10):'Not specified');p.moveDown(1);const y=p.y;p.rect(50,y,495,46).fill('#eaf3ff');p.fillColor('#163e75').font('Helvetica-Bold').fontSize(16).text(`Amount: ${f.currency} ${fmt(f.amount)}`,64,y+14);p.moveDown(5);p.font('Helvetica').fontSize(9).fillColor('#64748b').text('Generated from the school fee structure register. Payments and learner-specific balances are recorded separately.',{align:'center'});p.end();
+ const f=q.rows[0],s=await school(sid),p=pdfStart(res,'fee-structure-'+f.id+'.pdf');header(p,s,'OFFICIAL FEE STRUCTURE');line(p,'Fee item:',f.name);line(p,'Academic year:',f.year_label||'Not specified');line(p,'Class / stream:',[f.class_name,f.stream].filter(Boolean).join(' ')||'Not specified');line(p,'Due date:',f.due_on?String(f.due_on).slice(0,10):'Not specified');p.moveDown(1);const y=p.y;p.rect(50,y,495,46).fill('#eaf3ff');p.fillColor('#163e75').font('Helvetica-Bold').fontSize(16).text(`Amount: ${f.currency} ${fmt(f.amount)}`,64,y+14);p.y=y+66;if(f.print_notes){p.font('Helvetica-Bold').fontSize(10).fillColor('#243449').text('School instructions / additional information');p.moveDown(.4);p.font('Helvetica').fontSize(10).fillColor('#334155').text(f.print_notes,{width:490});p.moveDown(1);}p.font('Helvetica').fontSize(9).fillColor('#64748b').text('Learner-specific fee statements show assigned charges, payments received and the current account balance.',{align:'center'});p.end();
  }catch(e){if(!res.headersSent)res.status(e.status||500).json({error:e.message});else res.end()}});
+router.get('/:schoolId/fee-statements/:learnerId/pdf',schoolBoundary,roles(...VIEW),async(req,res)=>{try{
+ const sid=req.params.schoolId,learnerId=req.params.learnerId;if(!uuid.test(learnerId))return res.status(400).json({error:'Invalid learner ID'});
+ const learner=(await db.query(`SELECT l.id,l.admission_no,l.first_name,l.middle_name,l.last_name,c.name class_name,c.stream FROM learners l LEFT JOIN classes c ON c.id=l.class_id AND c.school_id=l.school_id WHERE l.school_id=$1 AND l.id=$2`,[sid,learnerId])).rows[0];if(!learner)return res.status(404).json({error:'Learner not found in this school'});
+ const [charges,payments,totals]=await Promise.all([
+  db.query(`SELECT ch.id,ch.description,ch.amount,ch.due_on,ch.created_at,fs.print_notes,COALESCE(a.paid,0) paid FROM school_fee_charges ch LEFT JOIN school_fee_structures fs ON fs.id=ch.fee_structure_id AND fs.school_id=ch.school_id LEFT JOIN (SELECT a.charge_id,sum(a.amount) paid FROM school_fee_payment_allocations a JOIN school_fee_payments p ON p.id=a.payment_id AND p.status='CONFIRMED' AND p.school_id=$1 WHERE a.school_id=$1 AND NOT EXISTS(SELECT 1 FROM school_fee_payment_reversals r WHERE r.school_id=p.school_id AND r.payment_id=p.id) GROUP BY a.charge_id) a ON a.charge_id=ch.id WHERE ch.school_id=$1 AND ch.learner_id=$2 ORDER BY ch.due_on NULLS LAST,ch.created_at,ch.id`,[sid,learnerId]),
+  db.query(`SELECT p.receipt_no,p.amount,p.payment_date,p.payment_method,p.reference FROM school_fee_payments p WHERE p.school_id=$1 AND p.learner_id=$2 AND p.status='CONFIRMED' AND NOT EXISTS(SELECT 1 FROM school_fee_payment_reversals r WHERE r.school_id=p.school_id AND r.payment_id=p.id) ORDER BY p.payment_date,p.created_at,p.id`,[sid,learnerId]),
+  db.query(`SELECT COALESCE((SELECT sum(amount) FROM school_fee_charges WHERE school_id=$1 AND learner_id=$2),0) charged,COALESCE((SELECT sum(amount) FROM school_fee_payments p WHERE p.school_id=$1 AND p.learner_id=$2 AND p.status='CONFIRMED' AND NOT EXISTS(SELECT 1 FROM school_fee_payment_reversals r WHERE r.school_id=p.school_id AND r.payment_id=p.id)),0) paid`,[sid,learnerId])
+ ]);
+ const fileLearner=String(learner.admission_no||learner.id).replace(/[^a-zA-Z0-9_-]/g,'-');
+ const s=await school(sid),p=pdfStart(res,`fee-statement-${fileLearner}.pdf`);header(p,s,'LEARNER FEE STATEMENT');
+ line(p,'Learner:',[learner.first_name,learner.middle_name,learner.last_name].filter(Boolean).join(' '));line(p,'Admission number:',learner.admission_no);line(p,'Current class:',[learner.class_name,learner.stream].filter(Boolean).join(' ')||'Not assigned');line(p,'Statement date:',new Date().toISOString().slice(0,10));
+ p.moveDown(.5);p.font('Helvetica-Bold').fontSize(11).fillColor('#17345b').text('Assigned fee charges');p.moveDown(.5);
+ const columns=[{label:'Fee item',x:55,w:195,align:'left'},{label:'Due',x:250,w:65,align:'left'},{label:'Charge',x:315,w:75,align:'right'},{label:'Paid',x:390,w:70,align:'right'},{label:'Balance',x:460,w:80,align:'right'}];
+ const drawChargeHeader=()=>{const y=p.y;p.rect(50,y,495,22).fill('#17345b');columns.forEach(col=>p.fillColor('#fff').font('Helvetica-Bold').fontSize(8).text(col.label,col.x,y+6,{width:col.w-5,align:col.align,lineBreak:false}));p.y=y+28;};
+ drawChargeHeader();
+ if(!charges.rowCount){p.font('Helvetica').fontSize(9).fillColor('#475569').text('No charges have been assigned to this learner.');p.moveDown();}
+ for(const charge of charges.rows){
+  const cells=[charge.description,String(charge.due_on||'—').slice(0,10),fmt(charge.amount),fmt(charge.paid),fmt(Math.max(0,Number(charge.amount)-Number(charge.paid)))];
+  const rowHeight=Math.max(...cells.map((value,index)=>p.heightOfString(String(value),{width:columns[index].w-7,font:'Helvetica',fontSize:8})))+10;
+  if(p.y+rowHeight>p.page.height-65){p.addPage();header(p,s,'LEARNER FEE STATEMENT · CONTINUED');drawChargeHeader();}
+  const y=p.y;p.fillColor('#334155').font('Helvetica').fontSize(8);cells.forEach((value,index)=>p.text(String(value),columns[index].x,y+4,{width:columns[index].w-7,align:columns[index].align}));p.strokeColor('#dbe3ec').moveTo(50,y+rowHeight).lineTo(545,y+rowHeight).stroke();p.y=y+rowHeight;
+ }
+ const charged=Number(totals.rows[0].charged),paid=Number(totals.rows[0].paid),balance=charged-paid;
+ if(p.y+110>p.page.height-55){p.addPage();header(p,s,'LEARNER FEE STATEMENT · CONTINUED');}
+ p.moveDown(.6);p.font('Helvetica-Bold').fontSize(9).fillColor('#17345b').text(`Total charges: KES ${fmt(charged)}`,{align:'right'});p.text(`Total payments received: KES ${fmt(paid)}`,{align:'right'});p.fontSize(12).text(`${balance<0?'Prepaid credit':'Outstanding balance'}: KES ${fmt(Math.abs(balance))}`,{align:'right'});
+ if(p.y+40>p.page.height-55){p.addPage();header(p,s,'LEARNER FEE STATEMENT · CONTINUED');}
+ p.moveDown(1);p.font('Helvetica-Bold').fontSize(11).fillColor('#17345b').text('Confirmed payment receipts');p.moveDown(.5);
+ for(const payment of payments.rows){
+  const receiptText=`${String(payment.payment_date).slice(0,10)}  ·  ${payment.receipt_no}  ·  ${payment.payment_method}  ·  KES ${fmt(payment.amount)}${payment.reference?'  ·  Ref '+payment.reference:''}`;
+  p.font('Helvetica').fontSize(8).fillColor('#334155');
+  const receiptHeight=p.heightOfString(receiptText,{width:485,font:'Helvetica',fontSize:8})+5;
+  if(p.y+receiptHeight>p.page.height-50){p.addPage();header(p,s,'LEARNER FEE STATEMENT · CONTINUED');p.font('Helvetica-Bold').fontSize(10).fillColor('#17345b').text('Confirmed payment receipts · continued');p.moveDown(.4);p.font('Helvetica').fontSize(8).fillColor('#334155');}
+  p.text(receiptText,55,p.y,{width:485});
+ }
+ const notes=[...new Set(charges.rows.map(charge=>String(charge.print_notes||'').trim()).filter(Boolean))];
+ if(notes.length){
+  if(p.y+25>p.page.height-50){p.addPage();header(p,s,'LEARNER FEE STATEMENT · CONTINUED');}
+  p.moveDown(1);p.font('Helvetica-Bold').fontSize(10).fillColor('#17345b').text('School instructions');p.moveDown(.3);
+  for(const note of notes){
+   p.font('Helvetica').fontSize(9).fillColor('#334155');
+   const noteHeight=p.heightOfString(note,{width:490,font:'Helvetica',fontSize:9})+12;
+   if(p.y+noteHeight>p.page.height-50){p.addPage();header(p,s,'LEARNER FEE STATEMENT · CONTINUED');p.font('Helvetica-Bold').fontSize(10).fillColor('#17345b').text('School instructions · continued');p.moveDown(.3);p.font('Helvetica').fontSize(9).fillColor('#334155');}
+   p.text(note,{width:490});p.moveDown(.6);
+  }
+ }
+ p.end();
+}catch(e){if(!res.headersSent)res.status(e.status||500).json({error:e.message});else res.end()}});
 router.get('/:schoolId/leaving-certificates',schoolBoundary,roles(...VIEW),async(req,res)=>{try{const q=await db.query(`SELECT r.id,r.data,r.created_at,l.admission_no,l.first_name,l.middle_name,l.last_name FROM school_module_records r LEFT JOIN learners l ON l.id=(r.data->>'learner_id')::uuid AND l.school_id=r.school_id WHERE r.school_id=$1 AND r.record_type='leaving_certificate' ORDER BY r.created_at DESC LIMIT 250`,[req.params.schoolId]);res.json(q.rows)}catch(e){res.status(500).json({error:'Unable to load certificates'})}});
 router.post('/:schoolId/leaving-certificates',schoolBoundary,roles(...WRITE),async(req,res)=>{try{
  const sid=req.params.schoolId,b=req.body||{};if(!uuid.test(b.learner_id))return res.status(400).json({error:'Select a valid learner'});
