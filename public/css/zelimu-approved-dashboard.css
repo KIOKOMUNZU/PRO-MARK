@@ -741,3 +741,34 @@ body .z7-navhead{letter-spacing:.075em!important}
 }
 @media(prefers-reduced-motion:reduce){body .z7 *{scroll-behavior:auto!important}}
 /* ZELIMU PREMIUM TYPOGRAPHY V3 END */
+
+body .z7-live-status{display:flex;align-items:center;gap:7px;margin-top:8px!important;color:#56746a;font-size:10px}
+body .z7-live-dot{width:7px;height:7px;border-radius:50%;background:#20a565;box-shadow:0 0 0 3px #20a56522}
+body .z7-refresh{border:1px solid #cfe0d4;border-radius:8px;background:#fff;color:#16543d;padding:10px 12px;font-size:11px;font-weight:800;cursor:pointer}
+body .z7-refresh:disabled{opacity:.55;cursor:wait}
+body .z7-chart-context{min-height:22px;color:#637a70;font-size:10px}
+body .z7-chart-wrap{min-height:185px}
+body .z7-chart-loading{display:flex;align-items:center;justify-content:center;min-height:185px;padding:12px;color:#71849a;text-align:center;font-size:11px}
+body .z7-chart-loading.z7-error{color:#a73535}
+body .z7-live-plot{width:100%;height:auto;min-height:180px;display:block;overflow:visible}
+body .z7-gridline{stroke:#e7edf2;stroke-width:1}
+body .z7-axislabel{fill:#73869a;font-size:10px}
+body .z7-barlabel{fill:#29436a;font-size:11px}
+body .z7-barvalue{fill:#234a3b;font-size:10px;font-weight:700}
+body .z7-bar{fill:#13835e;transition:width .5s ease}
+body .z7-line{fill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+body .z7-chart-note{margin:5px 0 0;color:#6b7f91;text-align:center;font-size:10px;line-height:1.45}
+body .z7-legend{flex-wrap:wrap}
+body .z7-legend i{display:inline-block;width:8px;height:8px;margin-right:5px;border-radius:50%}
+body .z7-actioncount{min-width:24px;color:#0b7956!important;font-size:11px;font-weight:800;text-align:right}
+body .z7-table-wrap{max-height:250px;overflow:auto}
+body .z7-activity-status{display:inline-block;padding:3px 6px;border-radius:20px;background:#e8f5ed;color:#176044;font-size:9px;font-weight:700}
+body .z7-finlist{line-height:1.9}
+body .z7-finlist b{color:#183e31}
+body .z7-error{color:#9e3b3b!important}
+@media(max-width:750px){
+ body .z7-heading-right{flex-wrap:wrap;justify-content:flex-end}
+ body .z7-refresh{padding:9px}
+ body .z7-table-wrap{overflow-x:auto}
+ body .z7-live-plot{min-height:155px}
+}
