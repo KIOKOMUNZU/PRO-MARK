@@ -629,17 +629,25 @@ body, main, .main-content, .dashboard-main {
 <div class="za-context-heading"><strong>Analysis filters</strong><span>Choose the year, term, grade and class once for every workspace.</span></div>
 <div class="analytics-toolbar grid"><label>Academic year<select id="anYear"></select></label><label>Term<select id="anTerm"></select></label><label>Grade / Level<select id="anLevel"><option value="">All grades</option></select></label><label>Class<select id="anClass"><option value="">All classes</option></select></label><label>Subject Teacher<select id="anTeacher"><option value="">All teachers</option></select></label></div>
 <div id="zaWorkspace" class="za-v5" aria-label="Performance Analytics modules">
- <div class="za-header"><div><h3>Academic Performance & Merit</h3><p>Eight dedicated workspaces · live school results</p></div><span class="pill">ZELIMU CBC</span></div>
- <div class="za-grid" role="tablist" aria-label="Analytics modules">
- <button type="button" class="za-tile" data-za-tool="merit" role="tab">🏆 <strong>Merit Lists</strong><small>Assessment-specific and term rankings</small></button>
- <button type="button" class="za-tile" data-za-tool="subjects" role="tab">📚 <strong>Subject Analytics</strong><small>Averages, grades and leaders</small></button>
- <button type="button" class="za-tile" data-za-tool="classes" role="tab">🏫 <strong>Class &amp; Stream</strong><small>Class comparison and trends</small></button>
- <button type="button" class="za-tile" data-za-tool="school" role="tab">📊 <strong>School Performance</strong><small>School indicators and term trends</small></button>
- <button type="button" class="za-tile" data-za-tool="learners" role="tab">📈 <strong>Learner Progress</strong><small>Improvement and learner trajectories</small></button>
- <button type="button" class="za-tile" data-za-tool="exams" role="tab">📝 <strong>Exam Comparison</strong><small>CAT, Opener, Mid and End Term</small></button>
- <button type="button" class="za-tile" data-za-tool="teachers" role="tab">👩‍🏫 <strong>Teacher &amp; Department</strong><small>Assigned subject performance</small></button>
- <button type="button" class="za-tile" data-za-tool="reports" role="tab">📄 <strong>Reports &amp; Exports</strong><small>CSV, print and report cards</small></button>
- </div><div id="zaWorkspaceDetail" class="za-detail" role="tabpanel" aria-live="polite">Select a workspace above, choose year and term, then load results.</div>
+ <div class="za-header"><div><h3>Academic Performance &amp; Merit</h3><p>Eight focused workspaces · one shared academic context</p></div><span class="pill">ZELIMU CBC</span></div>
+ <div class="za-groups" role="tablist" aria-label="Analytics workspaces">
+  <section class="za-group"><h4>Results</h4><div class="za-grid">
+   <button type="button" class="za-tile" data-za-tool="merit" role="tab"><strong>Merit Lists</strong><small>Official configured ranking; completeness and class position</small></button>
+   <button type="button" class="za-tile" data-za-tool="exams" role="tab"><strong>Exam Comparison</strong><small>Compare assessment outcomes and participation</small></button>
+  </div></section>
+  <section class="za-group"><h4>Subjects &amp; Classes</h4><div class="za-grid">
+   <button type="button" class="za-tile" data-za-tool="subjects" role="tab"><strong>Subject Analytics</strong><small>Means, coverage, configured grades, targets and learners</small></button>
+   <button type="button" class="za-tile" data-za-tool="classes" role="tab"><strong>Class &amp; Stream</strong><small>Compare class learning areas, cohort size and trends</small></button>
+  </div></section>
+  <section class="za-group"><h4>Learners &amp; Staff</h4><div class="za-grid">
+   <button type="button" class="za-tile" data-za-tool="learners" role="tab"><strong>Learner Progress</strong><small>Term trajectory, subject strengths and support needs</small></button>
+   <button type="button" class="za-tile" data-za-tool="teachers" role="tab"><strong>Teacher &amp; Department</strong><small>Assignment coverage and academic supervision evidence</small></button>
+  </div></section>
+  <section class="za-group"><h4>Leadership &amp; Outputs</h4><div class="za-grid">
+   <button type="button" class="za-tile" data-za-tool="school" role="tab"><strong>School Performance</strong><small>Leadership overview, targets and term movement</small></button>
+   <button type="button" class="za-tile" data-za-tool="reports" role="tab"><strong>Reports &amp; Exports</strong><small>Filtered CSV, print/PDF and official report cards</small></button>
+  </div></section>
+ </div><div id="zaWorkspaceDetail" class="za-detail" role="tabpanel" aria-live="polite">Choose a workspace, set the shared academic context, then load its analysis.</div>
 
 <section hidden id="v6WeightedPanel" class="za-detail" style="margin-top:12px" aria-label="V6 weighted term merit preview">
  <h3>V6 · Weighted Term Merit Preview</h3><p class="muted small">Independent calculation preview. Existing official merit PDFs and report cards remain unchanged. Select year, term and class using the analytics filters above.</p>
@@ -678,7 +686,7 @@ body, main, .main-content, .dashboard-main {
 <script>
 (function(){'use strict';
 const token=localStorage.getItem('token'),rawUser=localStorage.getItem('user');if(!token||!rawUser){location.href='/login.html';return;}let user;try{user=JSON.parse(rawUser)}catch{localStorage.clear();location.href='/login.html';return;}
-const isPlatformOwner=user.role==='PLATFORM_OWNER';let sid=user.school_id||new URLSearchParams(location.search).get('school_id');if(isPlatformOwner&&!sid){location.href='/owner.html';return;}if(!sid){location.href='/owner.html';return;}const isAdmin=isPlatformOwner||['SCHOOL_ADMIN','ADMIN'].includes(user.role),isTeacher=true,isLeadership=['HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER'].includes(user.role),isClassTeacher=user.role==='CLASS_TEACHER',isAnyTeacher=true;
+const isPlatformOwner=user.role==='PLATFORM_OWNER';let sid=user.school_id||new URLSearchParams(location.search).get('school_id');if(isPlatformOwner&&!sid){location.href='/owner.html';return;}if(!sid){location.href='/owner.html';return;}const isAdmin=isPlatformOwner||['SCHOOL_ADMIN','ADMIN'].includes(user.role),isSubjectTeacher=user.role==='TEACHER',isTeacher=isSubjectTeacher||user.role==='CLASS_TEACHER',isLeadership=['HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER'].includes(user.role),isClassTeacher=user.role==='CLASS_TEACHER',isAnyTeacher=isTeacher;
 const $=id=>document.getElementById(id), api=async(url,opt={})=>{const headers=Object.assign({'Authorization':'Bearer '+localStorage.getItem('token')},opt.headers||{});if(opt.body&&typeof opt.body!=='string'&&!(opt.body instanceof FormData)){headers['Content-Type']='application/json';opt.body=JSON.stringify(opt.body);}const method=String(opt.method||'GET').toUpperCase();let r,lastError;for(let attempt=0;attempt<(method==='GET'?2:1);attempt++){try{r=await fetch(url,{...opt,headers,cache:method==='GET'?'default':undefined});break}catch(e){lastError=e;if(attempt<1)await new Promise(resolve=>setTimeout(resolve,250));}}if(!r){throw new Error(`Unable to reach the ZELIMU CBC server for this request. Please try again. (${lastError?.message||'network error'})`);}const raw=await r.text();let d={};if(raw.trim()){try{d=JSON.parse(raw)}catch{throw new Error(`Server returned an invalid response (HTTP ${r.status}).`)}}if(r.status===401){localStorage.removeItem('token');localStorage.removeItem('user');location.href='/login.html';throw new Error('Session expired. Please sign in again.')}if(!r.ok){const msg=d.error||`Request failed (${r.status})`;throw new Error(`${msg} [HTTP ${r.status}] ${url}`);}return d;};
 function opts(el,arr,label,empty='Select…'){if(!el)return;el.innerHTML='';const e=document.createElement('option');e.value='';e.textContent=empty;el.appendChild(e);for(const x of arr){const o=document.createElement('option');o.value=x.id;o.textContent=label(x);el.appendChild(o);}}
 async function terms(yearId,el,keepBlank=false,emptyLabel){if(!yearId){if(el)el.innerHTML=`<option value="">${emptyLabel||'Select term…'}</option>`;return [];}const previous=el?.value||'';const raw=await api(`/api/school/${sid}/terms/${yearId}`);const r=Array.isArray(raw)?raw:(Array.isArray(raw?.terms)?raw.terms:[]);state.terms[yearId]=r;if(el){opts(el,r,x=>x?.name||`Term ${x?.term_no||''}`,emptyLabel);if(previous&&r.some(x=>String(x.id)===String(previous)))el.value=previous;else if(r.length&&!keepBlank)el.value=r[0].id;} if(el?.id==='dateTerm')syncCalendarDates(r,el.value); return r;}
@@ -692,9 +700,11 @@ function applyRoleView(){
   // that overrides the tab CSS and makes every section visible at once.
   document.querySelectorAll('.admin-only').forEach(x=>x.classList.toggle('role-hidden',!isAdmin));
   document.querySelectorAll('.admin-or-leadership').forEach(x=>x.classList.toggle('role-hidden',!(isAdmin||isLeadership)));
+  document.querySelectorAll('.class-teacher-analytics').forEach(x=>x.classList.toggle('role-hidden',!(isAdmin||isLeadership||isClassTeacher||isSubjectTeacher)));
   document.querySelectorAll('.teacher-only').forEach(x=>x.classList.toggle('role-hidden',!isTeacher));
   document.querySelectorAll('.class-teacher-only').forEach(x=>x.classList.toggle('role-hidden',!isClassTeacher));
-  ['results','merit','reports'].forEach(id=>{const x=$(id);if(x)x.classList.toggle('role-hidden',!(isAdmin||isLeadership||isAnyTeacher));});
+  ['results','merit','reports'].forEach(id=>{const x=$(id);if(x)x.classList.toggle('role-hidden',!(isAdmin||isLeadership||isClassTeacher));});
+  document.querySelectorAll('#zaWorkspace [data-za-tool]').forEach(button=>{button.hidden=isSubjectTeacher&&button.dataset.zaTool!=='subjects';});
   const people=$('people');if(people)people.classList.toggle('role-hidden',!(isAdmin||isClassTeacher||isLeadership));
   const leadership=$('leadership');if(leadership)leadership.classList.toggle('role-hidden',!isAdmin);
   const nav=$('navTabs');
@@ -702,9 +712,9 @@ function applyRoleView(){
     const t=b.dataset.target;
     let allowed=true;
     if(['identity','documents','academic','assign','assess','markControl','leadership','userControl'].includes(t)) allowed=isAdmin;
-    if(t==='analytics') allowed=isAdmin||isLeadership;
+    if(t==='analytics') allowed=isAdmin||isLeadership||isClassTeacher||isSubjectTeacher;
     if(t==='teacherMarking') allowed=isTeacher;
-    if(['results','merit','reports'].includes(t)) allowed=isAdmin||isLeadership||isAnyTeacher;
+    if(['results','merit','reports'].includes(t)) allowed=isAdmin||isLeadership||isClassTeacher;
     if(t.startsWith('pm24_')){ const n=Number(t.split('_')[1]); if(isAdmin) allowed=true; else if(isLeadership) allowed=[6,7,9,10,11,12,13,14,15,16,19,20,21,24,25,26].includes(n); else if(isClassTeacher) allowed=[4,7,8,9,11,12,13,16,25,26].includes(n); else if(isAnyTeacher) allowed=[8,9,11,25,26].includes(n); else allowed=false; if(n===27) allowed=isAdmin; if(n===28) allowed=isAdmin; }
     if(t==='people') allowed=isAdmin||isClassTeacher||isLeadership;
     if(t==='resources') allowed=isAdmin||isLeadership||isClassTeacher||isAnyTeacher;
@@ -1296,6 +1306,7 @@ async function setupTeacher(){
  if(isAdmin){ a=state.assignments||[]; }
  else { const loginUserId=user.user_id||user.id||user.userId; const teacher=state.teachers.find(x=>String(x.user_id)===String(loginUserId)); if(!teacher){$('teacherMsg').textContent='No teacher profile is linked to this login.';setTeacherStepState();return;} a=(state.assignments||[]).filter(x=>String(x.teacher_id)===String(teacher.id)); }
  state.teacherAssignments=Array.isArray(a)?a:(Array.isArray(a?.assignments)?a.assignments:[]);
+ if(!isAdmin&&!isLeadership)await setupAnalytics();
  // Teacher Mark Entry is deliberately a focused entry workspace. Assignment cards
  // and class-register panels are not rendered here; they belong to the dedicated
  // Assignments / Class Lists modules. The teacher selects Assessment -> Class -> Subject
@@ -1676,7 +1687,7 @@ $('userControlList')?.addEventListener('click',async e=>{
   }
  }catch(x){alert(x.message);}
 });
-async function setupAnalytics(){try{const year=$('anYear'),previousYear=year?.value;opts(year,state.years,x=>x.year_label);if(year)year.value=state.years.some(x=>String(x.id)===String(previousYear))?previousYear:(state.years[0]?.id||'');const levels=state.classes.reduce((a,c)=>a.some(x=>String(x.id)===String(c.school_level_id))?a:a.concat([{id:c.school_level_id,name:c.level_name}]),[]);opts($('anLevel'),levels,x=>x.name,'All grades');opts($('anClass'),roleAllowedClasses(state.classes),x=>`${x.name} ${x.stream||''}`,'All classes');opts($('anTeacher'),state.teachers||[],x=>`${x.first_name||''} ${x.last_name||''}${x.staff_no?' · '+x.staff_no:''}`,'All teachers');if(year?.value)await terms(year.value,$('anTerm'));safeOn('anTeacher','change',()=>runAnalytics());}catch(e){console.error('Analytics filters could not be initialized:',e);const out=$('zaWorkspaceDetail');if(out)out.innerHTML=`<div class="notice" role="alert">Unable to load analytics filters: ${esc(e.message)}</div>`;}}
+async function setupAnalytics(){try{const year=$('anYear'),previousYear=year?.value;opts(year,state.years,x=>x.year_label);if(year)year.value=state.years.some(x=>String(x.id)===String(previousYear))?previousYear:(state.years[0]?.id||'');const levels=state.classes.reduce((a,c)=>a.some(x=>String(x.id)===String(c.school_level_id))?a:a.concat([{id:c.school_level_id,name:c.level_name}]),[]);opts($('anLevel'),levels,x=>x.name,'All grades');const assignedClassIds=new Set((state.teacherAssignments||[]).map(a=>String(a.class_id)));const availableClasses=isSubjectTeacher?state.classes.filter(c=>assignedClassIds.has(String(c.id))):roleAllowedClasses(state.classes);opts($('anClass'),availableClasses,x=>`${x.name} ${x.stream||''}`,'All classes');opts($('anTeacher'),state.teachers||[],x=>`${x.first_name||''} ${x.last_name||''}${x.staff_no?' · '+x.staff_no:''}`,'All teachers');const teacherFilter=$('anTeacher')?.closest('label');if(teacherFilter)teacherFilter.hidden=isTeacher;if(year?.value)await terms(year.value,$('anTerm'));safeOn('anTeacher','change',()=>runAnalytics());}catch(e){console.error('Analytics filters could not be initialized:',e);const out=$('zaWorkspaceDetail');if(out)out.innerHTML=`<div class="notice" role="alert">Unable to load analytics filters: ${esc(e.message)}</div>`;}}
 async function setupMarkControl(){try{opts($('mcYear'),state.years,x=>x.year_label);opts($('mcClass'),roleAllowedClasses(state.classes),x=>`${x.name} ${x.stream||''}`.trim(),'Select class…');opts($('pubYear'),state.years,x=>x.year_label);const levels=state.classes.reduce((a,c)=>a.some(x=>String(x.id)===String(c.school_level_id))?a:a.concat([{id:c.school_level_id,name:c.level_name}]),[]);opts($('pubLevels'),levels,x=>x.name);$('pubLevels').querySelector('option[value=""]')?.remove();opts($('pubClasses'),roleAllowedClasses(state.classes),x=>`${x.name} ${x.stream||''} · ${x.level_name||''}`);$('pubClasses').querySelector('option[value=""]')?.remove();if(state.years[0]){await Promise.all(['mcTerm','pubTerm'].map(id=>terms(state.years[0].id,$(id))));await loadControlAssessments();}updatePublicationScope();await loadPublicationHistory();}catch(e){console.error('Mark control centre could not be initialized:',e);const msg=$('publishMsg');if(msg){msg.style.display='block';msg.textContent=`Unable to initialize publishing controls: ${e.message}`;}}}
 async function loadControlAssessments(refreshTerm=true){const y=$('mcYear').value;if(!y)return;const previousTerm=$('mcTerm').value;if(refreshTerm)await terms(y,$('mcTerm'));if(previousTerm&&[...$('mcTerm').options].some(o=>o.value===previousTerm))$('mcTerm').value=previousTerm;if(!$('mcTerm').value)return;const classId=String($('mcClass')?.value||'');const qs=classId?`?class_id=${encodeURIComponent(classId)}`:'';const all=await api(`/api/assessments/${sid}/${y}/${$('mcTerm').value}${qs}`);const a=Array.isArray(all)?all:[];const previousAssessment=$('mcAssessment').value;opts($('mcAssessment'),a,x=>`${x.name} · ${x.assessment_type}`,'Select assessment…');const chosen=a.find(v=>String(v.id)===String(previousAssessment))||a[0];if(chosen){$('mcAssessment').value=chosen.id;$('mcDeadline').value=chosen.deadline_at?new Date(chosen.deadline_at).toISOString().slice(0,16):'';}else $('mcDeadline').value='';}
 let publicationPreview=null;
@@ -2782,6 +2793,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 <style id="zaV5Styles">
 #zaWorkspace .za-tile[aria-selected="true"]{border:2px solid #168457;background:#e6f7ed;box-shadow:0 4px 16px #0c683023}
 #zaWorkspace .za-detail{min-height:250px;padding:20px}
+.za-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.za-group{padding:12px;border:1px solid #dae8df;border-radius:12px;background:#fbfdfb}.za-group h4{margin:0 0 9px;color:#315b45}.za-group .za-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.za-group .za-tile{min-width:0}.za-group .za-tile small{display:block}.za-subject-teacher-note{margin:8px 0;padding:10px;border-left:3px solid #148558;background:#f3faf6}
 .za-v5-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:14px}
 .za-v5-controls label{display:flex;flex-direction:column;gap:5px;min-width:180px;flex:1}
 .za-v5-controls select,.za-v5-controls input{min-height:40px;border:1px solid #bbd5c6;border-radius:8px;padding:8px;background:white;color:#173e2c}
@@ -2793,7 +2805,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 .za-v5-scroll{overflow:auto;max-height:540px}.za-v5-panel{margin-top:15px;border:1px solid #dae8df;border-radius:10px;padding:14px}
 .za-v5-panel h4{margin:0 0 12px}.za-v5-bar{display:flex;gap:8px;align-items:center;margin:8px 0}.za-v5-bar span{width:180px;max-width:35%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.za-v5-bar i{display:block;background:#15945c;height:13px;border-radius:8px}.za-v5-bar b{margin-left:auto}
 .za-chart{display:block;width:100%;height:auto;overflow:visible}.za-chart text{font-family:inherit;fill:#496457;font-size:12px}.za-chart .za-chart-grid{stroke:#dbe8df;stroke-width:1}.za-chart .za-chart-axis{stroke:#91aa9c;stroke-width:1}.za-chart .za-chart-bar{fill:#12845a}.za-chart .za-chart-target{stroke:#d68128;stroke-width:2;stroke-dasharray:4 3}.za-chart .za-chart-line{fill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.za-chart .za-chart-point{stroke:white;stroke-width:2}.za-chart-legend{display:flex;gap:8px 16px;flex-wrap:wrap;margin:8px 0 0}.za-chart-legend span{display:inline-flex;gap:6px;align-items:center;font-size:.86rem}.za-chart-legend i{width:11px;height:11px;border-radius:3px;display:inline-block}.za-chart-note{font-size:.84rem;color:#60766a;margin:8px 0 0}
-@media(max-width:640px){.za-v5-controls{display:grid;grid-template-columns:1fr}.za-v5-controls label{min-width:0}#zaWorkspace .za-detail{padding:10px}}
+@media(max-width:700px){.za-groups{grid-template-columns:1fr}}@media(max-width:640px){.za-v5-controls{display:grid;grid-template-columns:1fr}.za-v5-controls label{min-width:0}#zaWorkspace .za-detail{padding:10px}.za-group .za-grid{grid-template-columns:1fr}}
 
 /* Unified analytics navigation and context */
 #analytics .za-context-heading{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:14px 0 6px}
@@ -2883,7 +2895,8 @@ function subjectTrendChart(trends,subjects){
  return `<svg class="za-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Historical term-average trends for up to six subjects">${grid}${periodLabels}${series}</svg><div class="za-chart-legend">${legend}</div><p class="za-chart-note">Term averages combine available marks across assessments; missing periods are left blank. Showing up to six subjects and the latest eight terms.</p>`;
 }
 function csv(name,heads,rows){const q=v=>'"'+String(v??'').replace(/"/g,'""').replace(/[\r\n]+/g,' ')+'"';const text=[heads,...rows].map(row=>row.map(q).join(',')).join('\r\n');const url=URL.createObjectURL(new Blob(['\ufeff'+text],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-function commonControls(){return `<div class="za-v5-controls"><button class="za-v5-btn" id="zaLoad">Load ${esc(selected==='merit'?'merit':'analysis')}</button><button class="za-v5-btn secondary" id="zaCsv">Export this view (CSV)</button></div>`;}
+async function excel(title,headers,rows){const response=await fetch(`/api/communications/${encodeURIComponent(sid())}/analytics-export.xlsx`,{method:'POST',headers:{Authorization:'Bearer '+localStorage.getItem('token'),'Content-Type':'application/json'},body:JSON.stringify({title,headers,rows})});if(!response.ok){let message=`Excel export failed (HTTP ${response.status}).`;try{message=(await response.json()).error||message;}catch{}throw Error(message);}const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download=`zelimu-${selected}-analytics.xlsx`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+function commonControls(){return `<div class="za-v5-controls"><button class="za-v5-btn" id="zaLoad">Load ${esc(selected==='merit'?'merit':'analysis')}</button><button class="za-v5-btn secondary" id="zaCsv">Export this view (CSV)</button><button class="za-v5-btn secondary" id="zaExcel">Export this view (Excel)</button></div>`;}
 async function loadAssessmentOptions(){const c=context();assessments=[];if(!c.year||!c.term)return;const raw=await get(`/api/assessments/${sid()}/${c.year}/${c.term}`);const rows=Array.isArray(raw)?raw:(raw.assessments||[]);const seen=new Set();assessments=rows.filter(a=>!c.cls||!a.class_id||String(a.class_id)===String(c.cls)).filter(a=>{const key=String(a.id);if(seen.has(key))return false;seen.add(key);return true;});}
 
 async function subjectDeviationRegister(){
@@ -3091,6 +3104,7 @@ else if(selected==='reports'){html=kpis([['Available learner trends',(r.learner_
 else return;
 out.innerHTML=`<h3>${esc(root.querySelector('[aria-selected="true"] strong')?.textContent||'Analytics')}</h3>${commonControls()}${html}`;
 const csvBtn=$('zaCsv');if(csvBtn)csvBtn.onclick=()=>csv(`zelimu-${selected}.csv`,exportHeads,exportRows);
+const excelBtn=$('zaExcel');if(excelBtn)excelBtn.onclick=async()=>{excelBtn.disabled=true;try{await excel(`ZELIMU ${selected} analytics`,exportHeads,exportRows);}catch(e){alert(e.message);}finally{excelBtn.disabled=false;}};
 $('zaLoad').onclick=load;
 if($('zaSubjectAssessment'))$('zaSubjectAssessment').onchange=()=>{subjectAssessmentId=$('zaSubjectAssessment').value;load();};
 if($('zaClassChartSubject'))$('zaClassChartSubject').onchange=()=>{classChartSubjectId=$('zaClassChartSubject').value;render(cached);};

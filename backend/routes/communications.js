@@ -1,9 +1,36 @@
 const express=require('express'),db=require('../db');
+const ExcelJS=require('exceljs');
 const {buildTermReport}=require('../services/report-engine');
 const {authenticate,roles,schoolBoundary}=require('../middleware/auth');
 const router=express.Router();
 const analyticsResponseCache=new Map();
 router.use(authenticate);
+router.post('/:schoolId/analytics-export.xlsx',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER'),async(req,res)=>{
+ try{
+  const {title,headers,rows}=req.body||{};
+  if(!Array.isArray(headers)||headers.length<1||headers.length>50||!Array.isArray(rows)||rows.length>10000||rows.some(row=>!Array.isArray(row)||row.length!==headers.length)){
+   return res.status(400).json({error:'Export data must contain 1-50 columns and no more than 10,000 consistently sized rows.'});
+  }
+  const workbook=new ExcelJS.Workbook();
+  const sheet=workbook.addWorksheet(String(title||'Academic analysis').replace(/[\\/*?:\[\]]/g,' ').slice(0,31)||'Academic analysis');
+  sheet.columns=headers.map((header,index)=>({key:`column${index}`,header:String(header??'').slice(0,200),width:18}));
+  sheet.getRow(1).font={bold:true};
+  for(const row of rows)sheet.addRow(row.map(value=>{
+   if(value==null)return '';
+   if(typeof value==='number')return Number.isFinite(value)?value:'';
+   if(typeof value==='boolean')return value;
+   if(typeof value==='string')return value.length>32000?value.slice(0,32000):value;
+   return String(value).slice(0,32000);
+  }));
+  sheet.views=[{state:'frozen',ySplit:1}];
+  sheet.columns.forEach(column=>{column.width=Math.min(40,Math.max(12,...sheet.getColumn(column.number).values.slice(1,21).map(value=>String(value??'').length+2)));});
+  const file=await workbook.xlsx.writeBuffer();
+  res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition','attachment; filename="zelimu-academic-analysis.xlsx"');
+  res.setHeader('Content-Length',String(file.length));
+  res.end(file);
+ }catch(e){console.error('Unable to generate academic analytics workbook:',e);res.status(500).json({error:'Unable to generate the Excel export.'});}
+});
 function normalizedPhone(phone){
  return String(phone||'').replace(/[\s()+-]/g,'');
 }
@@ -616,22 +643,31 @@ router.post('/:schoolId/result-publications/:publicationId/notifications',school
 });
 router.post('/:schoolId/publish-grade-results',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{try{const sid=req.params.schoolId,b=req.body||{};if(!b.academic_year_id||!b.term_id||!b.level_id)return res.status(400).json({error:'Academic year, term and grade are required'});const learners=(await db.query(`SELECT DISTINCT l.id,l.first_name,l.middle_name,l.last_name FROM learner_enrollments e JOIN learners l ON l.id=e.learner_id JOIN classes c ON c.id=e.class_id WHERE e.school_id=$1 AND e.academic_year_id=$2 AND c.school_level_id=$3 AND COALESCE(e.status,'ACTIVE')='ACTIVE'`,[sid,b.academic_year_id,b.level_id])).rows;let queued=0,skipped=0,failed=0;for(const l of learners){const report=await buildTermReport(sid,l.id,b.academic_year_id,b.term_id);if(!report){skipped++;continue}const guardians=(await db.query(`SELECT pg.id,pg.phone FROM parent_guardians pg JOIN learner_guardians lg ON lg.parent_guardian_id=pg.id WHERE pg.school_id=$1 AND lg.learner_id=$2 AND pg.is_active AND pg.sms_enabled AND pg.communication_consent AND COALESCE(trim(pg.phone),'')<>''`,[sid,l.id])).rows;if(!guardians.length){skipped++;continue}const subjectSummary=(report.subjects||[]).map(x=>`${x.subject_code||x.subject_name}:${x.average==null?'—':Number(x.average).toFixed(1)}${x.grade?'/'+x.grade:''}`).join(', ');const body=String(b.message_template||`${report.school_name}: ${report.learner_name} ${report.term_name||'term'} results. Average ${report.overall_average==null?'—':Number(report.overall_average).toFixed(2)}, grade ${report.overall_grade||'—'}. Marks: ${subjectSummary||'See portal for full report.'}`).replaceAll('{learner}',report.learner_name).replaceAll('{average}',report.overall_average==null?'—':Number(report.overall_average).toFixed(2)).replaceAll('{grade}',report.overall_grade||'—').replaceAll('{marks}',subjectSummary);for(const g of guardians){let status='QUEUED',provider=process.env.SMS_PROVIDER||'UNCONFIGURED',reason=null;try{const d=await deliverSms({phone:g.phone,message:body,school_id:sid,learner_id:l.id});status=d.status;provider=d.provider;}catch(e){reason=e.message;status='FAILED';failed++;}await db.query(`INSERT INTO communication_messages(school_id,learner_id,parent_guardian_id,channel,message_type,body,status,provider,failure_reason,created_by,sent_at) VALUES($1,$2,$3,'SMS','PUBLISHED_RESULTS',$4,$5,$6,$7,$8,CASE WHEN $5='SENT' THEN now() ELSE NULL END)`,[sid,l.id,g.id,body,status,provider,reason,req.user.user_id]);if(status==='SENT'||status==='QUEUED')queued++;}}res.status(201).json({learners:learners.length,queued,skipped,failed,message:(String(process.env.SMS_PROVIDER||'').toUpperCase()==='AFRICASTALKING'&&process.env.SMS_AFRICA_TALKING_API_KEY)?"Results sent through Africa's Talking SMS.":(process.env.SMS_WEBHOOK_URL?'Results sent through the configured SMS webhook.':'Results queued safely; configure an SMS provider for live delivery.')});}catch(e){res.status(400).json({error:e.message})}});
 // Subject-level descriptive analytics. Official merit and report calculations remain separate.
-router.get('/:schoolId/analytics/subjects',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER'),async(req,res)=>{
+router.get('/:schoolId/analytics/subjects',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER'),async(req,res)=>{
  try{
   const sid=req.params.schoolId;
   let {academic_year_id:y,term_id:t,level_id:level,class_id:cls,teacher_id:teacherId,assessment_id:assessmentId}=req.query;
   if(!y||!t)return res.status(400).json({error:'Academic year and term are required'});
+  if(req.user.role==='TEACHER'){
+   const own=(await db.query(`SELECT id FROM teachers WHERE school_id=$1 AND user_id=$2 AND COALESCE(is_active,true)=true LIMIT 1`,[sid,req.user.user_id])).rows[0];
+   if(!own)return res.status(403).json({error:'No active teacher profile is linked to this account.'});
+   teacherId=own.id;
+  }
   if(req.user.role==='CLASS_TEACHER'){
-   const own=(await db.query(`SELECT cta.class_id FROM class_teacher_assignments cta JOIN teachers th ON th.id=cta.teacher_id WHERE cta.school_id=$1 AND th.user_id=$2 AND cta.academic_year_id=$3 ORDER BY cta.created_at DESC LIMIT 1`,[sid,req.user.user_id,y])).rows[0];
+   const own=(await db.query(`SELECT cta.class_id FROM class_teacher_assignments cta JOIN teachers th ON th.id=cta.teacher_id WHERE cta.school_id=$1 AND th.user_id=$2 AND cta.academic_year_id=$3 AND ($4::uuid IS NULL OR cta.class_id=$4) ORDER BY cta.created_at DESC LIMIT 1`,[sid,req.user.user_id,y,cls||null])).rows[0];
    if(!own)return res.status(403).json({error:'No active Class Teacher assignment found for this academic year.'});
    cls=own.class_id;
   }
   const term=(await db.query(`SELECT id,academic_year_id FROM terms WHERE id=$1 AND school_id=$2`,[t,sid])).rows[0];
   if(!term||String(term.academic_year_id)!==String(y))return res.status(404).json({error:'The selected term does not belong to this academic year.'});
-  const classParams=[sid];
+  const classParams=[sid,y,t];
   let classFilter='';
   if(level){classParams.push(level);classFilter+=` AND c.school_level_id=$${classParams.length}`;}
   if(cls){classParams.push(cls);classFilter+=` AND c.id=$${classParams.length}`;}
+  if(req.user.role==='TEACHER'){
+   classParams.push(teacherId);
+   classFilter+=` AND EXISTS(SELECT 1 FROM teacher_subject_assignments tsa WHERE tsa.school_id=c.school_id AND tsa.class_id=c.id AND tsa.teacher_id=$${classParams.length} AND tsa.academic_year_id=$2 AND (tsa.term_id=$3 OR tsa.term_id IS NULL) AND COALESCE(tsa.is_active,true)=true)`;
+  }
   const classes=(await db.query(`SELECT c.id,c.name,c.stream,c.school_level_id,sl.name level_name,sl.school_section_id section_id
    FROM classes c LEFT JOIN school_levels sl ON sl.id=c.school_level_id
    WHERE c.school_id=$1 AND COALESCE(c.is_active,true)=true${classFilter} ORDER BY sl.sort_order,c.name,c.stream`,classParams)).rows;
@@ -727,7 +763,7 @@ router.get('/:schoolId/analytics/subjects',schoolBoundary,roles('SCHOOL_ADMIN','
 // Deep academic analytics for the selected grade/class context.
 router.get('/:schoolId/analytics',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER'),async(req,res)=>{
  try{
-  const sid=req.params.schoolId; let {academic_year_id:y,term_id:t,level_id:level,class_id:cls,teacher_id:teacherFilter}=req.query; if(req.user.role==='CLASS_TEACHER'){const own=(await db.query(`SELECT cta.class_id FROM class_teacher_assignments cta JOIN teachers th ON th.id=cta.teacher_id WHERE cta.school_id=$1 AND th.user_id=$2 AND cta.academic_year_id=$3 ORDER BY cta.created_at DESC LIMIT 1`,[sid,req.user.user_id,y])).rows[0];if(!own)return res.status(403).json({error:'No active Class Teacher assignment found for this academic year.'});cls=own.class_id;const me=(await db.query(`SELECT id FROM teachers WHERE school_id=$1 AND user_id=$2 AND COALESCE(is_active,true)=true LIMIT 1`,[sid,req.user.user_id])).rows[0];teacherFilter=me?.id||null;}
+ const sid=req.params.schoolId; let {academic_year_id:y,term_id:t,level_id:level,class_id:cls,teacher_id:teacherFilter}=req.query; if(req.user.role==='CLASS_TEACHER'){const own=(await db.query(`SELECT cta.class_id FROM class_teacher_assignments cta JOIN teachers th ON th.id=cta.teacher_id WHERE cta.school_id=$1 AND th.user_id=$2 AND cta.academic_year_id=$3 AND ($4::uuid IS NULL OR cta.class_id=$4) ORDER BY cta.created_at DESC LIMIT 1`,[sid,req.user.user_id,y,cls||null])).rows[0];if(!own)return res.status(403).json({error:'No active Class Teacher assignment found for this academic year.'});cls=own.class_id;const me=(await db.query(`SELECT id FROM teachers WHERE school_id=$1 AND user_id=$2 AND COALESCE(is_active,true)=true LIMIT 1`,[sid,req.user.user_id])).rows[0];teacherFilter=me?.id||null;}
   if(!y||!t)return res.status(400).json({error:'Academic year and term are required'});
   const term=(await db.query(`SELECT id,term_no,name FROM terms WHERE id=$1 AND school_id=$2`,[t,sid])).rows[0];
   if(!term)return res.status(404).json({error:'Term not found'});
