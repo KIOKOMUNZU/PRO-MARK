@@ -57,8 +57,13 @@ function cached(key,ttl,loader){
   const now=Date.now(),hit=reportCache.get(key);
   if(hit && hit.expires>now)return hit.value;
   const value=Promise.resolve().then(loader);
-  reportCache.set(key,{value,expires:now+ttl});
-  value.catch(()=>reportCache.delete(key));
+  const entry={value,expires:Infinity};
+  reportCache.set(key,entry);
+  value.then(()=>{
+    if(reportCache.get(key)===entry)entry.expires=Date.now()+ttl;
+  },()=>{
+    if(reportCache.get(key)===entry)reportCache.delete(key);
+  });
   return value;
 }
 function autoSubjectComment(s){
@@ -194,7 +199,7 @@ async function resolveGrading(schoolId, meta, assessmentId=null, subjectId=null)
 async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
   const meta = await getContext(schoolId,learnerId,yearId,termId);
   if (!meta) return null;
-  const assessments = await cached(`assessments|${schoolId}|${yearId}|${termId}|${meta.section_id||''}|${meta.level_id||''}`,30000,async()=> (await db.query(`
+  const assessmentsPromise = cached(`assessments|${schoolId}|${yearId}|${termId}|${meta.section_id||''}|${meta.level_id||''}`,30000,async()=> (await db.query(`
     SELECT a.*,
       (SELECT COUNT(*)::int FROM marks mx WHERE mx.assessment_id=a.id AND mx.school_id=a.school_id AND mx.academic_year_id=a.academic_year_id AND mx.term_id=a.term_id) AS mark_count,
       COALESCE((SELECT ac.include_in_term_average FROM assessment_configurations ac
@@ -209,7 +214,7 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
     WHERE a.school_id=$1 AND a.academic_year_id=$2 AND a.term_id=$3
     ORDER BY a.assessment_order,a.created_at,a.name`,[schoolId,yearId,termId,meta.section_id,meta.level_id])).rows);
 
-  const marks = (await db.query(`
+  const marksPromise = db.query(`
     SELECT m.subject_id,s.code subject_code,s.name subject_name,a.id assessment_id,a.name assessment_name,
            a.assessment_type,a.max_mark,a.weight,m.mark,m.remark,
            th.staff_no,th.first_name teacher_first_name,th.last_name teacher_last_name,
@@ -237,7 +242,7 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
     LEFT JOIN teachers th2 ON th2.user_id=m.entered_by AND th2.school_id=m.school_id AND th2.is_active=true
     LEFT JOIN users u2 ON u2.id=m.entered_by AND u2.is_active=true
     WHERE m.school_id=$1 AND m.learner_id=$2 AND m.academic_year_id=$3 AND m.term_id=$4
-    ORDER BY s.name,a.assessment_order,a.name`,[schoolId,learnerId,yearId,termId,meta.section_id,meta.level_id])).rows;
+    ORDER BY s.name,a.assessment_order,a.name`,[schoolId,learnerId,yearId,termId,meta.section_id,meta.level_id]).then(q=>q.rows);
 
   // Subject-teacher assignments are read live for every report build.  This is
   // intentional: an administrator can assign/reassign a teacher and the very next
@@ -250,7 +255,7 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
   //   3) another assignment in the same year (latest one)
   // Active assignments are preferred, but an inactive historical row is allowed as a
   // fallback so a valid teacher name is never lost from an existing report.
-  const assignedSubjects = await cached(`assignments|${schoolId}|${meta.class_id}|${yearId}|${termId}`,15000,async()=> (await db.query(`
+  const assignedSubjectsPromise = cached(`assignments|${schoolId}|${meta.class_id}|${yearId}|${termId}`,15000,async()=> (await db.query(`
     SELECT DISTINCT ON (tsa.subject_id) tsa.subject_id,s.code subject_code,s.name subject_name,
            th.staff_no,th.first_name teacher_first_name,th.last_name teacher_last_name,
            COALESCE(tsa.is_active,true) assignment_active,tsa.term_id assignment_term_id,
@@ -263,7 +268,8 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
     ORDER BY tsa.subject_id,
       CASE WHEN tsa.term_id=$4 THEN 0 WHEN tsa.term_id IS NULL THEN 1 ELSE 2 END,
       CASE WHEN COALESCE(tsa.is_active,true)=true THEN 0 ELSE 1 END,
-      tsa.created_at DESC,tsa.id DESC`,[schoolId,meta.class_id,yearId,termId])).rows);
+        tsa.created_at DESC,tsa.id DESC`,[schoolId,meta.class_id,yearId,termId])).rows);
+      const [assessments,marks,assignedSubjects]=await Promise.all([assessmentsPromise,marksPromise,assignedSubjectsPromise]);
 
   // Report-card subjects come from the current class assignments PLUS any marks
   // actually recorded for this learner in the selected year/term.  This prevents a

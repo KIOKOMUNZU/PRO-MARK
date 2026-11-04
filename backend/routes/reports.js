@@ -1,7 +1,7 @@
 const express=require("express"),db=require("../db");
 const {authenticate,schoolBoundary,roles}=require("../middleware/auth");
 const {buildTermReport,buildYearReport,invalidateReportCaches}=require("../services/report-engine");
-const {reportPdf,reportPdfs,buildReportPdfsBuffer,streamReportPdfs}=require("../services/report-pdf");
+const {reportPdf,reportPdfs,buildReportPdfsBuffer,streamReportPdfs,invalidateReportPdfCache}=require("../services/report-pdf");
 const router=express.Router();router.use(authenticate);
 const classReportPdfCache=new Map();
 function getClassReportPdf(key){const hit=classReportPdfCache.get(key);if(hit&&hit.expires>Date.now())return hit.value;if(hit)classReportPdfCache.delete(key);return null;}
@@ -84,6 +84,7 @@ router.put('/:schoolId/designation',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN',
  ON CONFLICT(learner_id,academic_year_id,term_id) DO UPDATE SET designation=EXCLUDED.designation,decision=EXCLUDED.decision,attendance_days=EXCLUDED.attendance_days,school_open_days=EXCLUDED.school_open_days,conduct=EXCLUDED.conduct,effort=EXCLUDED.effort,next_term_target=EXCLUDED.next_term_target,intervention_plan=EXCLUDED.intervention_plan,teacher_comment=EXCLUDED.teacher_comment,headteacher_comment=EXCLUDED.headteacher_comment,updated_by=EXCLUDED.updated_by,updated_at=now()
  RETURNING *`,[req.params.schoolId,b.learner_id,b.academic_year_id,b.term_id,String(b.designation||'AUTO').toUpperCase(),String(b.decision||'AUTO').toUpperCase(),b.attendance_days===''||b.attendance_days==null?null:Number(b.attendance_days),b.school_open_days===''||b.school_open_days==null?null:Number(b.school_open_days),b.conduct||null,b.effort||null,b.next_term_target===''||b.next_term_target==null?null:Number(b.next_term_target),b.intervention_plan||null,b.teacher_comment||null,b.headteacher_comment||null,req.user.user_id]);
  invalidateReportCaches();
+ invalidateReportPdfCache();
  res.json(q.rows[0]);
 }catch(e){res.status(400).json({error:e.message})}});
 module.exports=router;
