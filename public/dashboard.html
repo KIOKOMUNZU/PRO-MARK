@@ -2939,16 +2939,22 @@ function meritGroups(items){
   const key=name.toUpperCase().replace(/\s+/g,' ');
   if(!key)continue;
   if(!groups.has(key))
-   groups.set(key,{
-    key,name,
-    order:Number(a.assessment_order??999)
-   });
+   groups.set(key,{key,name,order:Number(a.assessment_order??999)});
  }
+ const stage=name=>{
+  const normalized=String(name||'').toUpperCase().replace(/[ _-]+/g,' ');
+  if(/\bOPENER\b/.test(normalized))return 10;
+  const cat=/\bCAT\s*(\d+)\b/.exec(normalized);
+  if(cat)return 20+Number(cat[1]);
+  if(/\bMID ?TERM\b/.test(normalized))return 50;
+  if(/\bEND ?TERM\b/.test(normalized))return 60;
+  return 40;
+ };
  return [...groups.values()].sort((a,b)=>
+  stage(a.name)-stage(b.name)||
   a.order-b.order||a.name.localeCompare(b.name)
  );
 }
-
 function meritControls(){
  const groups=meritGroups(assessments);
  return `<div class="za-v5-controls">
@@ -3064,7 +3070,7 @@ async function merit(){
     }
 
     const yearOrder=year=>{
-     const match=String(year.year_label||'').match(/\\d{4}/);
+     const match=String(year.year_label||'').match(/\d{4}/);
      if(match)return Number(match[0]);
      const date=Date.parse(year.start_date||'');
      return Number.isNaN(date)?0:date;
