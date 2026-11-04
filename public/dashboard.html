@@ -3326,40 +3326,61 @@ $('v6LoadWeights').onclick=()=>loadProfiles().catch(e=>setError(weights,e));$('v
 ['anYear','anTerm','anClass'].forEach(id=>$(id)?.addEventListener('change',()=>{result=null;exportBtn.disabled=true;out.textContent='Filters changed. Load weighted merit again.';weights.textContent='Filters changed. Reload assessment weights.'}));
 })();
 </script>
-<script src="/merit-unified.js" defer>
-/* ZELIMU GRADING REMOVE HANDLER */
-document.addEventListener('click',async function(e){
- const button=e.target.closest('.remove-grading');
- if(!button)return;
+<script src="/merit-unified.js" defer></script>
+<script>
+document.addEventListener('click', async (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  const button = target?.closest('.remove-grading');
+  if (!button) return;
 
- e.preventDefault();
+  let user;
+  try {
+    user = JSON.parse(localStorage.getItem('user') || '{}');
+  } catch {
+    alert('Unable to read your session. Please sign in again.');
+    return;
+  }
 
- const systemId=button.dataset.gradingId;
- const system=(window.pmGradingSystems||[])
-  .find(x=>String(x.id)===String(systemId));
+  const schoolId = user.school_id || new URLSearchParams(location.search).get('school_id');
+  const token = localStorage.getItem('token');
+  const systemId = button.dataset.gradingId;
 
- if(!system)return;
+  if (!schoolId || !token || !systemId) {
+    alert('Your session or grading-system details are missing. Please sign in again.');
+    return;
+  }
 
- if(!confirm(
-  `Remove grading system "${system.name}" from active use?\n\n`+
-  'This will not delete examination marks or historical grading bands.'
- ))return;
+  const system = (window.pmGradingSystems || []).find(
+    item => String(item.id) === String(systemId)
+  );
 
- button.disabled=true;
+  if (!confirm('Remove grading system "' + (system?.name || 'this system') + '" from active use?')) {
+    return;
+  }
 
- try{
-  await api(`/api/grading/${sid}/systems/${systemId}`,{
-   method:'DELETE'
-  });
+  button.disabled = true;
 
-  await loadGradings();
+  try {
+    const response = await fetch(
+      '/api/grading/' + encodeURIComponent(schoolId) + '/systems/' + encodeURIComponent(systemId),
+      { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } }
+    );
+    const result = await response.json().catch(() => ({}));
 
-  alert('Grading system removed from active use.');
- }catch(err){
-  alert('Unable to remove grading system: '+err.message);
-  button.disabled=false;
- }
+    if (!response.ok) {
+      throw new Error(result.error || 'Request failed (' + response.status + ')');
+    }
+
+    button.closest('.item')?.remove();
+
+    const list = document.getElementById('gradingList');
+    if (list && !list.querySelector('.item')) {
+      list.innerHTML = '<div class="notice">No grading systems created yet.</div>';
+    }
+  } catch (error) {
+    alert('Unable to remove grading system: ' + error.message);
+    button.disabled = false;
+  }
 });
-
 </script>
 </body></html>
