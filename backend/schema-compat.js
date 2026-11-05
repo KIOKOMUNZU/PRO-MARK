@@ -220,6 +220,23 @@ async function ensureAssessmentWorkflowSchema(){
     teacher_id uuid REFERENCES teachers(id) ON DELETE SET NULL,day_of_week int NOT NULL CHECK(day_of_week BETWEEN 1 AND 7),
     start_time time NOT NULL,end_time time NOT NULL,room text DEFAULT '',notes text DEFAULT '',created_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now())`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_timetable_school_period ON timetable_entries(school_id,academic_year_id,term_id,class_id,day_of_week,start_time)`);
+  await db.query(`CREATE TABLE IF NOT EXISTS timetable_configurations(
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),school_id uuid NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+    academic_year_id uuid REFERENCES academic_years(id) ON DELETE CASCADE,term_id uuid REFERENCES terms(id) ON DELETE SET NULL,
+    name text NOT NULL,description text NOT NULL DEFAULT '',effective_start_date date,effective_end_date date,
+    teaching_days jsonb NOT NULL DEFAULT '[1,2,3,4,5]',periods_per_day integer NOT NULL DEFAULT 8,
+    period_start_times jsonb NOT NULL DEFAULT '[]',period_end_times jsonb NOT NULL DEFAULT '[]',
+    break_periods jsonb NOT NULL DEFAULT '[]',lunch_periods jsonb NOT NULL DEFAULT '[]',
+    is_active boolean NOT NULL DEFAULT true,created_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now())`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_timetable_config_school ON timetable_configurations(school_id,is_active,academic_year_id,term_id)`);
+  await db.query(`CREATE TABLE IF NOT EXISTS timetable_requirements(
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),school_id uuid NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+    academic_year_id uuid REFERENCES academic_years(id) ON DELETE CASCADE,term_id uuid REFERENCES terms(id) ON DELETE SET NULL,
+    class_id uuid NOT NULL REFERENCES classes(id) ON DELETE CASCADE,subject_id uuid NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    teacher_id uuid REFERENCES teachers(id) ON DELETE SET NULL,lessons_per_week integer NOT NULL CHECK(lessons_per_week > 0),
+    preferred_day integer,preferred_period integer,room_requirement text DEFAULT '',notes text DEFAULT '',
+    created_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now())`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_timetable_requirements_school ON timetable_requirements(school_id,academic_year_id,term_id,class_id,subject_id,teacher_id)`);
 
   // Term 3 is strictly OPENER + END TERM. The Kauti workbook supplied for the
   // current launch is an OPENER import, so any imported workbook marks that were

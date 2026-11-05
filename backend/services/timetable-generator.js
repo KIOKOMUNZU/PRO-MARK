@@ -1,18 +1,37 @@
 'use strict';
 // Deterministic, bounded backtracking timetable allocator; no external services.
 const days=[1,2,3,4,5];
-function minutes(s){const a=String(s).split(':').map(Number);return a[0]*60+a[1]}
+function normalizeInteger(value, fallback=null){
+ const n=Number(value);
+ if(!Number.isInteger(n))return fallback;
+ return n;
+}
+function minutes(s){
+ if(!s) return NaN;
+ const a=String(s).split(':').map(x=>Number(x));
+ if(a.length<2||!Number.isFinite(a[0])||!Number.isFinite(a[1]))return NaN;
+ return a[0]*60+a[1];
+}
 function hh(m){return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0')}
 function generate({requirements,settings={}}){
+ if(!Array.isArray(requirements))throw Error('Requirements must be an array of class/subject/teacher assignments');
  const start=minutes(settings.start_time||'08:00'), duration=Number(settings.lesson_minutes||40), perDay=Number(settings.periods_per_day||8);
- const dayList=Array.isArray(settings.days)&&settings.days.length?settings.days:days;
- if(dayList.some(d=>!Number.isInteger(d)||d<1||d>7)||new Set(dayList).size!==dayList.length)throw Error('Timetable days must be unique integers between 1 and 7');
+ const dayList=Array.isArray(settings.days)&&settings.days.length?settings.days.map(d=>normalizeInteger(d,null)).filter(d=>d!==null):days;
+ if(dayList.some(d=>d<1||d>7)||new Set(dayList).size!==dayList.length)throw Error('Timetable days must be unique integers between 1 and 7');
  if(!Number.isFinite(start)||!Number.isInteger(start))throw Error('Invalid timetable start time');
  if(!Number.isInteger(duration)||duration<20||duration>120||!Number.isInteger(perDay)||perDay<1||perDay>12||start<360||start+duration*perDay>1200)throw Error('Invalid timetable bell schedule');
- const blocked=new Set((settings.blocked||[]).map(x=>`${x.day}:${x.period}`));
- const unavailable=new Set((settings.teacher_unavailable||[]).map(x=>`${x.teacher_id}:${x.day}:${x.period}`));
+ const blocked=new Set((settings.blocked||[]).map(x=>{
+  const day=normalizeInteger(x&&x.day,null), period=normalizeInteger(x&&x.period,null);
+  if(day===null||period===null)return null;
+  return `${day}:${period}`;
+ }).filter(Boolean));
+ const unavailable=new Set((settings.teacher_unavailable||[]).map(x=>{
+  const teacherId=x&&x.teacher_id, day=normalizeInteger(x&&x.day,null), period=normalizeInteger(x&&x.period,null);
+  if(!teacherId||day===null||period===null)return null;
+  return `${teacherId}:${day}:${period}`;
+ }).filter(Boolean));
  const slots=dayList.flatMap(day=>Array.from({length:perDay},(_,i)=>({day,period:i+1,start_time:hh(start+i*duration),end_time:hh(start+(i+1)*duration)})).filter(s=>!blocked.has(`${s.day}:${s.period}`)));
- const tasks=[];const requirementKeys=new Set();for(const r of requirements){const key=`${r.class_id}:${r.subject_id}:${r.teacher_id}`;if(requirementKeys.has(key))throw Error('Duplicate class/subject/teacher lesson requirement');requirementKeys.add(key);const n=Number(r.lessons_per_week);if(!r.class_id||!r.subject_id||!r.teacher_id||!Number.isInteger(n)||n<1||n>slots.length)throw Error('Each requirement needs a class, subject, teacher and valid lesson count');for(let i=0;i<n;i++)tasks.push({...r,sequence:i});}
+ const tasks=[];const requirementKeys=new Set();for(const r of requirements){const key=`${r.class_id}:${r.subject_id}:${r.teacher_id}`;if(requirementKeys.has(key))throw Error('Duplicate class/subject/teacher lesson requirement');requirementKeys.add(key);const n=normalizeInteger(r.lessons_per_week,null);if(!r.class_id||!r.subject_id||!r.teacher_id||!Number.isInteger(n)||n<1||n>slots.length)throw Error('Each requirement needs a class, subject, teacher and valid lesson count');for(let i=0;i<n;i++)tasks.push({...r,sequence:i});}
  if(tasks.length>400)throw Error('Maximum 400 lessons per generation');
  const occupiedClass=new Set(),occupiedTeacher=new Set(),occupiedRoom=new Set(),subjectDay=new Map(),out=[];
  // Constrained first: teacher conflicts, larger lesson requirements, then stable IDs.

@@ -26,6 +26,7 @@ app.use("/api/school-documents",require("./routes/school-documents"));
 app.use("/api/operations",require("./routes/operations"));
 app.use("/api/biometrics",require("./routes/biometrics"));
 app.use("/api/timetable-generator",require("./routes/timetable-generator"));
+app.use("/api/timetable-config",require("./routes/timetable-config"));
 app.use("/api/resources",require("./routes/resources"));
 app.use("/api/extended",require("./routes/extended"));
 app.use("/api", (req,res)=>res.status(404).json({error:"API endpoint not found",method:req.method,path:req.originalUrl}));
