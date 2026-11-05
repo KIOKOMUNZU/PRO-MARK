@@ -77,7 +77,7 @@ router.post('/:schoolId/inventory',schoolBoundary,roles(...ADMIN),async(req,res)
 router.get('/:schoolId/timetable/workspace',schoolBoundary,roles(...ADMIN,'HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER'),async(req,res)=>{
   try{
     const sid=req.params.schoolId;
-    const [classes,subjects,teachers,entries]=await Promise.all([
+    const [classes,subjects,teachers,rooms,entries]=await Promise.all([
       db.query(`SELECT c.id,c.name,c.stream,lv.name level_name
         FROM classes c
         JOIN school_levels lv ON lv.id=c.school_level_id
@@ -89,6 +89,9 @@ router.get('/:schoolId/timetable/workspace',schoolBoundary,roles(...ADMIN,'HEADT
       db.query(`SELECT id,staff_no,first_name,last_name FROM teachers
         WHERE school_id=$1 AND COALESCE(is_active,true)=true
         ORDER BY last_name,first_name`,[sid]),
+      db.query(`SELECT id,room_name,room_code,room_type,capacity,features FROM timetable_rooms
+        WHERE school_id=$1 AND is_active=true
+        ORDER BY room_type,room_name`,[sid]),
       db.query(`SELECT te.*,c.name class_name,c.stream,s.name subject_name,s.code subject_code,
           t.first_name teacher_first_name,t.last_name teacher_last_name
         FROM timetable_entries te
@@ -96,18 +99,44 @@ router.get('/:schoolId/timetable/workspace',schoolBoundary,roles(...ADMIN,'HEADT
         JOIN subjects s ON s.id=te.subject_id
         LEFT JOIN teachers t ON t.id=te.teacher_id
         WHERE te.school_id=$1
-        ORDER BY te.day_of_week,te.start_time,c.name,c.stream`,[sid])
+          AND ($2::uuid IS NULL OR te.academic_year_id=$2)
+          AND ($3::uuid IS NULL OR te.term_id=$3)
+        ORDER BY te.day_of_week,te.start_time,c.name,c.stream`,[sid,req.query.academic_year_id||null,req.query.term_id||null])
     ]);
     res.json({
       classes:classes.rows,
       subjects:subjects.rows,
       teachers:teachers.rows,
+      rooms:rooms.rows,
       entries:entries.rows
     });
   }catch(e){res.status(e.status||500).json({error:e.message});}
 });
+router.post('/:schoolId/timetable/rooms',schoolBoundary,roles('PLATFORM_OWNER','SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER'),async(req,res)=>{
+  try{
+    const b=req.body||{},name=String(b.room_name||'').trim();
+    if(!name)return res.status(400).json({error:'Room name is required'});
+    const capacity=b.capacity===''||b.capacity===undefined||b.capacity===null?null:Number(b.capacity);
+    if(capacity!==null&&(!Number.isInteger(capacity)||capacity<1))return res.status(400).json({error:'Room capacity must be a positive whole number'});
+    const features=Array.isArray(b.features)?b.features:String(b.features||'').split(',').map(x=>x.trim()).filter(Boolean);
+    const q=await db.query(`INSERT INTO timetable_rooms(school_id,room_name,room_code,room_type,capacity,features)
+      VALUES($1,$2,$3,$4,$5,$6::jsonb) RETURNING *`,
+      [req.params.schoolId,name,String(b.room_code||'').trim()||null,String(b.room_type||'CLASSROOM').trim().toUpperCase(),capacity,JSON.stringify(features)]);
+    res.status(201).json(q.rows[0]);
+  }catch(e){res.status(e.code==='23505'?409:400).json({error:e.code==='23505'?'A room with that name already exists.':e.message});}
+});
+router.patch('/:schoolId/timetable/:entryId/lock',schoolBoundary,roles('PLATFORM_OWNER','SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER'),async(req,res)=>{
+  try{
+    const locked=req.body?.is_locked===true;
+    const q=await db.query(`UPDATE timetable_entries SET is_locked=$3,updated_at=now()
+      WHERE id=$1 AND school_id=$2 RETURNING *`,
+      [req.params.entryId,req.params.schoolId,locked]);
+    if(!q.rowCount)return res.status(404).json({error:'Timetable entry not found'});
+    res.json(q.rows[0]);
+  }catch(e){res.status(400).json({error:e.message});}
+});
 router.get('/:schoolId/timetable',schoolBoundary,roles(...ADMIN,'HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER'),async(req,res)=>{try{res.json((await db.query(`SELECT te.*,c.name class_name,c.stream,s.name subject_name,s.code subject_code,t.first_name teacher_first_name,t.last_name teacher_last_name FROM timetable_entries te JOIN classes c ON c.id=te.class_id JOIN subjects s ON s.id=te.subject_id LEFT JOIN teachers t ON t.id=te.teacher_id WHERE te.school_id=$1 ORDER BY te.day_of_week,te.start_time,c.name`,[req.params.schoolId])).rows)}catch(e){res.status(400).json({error:e.message})}});
-router.post('/:schoolId/timetable',schoolBoundary,roles(...ADMIN),async(req,res)=>{try{const b=req.body||{};if(!b.class_id||!b.subject_id||!b.day_of_week||!b.start_time||!b.end_time)return res.status(400).json({error:'Class, subject, day and time are required'});const sid=req.params.schoolId;await assertBelongs('classes',b.class_id,sid);await assertBelongs('subjects',b.subject_id,sid);if(b.teacher_id)await assertBelongs('teachers',b.teacher_id,sid);if(b.academic_year_id)await assertBelongs('academic_years',b.academic_year_id,sid);if(b.term_id)await assertBelongs('terms',b.term_id,sid);if(Number(b.day_of_week)<1||Number(b.day_of_week)>7||b.start_time>=b.end_time)return res.status(400).json({error:'Invalid timetable day or time interval'});const clash=await db.query(`SELECT id FROM timetable_entries WHERE school_id=$1 AND day_of_week=$2 AND start_time<$4::time AND end_time>$3::time AND academic_year_id IS NOT DISTINCT FROM $5::uuid AND term_id IS NOT DISTINCT FROM $6::uuid AND (class_id=$7 OR ($8::uuid IS NOT NULL AND teacher_id=$8)) LIMIT 1`,[sid,b.day_of_week,b.start_time,b.end_time,b.academic_year_id||null,b.term_id||null,b.class_id,b.teacher_id||null]);if(clash.rows.length)return res.status(409).json({error:'Timetable conflict: class or teacher already scheduled in this period'});const q=await db.query(`INSERT INTO timetable_entries(school_id,academic_year_id,term_id,class_id,subject_id,teacher_id,day_of_week,start_time,end_time,room,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,[req.params.schoolId,b.academic_year_id||null,b.term_id||null,b.class_id,b.subject_id,b.teacher_id||null,b.day_of_week,b.start_time,b.end_time,b.room||'',b.notes||'']);res.status(201).json(q.rows[0])}catch(e){res.status(400).json({error:e.message})}});
+router.post('/:schoolId/timetable',schoolBoundary,roles(...ADMIN),async(req,res)=>{try{const b=req.body||{};if(!b.class_id||!b.subject_id||!b.day_of_week||!b.start_time||!b.end_time)return res.status(400).json({error:'Class, subject, day and time are required'});const sid=req.params.schoolId;await assertBelongs('classes',b.class_id,sid);await assertBelongs('subjects',b.subject_id,sid);if(b.teacher_id)await assertBelongs('teachers',b.teacher_id,sid);if(b.academic_year_id)await assertBelongs('academic_years',b.academic_year_id,sid);if(b.term_id)await assertBelongs('terms',b.term_id,sid);if(Number(b.day_of_week)<1||Number(b.day_of_week)>7||b.start_time>=b.end_time)return res.status(400).json({error:'Invalid timetable day or time interval'});const clash=await db.query(`SELECT id FROM timetable_entries WHERE school_id=$1 AND day_of_week=$2 AND start_time<$4::time AND end_time>$3::time AND academic_year_id IS NOT DISTINCT FROM $5::uuid AND term_id IS NOT DISTINCT FROM $6::uuid AND (class_id=$7 OR ($8::uuid IS NOT NULL AND teacher_id=$8) OR ($9::text<>'' AND room=$9)) LIMIT 1`,[sid,b.day_of_week,b.start_time,b.end_time,b.academic_year_id||null,b.term_id||null,b.class_id,b.teacher_id||null,b.room||'']);if(clash.rows.length)return res.status(409).json({error:'Timetable conflict: class, teacher or room already scheduled in this period'});const q=await db.query(`INSERT INTO timetable_entries(school_id,academic_year_id,term_id,class_id,subject_id,teacher_id,day_of_week,start_time,end_time,room,notes,is_locked) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,[req.params.schoolId,b.academic_year_id||null,b.term_id||null,b.class_id,b.subject_id,b.teacher_id||null,b.day_of_week,b.start_time,b.end_time,b.room||'',b.notes||'',b.is_locked===true]);res.status(201).json(q.rows[0])}catch(e){res.status(400).json({error:e.message})}});
 
 router.get('/:schoolId/audit',schoolBoundary,roles(...ADMIN),async(req,res)=>{try{const q=await db.query(`SELECT a.*,u.email,u.first_name,u.last_name FROM audit_log a LEFT JOIN users u ON u.id=a.user_id WHERE a.school_id=$1 ORDER BY a.created_at DESC LIMIT 500`,[req.params.schoolId]);res.json(q.rows)}catch(e){res.status(400).json({error:e.message})}});
 router.get('/:schoolId/export/summary',schoolBoundary,roles(...ADMIN),async(req,res)=>{try{const sid=req.params.schoolId;const [school,years,classes,subjects,teachers,learners,assignments]=await Promise.all([db.query(`SELECT s.*,si.motto,si.contact_phone,si.contact_email FROM schools s LEFT JOIN school_identity si ON si.school_id=s.id WHERE s.id=$1`,[sid]),db.query(`SELECT * FROM academic_years WHERE school_id=$1 ORDER BY year_label`,[sid]),db.query(`SELECT * FROM classes WHERE school_id=$1 ORDER BY name,stream`,[sid]),db.query(`SELECT * FROM subjects WHERE school_id=$1 ORDER BY name`,[sid]),db.query(`SELECT id,staff_no,first_name,last_name,email,is_active FROM teachers WHERE school_id=$1 ORDER BY last_name,first_name`,[sid]),db.query(`SELECT id,admission_no,assessment_no,first_name,middle_name,last_name,gender,class_id,status,is_active FROM learners WHERE school_id=$1 ORDER BY last_name,first_name`,[sid]),db.query(`SELECT * FROM teacher_subject_assignments WHERE school_id=$1`,[sid])]);res.json({exported_at:new Date().toISOString(),school:school.rows[0],academic_years:years.rows,classes:classes.rows,subjects:subjects.rows,teachers:teachers.rows,learners:learners.rows,assignments:assignments.rows});}catch(e){res.status(400).json({error:e.message})}});

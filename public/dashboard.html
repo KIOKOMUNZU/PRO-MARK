@@ -2224,39 +2224,58 @@ async function renderAttendanceModule(){
 async function renderDisciplineModule(){const box=$('pm24Data');box.innerHTML=`<div class="analytics-panel"><h3>Discipline register</h3><form id="discForm" class="grid"><label>Learner<select name="learner_id" required><option value="">Select learner…</option>${(state.learners||[]).map(l=>`<option value="${l.id}">${esc([l.first_name,l.last_name].filter(Boolean).join(' '))} · ${esc(l.admission_no||'')}</option>`).join('')}</select></label><label>Title<input name="title" required></label><label>Category<input name="category" value="GENERAL"></label><label>Severity<select name="severity"><option>LOW</option><option>MEDIUM</option><option>HIGH</option><option>CRITICAL</option></select></label><label>Description<textarea name="description"></textarea></label><button class="btn primary">RECORD CASE</button></form><div id="discList" class="table-wrap"></div></div>`;const load=async()=>{const d=await api(`/api/operations/${sid}/discipline`);$('discList').innerHTML=`<table><thead><tr><th>Date</th><th>Learner</th><th>Title</th><th>Severity</th><th>Status</th><th>Action</th></tr></thead><tbody>${d.map(x=>`<tr><td>${esc(x.case_date)}</td><td>${esc(x.first_name+' '+x.last_name)}</td><td>${esc(x.title)}</td><td>${esc(x.severity)}</td><td>${esc(x.status)}</td><td>${esc(x.action_taken||'—')}</td></tr>`).join('')||'<tr><td colspan="6">No discipline cases recorded.</td></tr>'}</tbody></table>`};$('discForm').onsubmit=async e=>{e.preventDefault();try{await api(`/api/operations/${sid}/discipline`,{method:'POST',body:Object.fromEntries(new FormData(e.target))});e.target.reset();await load();}catch(x){alert(x.message)}};await load();}
 async function renderInventoryModule(){const box=$('pm24Data');box.innerHTML=`<div class="analytics-panel"><h3>Inventory / assets register</h3><form id="invForm" class="grid"><label>Asset code<input name="asset_code"></label><label>Item name<input name="name" required></label><label>Category<input name="category" value="GENERAL"></label><label>Quantity<input name="quantity" type="number" step="0.01" value="0"></label><label>Unit cost<input name="unit_cost" type="number" step="0.01" value="0"></label><label>Location<input name="location"></label><button class="btn primary">ADD ASSET</button></form><div id="invList" class="table-wrap"></div></div>`;const load=async()=>{const d=await api(`/api/operations/${sid}/inventory`);$('invList').innerHTML=`<table><thead><tr><th>Code</th><th>Item</th><th>Category</th><th>Qty</th><th>Unit cost</th><th>Location</th><th>Condition</th></tr></thead><tbody>${d.map(x=>`<tr><td>${esc(x.asset_code||'—')}</td><td>${esc(x.name)}</td><td>${esc(x.category)}</td><td>${x.quantity}</td><td>${Number(x.unit_cost).toFixed(2)}</td><td>${esc(x.location||'—')}</td><td>${esc(x.condition_status)}</td></tr>`).join('')||'<tr><td colspan="7">No assets recorded.</td></tr>'}</tbody></table>`};$('invForm').onsubmit=async e=>{e.preventDefault();try{await api(`/api/operations/${sid}/inventory`,{method:'POST',body:Object.fromEntries(new FormData(e.target))});e.target.reset();await load();}catch(x){alert(x.message)}};await load();}
 async function generateSchoolTimetable(){
- const out=$('ttGeneratorStatus');try{
- const lessons=Number($('ttWeeklyLessons').value),periods=Number($('ttPeriods').value),duration=Number($('ttDuration').value);
- if(!Number.isInteger(lessons)||lessons<1||lessons>12)throw Error('Weekly lessons must be 1–12');
- const assignments=(state.assignments||state.teacherAssignments||[]);
- let requirements=[];
- if(assignments.length){requirements=assignments.filter(a=>a.class_id&&a.subject_id&&a.teacher_id).map(a=>({class_id:a.class_id,subject_id:a.subject_id,teacher_id:a.teacher_id,lessons_per_week:Number(a.lessons_per_week||a.weekly_lessons||lessons)}));}
- if(!requirements.length){const class_id=$('ttGenClass').value,subject_id=$('ttGenSubject').value,teacher_id=$('ttGenTeacher').value;if(!teacher_id)throw Error('Select a teacher');requirements=[{class_id,subject_id,teacher_id,lessons_per_week:lessons}];}
- if(requirements.some(r=>!Number.isInteger(r.lessons_per_week)||r.lessons_per_week<1||r.lessons_per_week>12))throw Error('Each subject requires 1–12 weekly lessons');
- const payload={requirements,settings:{periods_per_day:periods,lesson_minutes:duration,start_time:$('ttStart').value},save:$('ttSave').checked,replace:$('ttReplace').checked};
- out.textContent='Generating timetable…';const d=await api(`/api/timetable-generator/${sid}/generate`,{method:'POST',body:payload});out.textContent=`${d.scheduled.length} lessons ${d.saved?'saved':'generated in preview'} (${d.attempts} scheduling attempts).`;
- const dayNames=['','Monday','Tuesday','Wednesday','Thursday','Friday'];
- $('ttPreview').innerHTML=`<table><thead><tr><th>Day</th><th>Time</th><th>Class</th><th>Subject</th><th>Teacher</th></tr></thead><tbody>${d.scheduled.map(x=>`<tr><td>${dayNames[x.day]||x.day}</td><td>${x.start_time}–${x.end_time}</td><td>${esc((state.classes||[]).find(c=>c.id===x.class_id)?.name||x.class_id)}</td><td>${esc((state.subjects||[]).find(a=>a.id===x.subject_id)?.name||x.subject_id)}</td><td>${esc((state.teachers||[]).find(a=>a.id===x.teacher_id)?.first_name||x.teacher_id)}</td></tr>`).join('')}</tbody></table>`;
- if(d.saved)await renderTimetableWorkspace();
- }catch(e){out.textContent=e.message||String(e)}
+ const out=$('ttGeneratorStatus');
+ if(!out)return;
+ try{
+  const yearId=$('ttConfigForm')?.elements.academic_year_id.value||'';
+  const termId=$('ttConfigForm')?.elements.term_id.value||'';
+  if(!yearId||!termId)throw Error('Select an academic year and term before generating.');
+  const requirements=await api(`/api/timetable-config/${sid}/requirements?academic_year_id=${encodeURIComponent(yearId)}&term_id=${encodeURIComponent(termId)}`);
+  if(!requirements.length)throw Error('No lesson requirements are saved for this year and term. Add the weekly lesson requirements first.');
+  const config=$('ttConfigForm');
+  const days=String(config.elements.teaching_days.value||'1,2,3,4,5').split(',').map(x=>Number(x.trim())).filter(x=>Number.isInteger(x)&&x>=1&&x<=7);
+  const payload={
+   academic_year_id:yearId,term_id:termId,
+   settings:{days,periods_per_day:Number($('ttPeriods').value),lesson_minutes:Number($('ttDuration').value),start_time:$('ttStart').value},
+   save:$('ttSave').checked,replace:$('ttReplace').checked
+  };
+  out.textContent=`Generating ${requirements.reduce((sum,r)=>sum+Number(r.lessons_per_week||0),0)} required lessons…`;
+  const d=await api(`/api/timetable-generator/${sid}/generate`,{method:'POST',body:payload});
+  const classById=new Map((state.classes||[]).map(x=>[String(x.id),x]));
+  const subjectById=new Map((state.subjects||[]).map(x=>[String(x.id),x]));
+  const teacherById=new Map((state.teachers||[]).map(x=>[String(x.id),x]));
+  const daysOfWeek=['','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  out.textContent=d.complete
+   ?`Complete: ${d.placed}/${d.required} lessons placed${d.saved?' and saved':''} in ${d.attempts} search attempts.`
+   :`Incomplete: ${d.placed}/${d.required} lessons placed after ${d.attempts} attempts. ${d.reason||''}`;
+  const warnings=(d.soft_warnings||[]).length?`<div class="notice">Preferences not met: ${d.soft_warnings.map(esc).join('<br>')}</div>`:'';
+  const unplaced=(d.unscheduled||[]).length?`<div class="notice"><b>Unplaced lessons</b><ul>${d.unscheduled.map(x=>`<li>${esc(classById.get(String(x.class_id))?.name||x.class_id)} · ${esc(subjectById.get(String(x.subject_id))?.name||x.subject_id)} · ${esc(teacherById.get(String(x.teacher_id))?.first_name||x.teacher_id)} #${x.lesson_number}: ${esc(x.reason)}</li>`).join('')}</ul></div>`:'';
+  const workloadRows=Object.entries(d.workload||{}).map(([teacherId,load])=>`<tr><td>${esc([teacherById.get(String(teacherId))?.first_name,teacherById.get(String(teacherId))?.last_name].filter(Boolean).join(' ')||teacherId)}</td><td>${load.lessons}</td><td>${load.periods}</td>${daysOfWeek.slice(1).map((_,index)=>`<td>${load.by_day[index+1]||0}</td>`).join('')}</tr>`).join('');
+  const workloadTable=workloadRows?`<h4>Scheduled teacher workload</h4><div class="table-wrap"><table><thead><tr><th>Teacher</th><th>Lessons</th><th>Periods</th>${daysOfWeek.slice(1).map(day=>`<th>${day}</th>`).join('')}</tr></thead><tbody>${workloadRows}</tbody></table></div>`:'';
+  $('ttPreview').innerHTML=`${warnings}${unplaced}<table><thead><tr><th>Day</th><th>Time</th><th>Class / stream</th><th>Subject</th><th>Teacher</th><th>Room</th></tr></thead><tbody>${d.scheduled.map(x=>`<tr><td>${daysOfWeek[x.day]||x.day}</td><td>${esc(x.start_time)}–${esc(x.end_time)}</td><td>${esc([classById.get(String(x.class_id))?.name,classById.get(String(x.class_id))?.stream].filter(Boolean).join(' ')||x.class_id)}</td><td>${esc(subjectById.get(String(x.subject_id))?.name||x.subject_id)}</td><td>${esc([teacherById.get(String(x.teacher_id))?.first_name,teacherById.get(String(x.teacher_id))?.last_name].filter(Boolean).join(' ')||x.teacher_id)}</td><td>${esc(x.room||'—')}</td></tr>`).join('')||'<tr><td colspan="6">No placements available.</td></tr>'}</tbody></table>${workloadTable}`;
+  if(d.saved)await renderTimetableWorkspace();
+ }catch(e){out.textContent=e.message||String(e);}
 }
 async function renderTimetableModule(){const box=$('pm24Data');box.innerHTML=`<div class="analytics-panel"><h3>School timetable configuration</h3><form id="ttConfigForm" class="grid"><label>Name<input name="name" placeholder="2026 Term 1" required></label><label>Academic year<select name="academic_year_id">${(state.years||[]).map(y=>`<option value="${y.id}">${esc(y.year_label||y.name||'Academic year')}</option>`).join('')}</select></label><label>Term<select name="term_id">${(state.terms||[]).map(t=>`<option value="${t.id}">${esc(t.term_name||t.name||'Term')}</option>`).join('')}</select></label><label>Start date<input name="effective_start_date" type="date"></label><label>End date<input name="effective_end_date" type="date"></label><label>Teaching days<input name="teaching_days" type="text" value="1,2,3,4,5" placeholder="1,2,3,4,5"></label><label>Periods per day<input name="periods_per_day" type="number" min="1" max="12" value="8"></label><label>Active<input name="is_active" type="checkbox" checked></label><label>Description<textarea name="description" rows="3" placeholder="School timetable description"></textarea></label><button class="btn primary" type="submit">SAVE TIMETABLE CONFIG</button></form><div id="ttConfigStatus" class="muted small"></div></div><div class="analytics-panel"><h3>Automatic Timetable Generator</h3><p>Generate a clash-free weekly schedule. When teacher assignments are loaded, they are used; otherwise generate for the selected class, subject and teacher.</p><div class="grid"><label>Class<select id="ttGenClass">${(state.classes||[]).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label><label>Subject<select id="ttGenSubject">${(state.subjects||[]).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label><label>Teacher<select id="ttGenTeacher">${(state.teachers||[]).map(c=>`<option value="${c.id}">${esc(c.first_name+' '+c.last_name)}</option>`).join('')}</select></label><label>Lessons per week<input id="ttWeeklyLessons" type="number" value="5" min="1" max="12"></label><label>Periods per day<input id="ttPeriods" type="number" value="8" min="1" max="12"></label><label>Period minutes<input id="ttDuration" type="number" value="40" min="20" max="120"></label><label>First lesson<input id="ttStart" type="time" value="08:00"></label><label><input id="ttSave" type="checkbox"> Save generated schedule</label><label><input id="ttReplace" type="checkbox"> Replace existing schedule for selected period</label></div><button class="btn primary" type="button" onclick="generateSchoolTimetable()">GENERATE TIMETABLE</button><p id="ttGeneratorStatus" role="status"></p><div class="table-wrap" id="ttPreview"></div></div><div class="analytics-panel"><h3>Timetable register</h3><form id="ttForm" class="grid"><label>Class<select name="class_id" required>${(state.classes||[]).map(c=>`<option value="${c.id}">${esc(c.name+' '+(c.stream||''))}</option>`).join('')}</select></label><label>Subject<select name="subject_id" required>${(state.subjects||[]).map(x=>`<option value="${x.id}">${esc(x.code+' · '+x.name)}</option>`).join('')}</select></label><label>Teacher<select name="teacher_id">${(state.teachers||[]).map(x=>`<option value="${x.id}">${esc(x.first_name+' '+x.last_name)}</option>`).join('')}</select></label><label>Day<select name="day_of_week"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option></select></label><label>Start<input name="start_time" type="time" required></label><label>End<input name="end_time" type="time" required></label><label>Room<input name="room"></label><button class="btn primary">ADD TIMETABLE ENTRY</button></form><div id="ttList" class="table-wrap"></div></div>`;const loadConfig=async()=>{try{const cfg=await api(`/api/timetable-config/${sid}/config`);const current=(Array.isArray(cfg)&&cfg.length)?cfg[0]:{};if(!current||!Object.keys(current).length)return;const form=$('ttConfigForm');if(form){form.name.value=current.name||'';form.academic_year_id.value=current.academic_year_id||form.academic_year_id.value||'';form.term_id.value=current.term_id||form.term_id.value||'';form.effective_start_date.value=current.effective_start_date?String(current.effective_start_date).slice(0,10):'';form.effective_end_date.value=current.effective_end_date?String(current.effective_end_date).slice(0,10):'';form.teaching_days.value=Array.isArray(current.teaching_days)?current.teaching_days.join(','):form.teaching_days.value||'1,2,3,4,5';form.periods_per_day.value=current.periods_per_day||8;form.description.value=current.description||'';form.is_active.checked=current.is_active!==false;}}catch(e){console.warn('Timetable config load failed',e);}};const load=async()=>{const d=await api(`/api/operations/${sid}/timetable`);$('ttList').innerHTML=`<table><thead><tr><th>Day</th><th>Time</th><th>Class</th><th>Subject</th><th>Teacher</th><th>Room</th></tr></thead><tbody>${d.map(x=>`<tr><td>${['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'][x.day_of_week]}</td><td>${x.start_time}–${x.end_time}</td><td>${esc(x.class_name+' '+(x.stream||''))}</td><td>${esc(x.subject_code||x.subject_name)}</td><td>${esc((x.teacher_first_name||'')+' '+(x.teacher_last_name||''))}</td><td>${esc(x.room||'—')}</td></tr>`).join('')||'<tr><td colspan="6">No timetable entries recorded.</td></tr>'}</tbody></table>`};$('ttConfigForm').onsubmit=async e=>{e.preventDefault();const form=e.target;const fd=Object.fromEntries(new FormData(form));const days=String(fd.teaching_days||'').split(',').map(x=>Number(String(x).trim())).filter(x=>Number.isInteger(x)&&x>=1&&x<=7);const payload={name:fd.name||'Timetable',description:fd.description||'',academic_year_id:fd.academic_year_id||null,term_id:fd.term_id||null,effective_start_date:fd.effective_start_date||null,effective_end_date:fd.effective_end_date||null,teaching_days:days.length?days:[1,2,3,4,5],periods_per_day:Number(fd.periods_per_day||8),is_active:!!form.is_active.checked};try{const saved=await api(`/api/timetable-config/${sid}/config`,{method:'POST',body:payload});$('ttConfigStatus').textContent=`Saved ${saved.name}.`;await load();}catch(x){$('ttConfigStatus').textContent=x.message||String(x);}};$('ttForm').onsubmit=async e=>{e.preventDefault();try{await api(`/api/operations/${sid}/timetable`,{method:'POST',body:Object.fromEntries(new FormData(e.target))});e.target.reset();await load();}catch(x){alert(x.message)}};await loadConfig();await load();}
 async function renderTimetableWorkspace(){
  const box=$('pm24Data');
  if(!box)return;
+ const canManage=isAdmin||['HEADTEACHER','DEPUTY_HEADTEACHER'].includes(user.role);
  box.innerHTML='<div class="notice">Loading timetable data…</div>';
  try{
   const [data,configResult]=await Promise.all([
    api(`/api/operations/${sid}/timetable/workspace`),
    api(`/api/timetable-config/${sid}/config`).then(value=>({value})).catch(error=>({error}))
   ]);
-  if(!data||!Array.isArray(data.classes)||!Array.isArray(data.subjects)||!Array.isArray(data.teachers)||!Array.isArray(data.entries))throw Error('The timetable service returned incomplete school data.');
-  Object.assign(state,{classes:data.classes,subjects:data.subjects,teachers:data.teachers});
+  if(!data||!Array.isArray(data.classes)||!Array.isArray(data.subjects)||!Array.isArray(data.teachers)||!Array.isArray(data.rooms)||!Array.isArray(data.entries))throw Error('The timetable service returned incomplete school data.');
+  Object.assign(state,{classes:data.classes,subjects:data.subjects,teachers:data.teachers,rooms:data.rooms});
   const years=state.years||[],termsList=Object.values(state.terms||{}).flat();
   const currentConfig=configResult.value?.[0]||null;
   const dayLabels=['','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
   const classOptions=data.classes.map(c=>`<option value="${esc(c.id)}">${esc([c.name,c.stream].filter(Boolean).join(' '))}</option>`).join('');
   const subjectOptions=data.subjects.map(s=>`<option value="${esc(s.id)}">${esc([s.code,s.name].filter(Boolean).join(' · '))}</option>`).join('');
   const teacherOptions=data.teachers.map(t=>`<option value="${esc(t.id)}">${esc([t.first_name,t.last_name].filter(Boolean).join(' '))}</option>`).join('');
+  const roomOptions=data.rooms.map(r=>`<option value="${esc(r.room_name)}">${esc(`${r.room_name} · ${r.room_type}${r.capacity?` · capacity ${r.capacity}`:''}`)}</option>`).join('');
   const yearOptions=years.map(y=>`<option value="${esc(y.id)}">${esc(y.year_label||y.name||'Academic year')}</option>`).join('');
   const termOptions=termsList.map(t=>`<option value="${esc(t.id)}">${esc(t.name||`Term ${t.term_no||''}`)}</option>`).join('');
   box.innerHTML=`${configResult.error?`<div class="notice">Timetable configuration could not be loaded: ${esc(configResult.error.message)}</div>`:''}
@@ -2269,10 +2288,55 @@ async function renderTimetableWorkspace(){
      <label>End date<input name="effective_end_date" type="date"></label>
      <label>Teaching days<input name="teaching_days" type="text" value="1,2,3,4,5" placeholder="1,2,3,4,5"></label>
      <label>Periods per day<input name="periods_per_day" type="number" min="1" max="12" value="8"></label>
+     <label>Period start times<input name="period_start_times" placeholder="08:00,08:40,09:20"></label>
+     <label>Period end times<input name="period_end_times" placeholder="08:40,09:20,10:00"></label>
      <label class="inline"><input name="is_active" type="checkbox" checked> Active</label>
      <label>Description<textarea name="description" rows="3" placeholder="School timetable description"></textarea></label>
-     <button class="btn primary" type="submit">SAVE TIMETABLE CONFIG</button>
+     <button class="btn primary" type="submit" ${!canManage?'disabled':''}>SAVE TIMETABLE CONFIG</button>
     </form><div id="ttConfigStatus" class="muted small" role="status"></div>
+   </div>
+   <div class="analytics-panel"><h3>Weekly lesson requirements</h3>
+    <p>Set the weekly subject load for each class/stream and assigned teacher. Generation uses this saved list for the selected year and term.</p>
+    <form id="ttRequirementForm" class="grid">
+     <label>Class / stream<select name="class_id" required>${classOptions}</select></label>
+     <label>Subject<select name="subject_id" required>${subjectOptions}</select></label>
+     <label>Qualified teacher<select name="teacher_id" required><option value="">Select teacher…</option>${teacherOptions}</select></label>
+     <label>Lessons per week<input name="lessons_per_week" type="number" min="1" max="30" value="5" required></label>
+     <label>Periods per lesson<input name="periods_per_lesson" type="number" min="1" max="3" value="1" required></label>
+     <label>Maximum per day<input name="max_per_day" type="number" min="1" max="12" placeholder="No limit"></label>
+     <label>Preferred day<select name="preferred_day"><option value="">No preference</option>${dayLabels.slice(1).map((day,i)=>`<option value="${i+1}">${day}</option>`).join('')}</select></label>
+     <label>Preferred period<input name="preferred_period" type="number" min="1" max="12" placeholder="No preference"></label>
+     <label>Required room / facility<select name="room_requirement"><option value="">No fixed room</option>${roomOptions}</select></label>
+     <label class="inline"><input name="hard_preference" type="checkbox"> Treat preferred day/period as required</label>
+     <button class="btn primary" type="submit" ${!canManage?'disabled':''}>SAVE / UPDATE REQUIREMENT</button>
+    </form>
+    <div id="ttRequirementStatus" class="muted small" role="status"></div>
+    <div id="ttRequirementsList" class="table-wrap"><div class="notice">Loading lesson requirements…</div></div>
+   </div>
+   <div class="analytics-panel"><h3>Rooms and facilities</h3>
+    <form id="ttRoomForm" class="grid">
+     <label>Room name<input name="room_name" required placeholder="Science laboratory"></label>
+     <label>Room code<input name="room_code" placeholder="LAB-1"></label>
+     <label>Room type<select name="room_type"><option>CLASSROOM</option><option>SCIENCE_LAB</option><option>COMPUTER_LAB</option><option>WORKSHOP</option><option>LIBRARY</option><option>HALL</option><option>SPORTS</option><option>ARTS</option><option>OTHER</option></select></label>
+     <label>Capacity<input name="capacity" type="number" min="1" placeholder="Optional"></label>
+     <label>Equipment / features<input name="features" placeholder="projector, computers"></label>
+     <button class="btn primary" type="submit" ${!canManage?'disabled':''}>ADD ROOM / FACILITY</button>
+    </form>
+    <div id="ttRoomStatus" class="muted small" role="status"></div>
+    <div class="table-wrap"><table><thead><tr><th>Room</th><th>Code</th><th>Type</th><th>Capacity</th><th>Features</th></tr></thead><tbody>${data.rooms.map(r=>`<tr><td>${esc(r.room_name)}</td><td>${esc(r.room_code||'—')}</td><td>${esc(r.room_type)}</td><td>${esc(r.capacity||'—')}</td><td>${esc(Array.isArray(r.features)?r.features.join(', '):'')}</td></tr>`).join('')||'<tr><td colspan="5">No rooms or facilities registered.</td></tr>'}</tbody></table></div>
+   </div>
+   <div class="analytics-panel"><h3>Teacher and room availability</h3>
+    <p>Block periods that teachers or facilities cannot use. These are enforced as hard generation constraints.</p>
+    <form id="ttUnavailableForm" class="grid">
+     <label>Teacher<select name="teacher_id"><option value="">Not a teacher block</option>${teacherOptions}</select></label>
+     <label>Room<select name="room_id"><option value="">Not a room block</option>${data.rooms.map(r=>`<option value="${esc(r.id)}">${esc(r.room_name)}</option>`).join('')}</select></label>
+     <label>Day<select name="day_of_week">${dayLabels.slice(1).map((day,i)=>`<option value="${i+1}">${day}</option>`).join('')}</select></label>
+     <label>Period<input name="period" type="number" min="1" max="12" required></label>
+     <label>Reason<input name="reason" placeholder="Optional"></label>
+     <button class="btn primary" type="submit" ${!canManage?'disabled':''}>BLOCK PERIOD</button>
+    </form>
+    <div id="ttUnavailableStatus" class="muted small" role="status"></div>
+    <div id="ttUnavailableList" class="table-wrap"><div class="notice">Loading unavailable periods…</div></div>
    </div>
    <div class="analytics-panel"><h3>Automatic timetable generator</h3>
     <p>Generate and preview a school timetable using current classes, subjects and teachers.</p>
@@ -2288,7 +2352,7 @@ async function renderTimetableWorkspace(){
      <label class="inline"><input id="ttSave" type="checkbox"> Save generated schedule</label>
      <label class="inline"><input id="ttReplace" type="checkbox"> Replace existing schedule for selected period</label>
     </div>
-    <button class="btn primary" type="button" id="ttGenerate" ${!data.classes.length||!data.subjects.length||!data.teachers.length?'disabled':''}>GENERATE TIMETABLE</button>
+    <button class="btn primary" type="button" id="ttGenerate" ${!canManage||!data.classes.length||!data.subjects.length||!data.teachers.length?'disabled':''}>GENERATE TIMETABLE</button>
     <p id="ttGeneratorStatus" role="status"></p><div class="table-wrap" id="ttPreview"></div>
    </div>
    <div class="analytics-panel"><h3>Timetable register</h3>
@@ -2299,9 +2363,11 @@ async function renderTimetableWorkspace(){
      <label>Day<select name="day_of_week">${dayLabels.slice(1).map((day,i)=>`<option value="${i+1}">${day}</option>`).join('')}</select></label>
      <label>Start<input name="start_time" type="time" required></label>
      <label>End<input name="end_time" type="time" required></label>
-     <label>Room<input name="room"></label>
-     <button class="btn primary" type="submit" ${!data.classes.length||!data.subjects.length?'disabled':''}>ADD TIMETABLE ENTRY</button>
+     <label>Room<select name="room"><option value="">Select room…</option>${roomOptions}</select></label>
+     <label class="inline"><input name="is_locked" type="checkbox"> Lock this timetable placement</label>
+     <button class="btn primary" type="submit" ${!canManage||!data.classes.length||!data.subjects.length?'disabled':''}>ADD TIMETABLE ENTRY</button>
     </form>
+    <div class="actions"><label>View<select id="ttView"><option value="all">All timetable entries</option><option value="class">Class timetable</option><option value="teacher">Teacher timetable</option><option value="room">Room timetable</option></select></label><select id="ttViewEntity" aria-label="Select class, teacher, or room"><option value="">All</option></select><button class="btn secondary" type="button" id="ttExport">DOWNLOAD CSV</button><button class="btn secondary" type="button" id="ttPrint">PRINT VIEW</button></div>
     <div id="ttList" class="table-wrap"></div>
    </div>`;
   const configForm=$('ttConfigForm');
@@ -2313,26 +2379,127 @@ async function renderTimetableWorkspace(){
    configForm.elements.effective_end_date.value=currentConfig.effective_end_date?String(currentConfig.effective_end_date).slice(0,10):'';
    configForm.elements.teaching_days.value=Array.isArray(currentConfig.teaching_days)?currentConfig.teaching_days.join(','):'1,2,3,4,5';
    configForm.elements.periods_per_day.value=currentConfig.periods_per_day||8;
+   configForm.elements.period_start_times.value=Array.isArray(currentConfig.period_start_times)?currentConfig.period_start_times.join(','):'';
+   configForm.elements.period_end_times.value=Array.isArray(currentConfig.period_end_times)?currentConfig.period_end_times.join(','):'';
    configForm.elements.description.value=currentConfig.description||'';
    configForm.elements.is_active.checked=currentConfig.is_active!==false;
   }
-  const renderEntries=rows=>{
-   $('ttList').innerHTML=`<table><thead><tr><th>Day</th><th>Time</th><th>Class</th><th>Subject</th><th>Teacher</th><th>Room</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${dayLabels[x.day_of_week]||x.day_of_week}</td><td>${esc(x.start_time)}–${esc(x.end_time)}</td><td>${esc([x.class_name,x.stream].filter(Boolean).join(' '))}</td><td>${esc(x.subject_code||x.subject_name)}</td><td>${esc([x.teacher_first_name,x.teacher_last_name].filter(Boolean).join(' ')||'Unassigned')}</td><td>${esc(x.room||'—')}</td></tr>`).join('')||'<tr><td colspan="6">No timetable entries recorded.</td></tr>'}</tbody></table>`;
+  const yearSelect=configForm.elements.academic_year_id,termSelect=configForm.elements.term_id;
+  const initialYear=currentConfig?.academic_year_id||years[0]?.id||'';
+  if(initialYear)yearSelect.value=initialYear;
+  const initialTerms=initialYear?await terms(initialYear,termSelect,true,'Select term…'):[];
+  if(currentConfig?.term_id)termSelect.value=currentConfig.term_id;
+  else if(initialTerms.length)termSelect.value=initialTerms[0].id;
+  const scopeQuery=()=>`academic_year_id=${encodeURIComponent(yearSelect.value||'')}&term_id=${encodeURIComponent(termSelect.value||'')}`;
+  const requirementsUrl=()=>`/api/timetable-config/${sid}/requirements?${scopeQuery()}`;
+  const unavailableUrl=()=>`/api/timetable-config/${sid}/unavailability?${scopeQuery()}`;
+  const entriesUrl=()=>`/api/operations/${sid}/timetable/workspace?${scopeQuery()}`;
+  let savedRequirements=[];
+  let unavailablePeriods=[];
+  const renderRequirements=()=>{
+   const list=$('ttRequirementsList');
+   list.innerHTML=`<table><thead><tr><th>Class / stream</th><th>Subject</th><th>Teacher</th><th>Lessons / week</th><th>Length</th><th>Room</th><th></th></tr></thead><tbody>${savedRequirements.map(r=>`<tr><td>${esc([r.class_name,r.stream].filter(Boolean).join(' '))}</td><td>${esc(r.subject_name)}</td><td>${esc([r.teacher_first_name,r.teacher_last_name].filter(Boolean).join(' '))}</td><td>${r.lessons_per_week}</td><td>${r.periods_per_lesson||1} period(s)</td><td>${esc(r.room_requirement||'—')}</td><td>${canManage?`<button type="button" class="btn mini danger ttRequirementDelete" data-id="${esc(r.id)}">REMOVE</button>`:''}</td></tr>`).join('')||'<tr><td colspan="7">No saved lesson requirements for this academic year and term.</td></tr>'}</tbody></table>`;
   };
-  renderEntries(data.entries);
+  const loadRequirements=async()=>{
+   $('ttRequirementsList').innerHTML='<div class="notice">Loading lesson requirements…</div>';
+   savedRequirements=await api(requirementsUrl());
+   renderRequirements();
+  };
+  const loadUnavailability=async()=>{
+   unavailablePeriods=await api(unavailableUrl());
+   $('ttUnavailableList').innerHTML=`<table><thead><tr><th>Entity</th><th>Day</th><th>Period</th><th>Reason</th><th></th></tr></thead><tbody>${unavailablePeriods.map(x=>`<tr><td>${esc(x.teacher_id?[x.teacher_first_name,x.teacher_last_name].filter(Boolean).join(' '):x.room_name||'Unknown')}</td><td>${dayLabels[x.day_of_week]||x.day_of_week}</td><td>${x.period}</td><td>${esc(x.reason||'—')}</td><td>${canManage?`<button type="button" class="btn mini danger ttUnavailableDelete" data-id="${esc(x.id)}">REMOVE</button>`:''}</td></tr>`).join('')||'<tr><td colspan="5">No teacher or room restrictions saved.</td></tr>'}</tbody></table>`;
+  };
+  let timetableRows=[];
+  const renderEntries=rows=>{
+   timetableRows=rows;
+   const view=$('ttView'),entity=$('ttViewEntity'),kind=view.value,selected=entity.value;
+   const options=kind==='class'?data.classes.map(x=>[x.id,[x.name,x.stream].filter(Boolean).join(' ')]):kind==='teacher'?data.teachers.map(x=>[x.id,[x.first_name,x.last_name].filter(Boolean).join(' ')]):kind==='room'?[...new Set(rows.map(x=>x.room).filter(Boolean))].map(x=>[x,x]):[];
+   entity.innerHTML=`<option value="">${kind==='all'?'All':'Select…'}</option>${options.map(([id,label])=>`<option value="${esc(id)}">${esc(label)}</option>`).join('')}`;
+   if(options.some(([id])=>String(id)===String(selected)))entity.value=selected;
+   const filter=entity.value;
+   const visible=rows.filter(x=>kind==='all'||!filter||(kind==='class'&&String(x.class_id)===filter)||(kind==='teacher'&&String(x.teacher_id)===filter)||(kind==='room'&&String(x.room)===filter));
+   $('ttList').innerHTML=`<table><thead><tr><th>Day</th><th>Time</th><th>Class / stream</th><th>Subject</th><th>Teacher</th><th>Room</th><th>Placement</th></tr></thead><tbody>${visible.map(x=>`<tr><td>${dayLabels[x.day_of_week]||x.day_of_week}</td><td>${esc(x.start_time)}–${esc(x.end_time)}</td><td>${esc([x.class_name,x.stream].filter(Boolean).join(' '))}</td><td>${esc(x.subject_code||x.subject_name)}</td><td>${esc([x.teacher_first_name,x.teacher_last_name].filter(Boolean).join(' ')||'Unassigned')}</td><td>${esc(x.room||'—')}</td><td>${x.is_locked?'Locked':'Flexible'}${canManage?` <button type="button" class="btn mini secondary ttLock" data-id="${esc(x.id)}" data-locked="${x.is_locked?'true':'false'}">${x.is_locked?'UNLOCK':'LOCK'}</button>`:''}</td></tr>`).join('')||'<tr><td colspan="7">No timetable entries recorded for this selection.</td></tr>'}</tbody></table>`;
+  };
+  const loadScopedEntries=async()=>{
+   const scoped=await api(entriesUrl());
+   renderEntries(scoped.entries||[]);
+  };
+  yearSelect.onchange=async()=>{
+   try{const choices=await terms(yearSelect.value,termSelect,true,'Select term…');termSelect.value=choices[0]?.id||'';await Promise.all([loadRequirements(),loadUnavailability(),loadScopedEntries()]);}
+   catch(error){$('ttRequirementStatus').textContent=error.message||String(error);}
+  };
+  termSelect.onchange=async()=>{
+   try{await Promise.all([loadRequirements(),loadUnavailability(),loadScopedEntries()]);}
+   catch(error){$('ttRequirementStatus').textContent=error.message||String(error);}
+  };
+  await Promise.all([loadRequirements(),loadUnavailability(),loadScopedEntries()]);
+  $('ttRequirementForm').onsubmit=async e=>{
+   e.preventDefault();
+   const form=e.currentTarget,fd=new FormData(form);
+   if(!yearSelect.value||!termSelect.value){$('ttRequirementStatus').textContent='Select an academic year and term first.';return;}
+   const payload={academic_year_id:yearSelect.value,term_id:termSelect.value,class_id:fd.get('class_id'),subject_id:fd.get('subject_id'),teacher_id:fd.get('teacher_id'),lessons_per_week:Number(fd.get('lessons_per_week')),periods_per_lesson:Number(fd.get('periods_per_lesson')||1),max_per_day:fd.get('max_per_day')||null,preferred_day:fd.get('preferred_day')||null,preferred_period:fd.get('preferred_period')||null,room_requirement:fd.get('room_requirement')||'',hard_preference:form.elements.hard_preference.checked};
+   try{await api(`/api/timetable-config/${sid}/requirements`,{method:'POST',body:payload});$('ttRequirementStatus').textContent='Lesson requirement saved.';await loadRequirements();}
+   catch(error){$('ttRequirementStatus').textContent=error.message||String(error);}
+  };
+  $('ttRequirementsList').onclick=async e=>{
+   const button=e.target.closest('.ttRequirementDelete');if(!button)return;
+   try{await api(`/api/timetable-config/${sid}/requirements/${encodeURIComponent(button.dataset.id)}`,{method:'DELETE'});await loadRequirements();}
+   catch(error){$('ttRequirementStatus').textContent=error.message||String(error);}
+  };
+  $('ttUnavailableForm').onsubmit=async e=>{
+   e.preventDefault();
+   const form=e.currentTarget,fd=new FormData(form),teacherId=String(fd.get('teacher_id')||''),roomId=String(fd.get('room_id')||'');
+   if(Boolean(teacherId)===Boolean(roomId)){$('ttUnavailableStatus').textContent='Select exactly one teacher or room.';return;}
+   if(!yearSelect.value||!termSelect.value){$('ttUnavailableStatus').textContent='Select an academic year and term first.';return;}
+   try{await api(`/api/timetable-config/${sid}/unavailability`,{method:'POST',body:{academic_year_id:yearSelect.value,term_id:termSelect.value,teacher_id:teacherId||null,room_id:roomId||null,day_of_week:Number(fd.get('day_of_week')),period:Number(fd.get('period')),reason:fd.get('reason')||''}});$('ttUnavailableStatus').textContent='Unavailable period saved.';await loadUnavailability();}
+   catch(error){$('ttUnavailableStatus').textContent=error.message||String(error);}
+  };
+  $('ttUnavailableList').onclick=async e=>{
+   const button=e.target.closest('.ttUnavailableDelete');if(!button)return;
+   try{await api(`/api/timetable-config/${sid}/unavailability/${encodeURIComponent(button.dataset.id)}`,{method:'DELETE'});await loadUnavailability();}
+   catch(error){$('ttUnavailableStatus').textContent=error.message||String(error);}
+  };
+  $('ttRoomForm').onsubmit=async e=>{
+   e.preventDefault();
+   const payload=Object.fromEntries(new FormData(e.currentTarget));
+   try{await api(`/api/operations/${sid}/timetable/rooms`,{method:'POST',body:payload});await renderTimetableWorkspace();const status=$('ttRoomStatus');if(status)status.textContent='Room or facility added.';}
+   catch(error){$('ttRoomStatus').textContent=error.message||String(error);}
+  };
+  $('ttView').onchange=()=>renderEntries(timetableRows);
+  $('ttViewEntity').onchange=()=>renderEntries(timetableRows);
+  $('ttList').onclick=async e=>{
+   const button=e.target.closest('.ttLock');if(!button)return;
+   try{await api(`/api/operations/${sid}/timetable/${encodeURIComponent(button.dataset.id)}/lock`,{method:'PATCH',body:{is_locked:button.dataset.locked!=='true'}});await loadScopedEntries();}
+   catch(error){$('ttGeneratorStatus').textContent=error.message||String(error);}
+  };
+  $('ttExport').onclick=()=>{
+   const kind=$('ttView').value,filter=$('ttViewEntity').value;
+   const rows=timetableRows.filter(x=>kind==='all'||!filter||(kind==='class'&&String(x.class_id)===filter)||(kind==='teacher'&&String(x.teacher_id)===filter)||(kind==='room'&&String(x.room)===filter));
+   const columns=[['day_of_week','Day'],['start_time','Start'],['end_time','End'],['class_name','Class'],['stream','Stream'],['subject_name','Subject'],['teacher_first_name','Teacher first name'],['teacher_last_name','Teacher last name'],['room','Room']];
+   const quote=value=>`"${String(value??'').replace(/"/g,'""')}"`;
+   const csv=[columns.map(x=>quote(x[1])).join(','),...rows.map(row=>columns.map(([key])=>quote(row[key])).join(','))].join('\\r\\n');
+   const blob=new Blob(['\\ufeff'+csv],{type:'text/csv;charset=utf-8'}),link=document.createElement('a');
+   link.href=URL.createObjectURL(blob);link.download=`timetable-${yearSelect.value||'school'}-${termSelect.value||'all'}.csv`;link.click();URL.revokeObjectURL(link.href);
+  };
+  $('ttPrint').onclick=()=>{
+   const popup=window.open('','_blank');if(!popup){$('ttRequirementStatus').textContent='Allow pop-ups to print the timetable.';return;}
+   popup.document.write(`<!doctype html><html><head><title>School timetable</title><style>body{font:14px Arial,sans-serif;margin:24px}h1{font-size:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:6px;text-align:left}th{background:#eee}@media print{body{margin:10mm}}</style></head><body><h1>${esc(currentConfig?.name||'School timetable')}</h1><p>${esc(yearSelect.selectedOptions[0]?.textContent||'')} · ${esc(termSelect.selectedOptions[0]?.textContent||'')}</p>${$('ttList').innerHTML}<script>window.onload=()=>window.print()<\\/script></body></html>`);
+   popup.document.close();
+  };
   if(currentConfig?.periods_per_day)$('ttPeriods').value=currentConfig.periods_per_day;
   $('ttGenerate').onclick=()=>generateSchoolTimetable();
   configForm.onsubmit=async e=>{
    e.preventDefault();
    const form=e.currentTarget,fd=new FormData(form);
    const days=String(fd.get('teaching_days')||'').split(',').map(x=>Number(x.trim())).filter(x=>Number.isInteger(x)&&x>=1&&x<=7);
-   const payload={name:String(fd.get('name')||'').trim(),description:String(fd.get('description')||''),academic_year_id:fd.get('academic_year_id')||null,term_id:fd.get('term_id')||null,effective_start_date:fd.get('effective_start_date')||null,effective_end_date:fd.get('effective_end_date')||null,teaching_days:days.length?days:[1,2,3,4,5],periods_per_day:Number(fd.get('periods_per_day')||8),is_active:form.elements.is_active.checked};
+   const times=name=>String(fd.get(name)||'').split(',').map(x=>x.trim()).filter(Boolean);
+   const payload={name:String(fd.get('name')||'').trim(),description:String(fd.get('description')||''),academic_year_id:fd.get('academic_year_id')||null,term_id:fd.get('term_id')||null,effective_start_date:fd.get('effective_start_date')||null,effective_end_date:fd.get('effective_end_date')||null,teaching_days:days.length?days:[1,2,3,4,5],periods_per_day:Number(fd.get('periods_per_day')||8),period_start_times:times('period_start_times'),period_end_times:times('period_end_times'),is_active:form.elements.is_active.checked};
    try{const saved=await api(`/api/timetable-config/${sid}/config`,{method:'POST',body:payload});await renderTimetableWorkspace();const status=$('ttConfigStatus');if(status)status.textContent=`Saved ${saved.name}.`;}
    catch(error){$('ttConfigStatus').textContent=error.message||String(error);}
   };
   $('ttForm').onsubmit=async e=>{
    e.preventDefault();
-   try{await api(`/api/operations/${sid}/timetable`,{method:'POST',body:Object.fromEntries(new FormData(e.currentTarget))});await renderTimetableWorkspace();const status=$('ttGeneratorStatus');if(status)status.textContent='Timetable entry added.';}
+   try{const form=e.currentTarget,entry=Object.fromEntries(new FormData(form));entry.is_locked=form.elements.is_locked.checked;entry.academic_year_id=yearSelect.value||null;entry.term_id=termSelect.value||null;await api(`/api/operations/${sid}/timetable`,{method:'POST',body:entry});await renderTimetableWorkspace();const status=$('ttGeneratorStatus');if(status)status.textContent='Timetable entry added.';}
    catch(error){const status=$('ttGeneratorStatus');if(status)status.textContent=error.message||String(error);}
   };
  }catch(error){
