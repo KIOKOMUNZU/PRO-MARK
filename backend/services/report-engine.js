@@ -66,45 +66,6 @@ function cached(key,ttl,loader){
   });
   return value;
 }
-function autoSubjectComment(s){
-  if(s.average===null || s.average===undefined)return '';
-  const n=Number(s.average);
-  const subject=String(s.subject_name||'').trim().toLowerCase();
-  if(subject.includes('kiswahili')||subject.includes('kiswa')){
-    if(n>=80)return 'Anafanya vizuri sana katika Kiswahili. Aendelee kukuza matumizi sahihi ya lugha.';
-    if(n>=70)return 'Anaonyesha uelewa mzuri wa Kiswahili. Aongeze mazoezi ya kusoma na kuandika.';
-    if(n>=60)return 'Anaendelea vizuri katika Kiswahili. Mazoezi zaidi yataimarisha ujuzi wa lugha.';
-    if(n>=50)return 'Ana msingi mzuri katika Kiswahili. Anahitaji juhudi zaidi katika sarufi na uandishi.';
-    return 'Anahitaji msaada zaidi katika Kiswahili, hasa katika kusoma, sarufi na uandishi.';
-  }
-  const band=n>=80?0:n>=70?1:n>=60?2:n>=50?3:4;
-  if(subject.includes('math'))return [
-    'Excellent mathematical reasoning. Maintain accuracy and solve increasingly challenging problems.',
-    'Very good mathematical understanding. More practice will strengthen accuracy and confidence.',
-    'Good progress in Mathematics. Continue practising calculations and problem solving.',
-    'Developing Mathematics skills. Regular practice of concepts and calculations is encouraged.',
-    'Needs focused support in Mathematics, especially basic concepts and problem solving.'
-  ][band];
-  if(subject.includes('english'))return [
-    'Excellent English language work. Continue developing reading, writing and communication skills.',
-    'Very good English performance. Continue practising clear expression and comprehension.',
-    'Good progress in English. More reading and writing practice will strengthen the skills.',
-    'Developing English skills. More reading, vocabulary and writing practice is needed.',
-    'Needs additional support in English reading, writing and comprehension.'
-  ][band];
-  if(subject.includes('science')||subject.includes('biology')||subject.includes('chemistry')||subject.includes('physics'))return [
-    'Excellent understanding of scientific ideas. Continue applying concepts practically.',
-    'Very good science work. More practical application will deepen understanding.',
-    'Good progress in Science. Continue practising explanations and application of concepts.',
-    'Developing science understanding. More revision and practical examples are recommended.',
-    'Needs additional support in understanding and applying scientific concepts.'
-  ][band];
-  if(n>=80)return `Excellent performance in ${s.subject_name}. Continue extending the skills already demonstrated.`;
-  if(n>=70)return `Very good performance in ${s.subject_name}. Keep improving through consistent practice.`;
-  if(n>=60)return `Good progress in ${s.subject_name}. More practice will help strengthen the skills.`;
-  if(n>=50)return `Developing performance in ${s.subject_name}. Continued effort and revision are encouraged.`;
-  return `The learner needs additional support and practice in ${s.subject_name}.`;
-}
 function configuredMainAssessments(assessments,classId,subjectId=null){
   const isIncluded=a=>a.include_in_final!==false&&!String(a.assessment_type||'').toUpperCase().startsWith('CAT')&&
     (a.class_id==null || String(a.class_id)===String(classId)) &&
@@ -129,12 +90,20 @@ async function getContext(schoolId, learnerId, yearId, termId) {
     SELECT l.id learner_id,l.admission_no,l.assessment_no,l.passport_photo_url,l.first_name,l.middle_name,l.last_name,COALESCE(le.class_id,l.class_id) class_id,
            c.name class_name,c.stream,sl.id level_id,sl.code level_code,sl.name level_name,
            ss.id section_id,ss.code section_code,ss.name section_name,
+           st.code school_template_code,rt.name report_template_name,
+           COALESCE(rt.template_type,CASE
+             WHEN st.code='JUNIOR' AND ss.code='JUNIOR' THEN 'JUNIOR_A4'
+             WHEN st.code='SENIOR' AND ss.code='SENIOR' THEN 'SENIOR_A4'
+             WHEN st.code='COMPLEX' AND ss.code='SENIOR' THEN 'SENIOR_A4'
+             WHEN st.code='COMPLEX' AND ss.code='TRANSITIONAL_SECONDARY' THEN 'TRANSITIONAL_A4'
+           END) report_template_type,COALESCE(rt.config,'{}'::jsonb) report_template_config,
            s.name school_name,s.code school_code,si.logo_url,si.motto,si.primary_color,si.secondary_color,
            si.address,si.contact_phone,si.contact_email,si.watermark_enabled,ay.year_label,ay.identity_snapshot,
            t.id term_id,t.term_no,t.name term_name,t.opening_date,t.closing_date,t.reopening_date,
            nt.id next_term_id,nt.term_no next_term_no,nt.name next_term_name,nt.opening_date next_term_opening_date,nt.closing_date next_term_closing_date,nt.reopening_date next_term_reopening_date
     FROM learners l
     JOIN schools s ON s.id=l.school_id
+    LEFT JOIN school_templates st ON st.id=s.template_id
     LEFT JOIN school_identity si ON si.school_id=s.id
     JOIN academic_years ay ON ay.id=$3 AND ay.school_id=l.school_id
     JOIN terms t ON t.id=$4 AND t.school_id=l.school_id AND t.academic_year_id=ay.id
@@ -143,6 +112,7 @@ async function getContext(schoolId, learnerId, yearId, termId) {
     LEFT JOIN classes c ON c.id=COALESCE(le.class_id,l.class_id)
     LEFT JOIN school_levels sl ON sl.id=c.school_level_id
     LEFT JOIN school_sections ss ON ss.id=sl.school_section_id
+    LEFT JOIN report_templates rt ON rt.school_id=s.id AND rt.section_code=ss.code AND rt.is_active=true
     WHERE l.school_id=$1 AND l.id=$2`, [schoolId,learnerId,yearId,termId])).rows[0];
   if(!meta)return null;
   // For Term 3, the reopening date belongs to Term 1 of the next academic year.
@@ -330,13 +300,7 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
       average:subjectAverage,grade:grade?.label||"",points:grade?.points??"",descriptor:grade?.descriptor||"",remark:grade?.remark||"",
       teacher_initials:teacher?teacherInitials(tf,tl,ts):"",
       teacher_name:teacher?teacherDisplay(tf,tl,ts):'',
-      // Keep the subject COMMENT cell available for the teacher.  If a teacher has
-      // explicitly saved a subject-level remark with a mark, preserve that remark;
-      // otherwise leave the cell blank instead of injecting long automatic prose.
-      // Prefer a recorded teacher remark; otherwise use the subject-specific
-      // performance comment. This keeps comments tied to the learner's actual
-      // subject result instead of repeating one generic remark for every subject.
-      comment:(sm.map(x=>String(x.remark||'').trim()).find(Boolean)||autoSubjectComment({average:subjectAverage,subject_name:sm[0]?.subject_name||assigned?.subject_name||'Subject'})),
+      comment:sm.map(x=>String(x.remark||'').trim()).find(Boolean)||'',
       assessments:byAssessment.map(m=>({id:m.assessment_id,name:m.assessment_name,type:m.assessment_type,mark:m.mark,max_mark:m.max_mark,percent:m.percent,weight:m.weight,include_in_term_average:m.include_in_term_average}))
     };
   }));
@@ -440,14 +404,24 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
   const trend=subjects.flatMap(s=>s.assessments.filter(a=>a.percent!==null).map(a=>a.percent));
   const trendAvg=avg(trend);
   const trendText=trendAvg===null?"": overall!==null && trendAvg<overall-5?"The learner shows stronger performance in the current subject averages than in the assessment history.":"Assessment performance is generally consistent with the current subject averages.";
-  const classRemark=overall===null?"No overall performance can be calculated yet.":overall>=80?`Outstanding overall performance, with particular strength in ${strongest?.subject_name||"the leading learning area"}. Continue the excellent work.`:overall>=70?`Very good overall performance. Strongest area: ${strongest?.subject_name||"the leading learning area"}. Keep building consistency.`:overall>=50?`A positive overall performance. Continued effort, especially in ${weakest?.subject_name||"the area needing most support"}, should improve results further.`:`Additional academic support is recommended, especially in ${weakest?.subject_name||"the area needing most support"}.`;
-  const headRemark=overall===null?"Performance will be reviewed once sufficient assessment data is available.":overall>=80?"Commendable performance. The learner should maintain the current standard and continue aiming higher.":overall>=70?"Good performance. Maintain steady effort and continue strengthening weaker areas.":overall>=50?"The learner is making positive progress. Continued monitoring and targeted support are recommended.":"The learner requires closer academic support, monitoring and a consistent improvement plan.";
   let designationRecord=null;
   try {
     designationRecord=(await db.query(`SELECT designation,decision,attendance_days,school_open_days,conduct,effort,next_term_target,intervention_plan,teacher_comment,headteacher_comment
       FROM report_card_designations
       WHERE school_id=$1 AND learner_id=$2 AND academic_year_id=$3 AND term_id=$4`,[schoolId,learnerId,yearId,termId])).rows[0]||null;
   } catch (_) { /* Migration may not have been applied yet; reports remain operational. */ }
+  let pathwayGuidance=null;
+  try {
+    pathwayGuidance=(await db.query(`SELECT selected_pathway,track_specialisation,pathway_evidence,strengths,competency_development,development_area,career_exploration,teacher_guidance
+      FROM report_pathway_guidance
+      WHERE school_id=$1 AND learner_id=$2 AND academic_year_id=$3 AND term_id=$4`,[schoolId,learnerId,yearId,termId])).rows[0]||null;
+  } catch (_) { /* The additive pathway migration may not yet be installed. */ }
+  let reportComments=[];
+  try {
+    reportComments=(await db.query(`SELECT comment_type,comment_text FROM report_comments
+      WHERE school_id=$1 AND learner_id=$2 AND academic_year_id=$3 AND term_id=$4`,[schoolId,learnerId,yearId,termId])).rows;
+  } catch (_) { /* Reports remain available if optional report-comment storage is absent. */ }
+  const commentFor=types=>reportComments.find(c=>types.includes(String(c.comment_type||'').trim().toUpperCase()))?.comment_text||'';
   const designation=(designationRecord?.designation&&designationRecord.designation!=='AUTO')?designationRecord.designation:autoDesignation(overall);
   const progressionDecision=(designationRecord?.decision&&designationRecord.decision!=='AUTO')?designationRecord.decision:autoDecision(overall);
 
@@ -485,8 +459,8 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
     overall_points:overallGrade?.points??"",
     grading_system:overallGrading.system,
     grading_bands:overallGrading.bands,
-    class_teacher_remark:classRemark,
-    head_teacher_remark:headRemark,
+    class_teacher_remark:commentFor(['CLASS_TEACHER','CLASS_TEACHER_REMARK'])||designationRecord?.teacher_comment||'',
+    head_teacher_remark:commentFor(['HEAD_TEACHER','HEAD_TEACHER_REMARK','HEADTEACHER'])||designationRecord?.headteacher_comment||'',
     assessment_trend_remark:trendText,
     strongest_subject:strongest?.subject_name||"",
     weakest_subject:weakest?.subject_name||"",
@@ -501,6 +475,11 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
     recorded_teacher_comment:designationRecord?.teacher_comment||'',
     recorded_headteacher_comment:designationRecord?.headteacher_comment||'',
     identity_snapshot:meta.identity_snapshot||{},
+    school_template_code:meta.school_template_code||'',
+    report_template_name:meta.report_template_name||'',
+    report_template_type:meta.report_template_type||'',
+    report_template_config:meta.report_template_config||{},
+    pathway_guidance:pathwayGuidance||{},
     next_term_id:meta.next_term_id||null,
     next_term_no:meta.next_term_no||null,
     next_term_name:meta.next_term_name||'',
@@ -553,8 +532,18 @@ async function buildYearReport(schoolId,learnerId,yearId) {
   const g=gradeFor(annualOverall,annualGrading.bands);
   const annualTotal=subjects.reduce((sum,s)=>sum+(s.annual_average==null?0:Number(s.annual_average)),0);
   const annualPossible=subjects.filter(s=>s.annual_average!=null).length*100;
+  const guidanceReport=reports[reports.length-1];
   return {
     ...reports[0],
+    section_code:guidanceReport.section_code,
+    section_name:guidanceReport.section_name,
+    level_code:guidanceReport.level_code,
+    level_name:guidanceReport.level_name,
+    school_template_code:guidanceReport.school_template_code,
+    report_template_name:guidanceReport.report_template_name,
+    report_template_type:guidanceReport.report_template_type,
+    report_template_config:guidanceReport.report_template_config,
+    pathway_guidance:guidanceReport.pathway_guidance,
     subjects,
     subject_ranking:annualRanked,
     term_reports:reports,

@@ -20,7 +20,9 @@ function normalizeReport(input){
     report_kind:String(r.report_kind||'').toUpperCase()==='ANNUAL'?'ANNUAL':'TERM',
     exam_columns:Array.isArray(r.exam_columns)?r.exam_columns:[],
     grading_bands:Array.isArray(r.grading_bands)?r.grading_bands:[],
-    subject_ranking:Array.isArray(r.subject_ranking)?r.subject_ranking:[]
+    subject_ranking:Array.isArray(r.subject_ranking)?r.subject_ranking:[],
+    report_template_config:(r.report_template_config&&typeof r.report_template_config==='object')?r.report_template_config:{},
+    pathway_guidance:(r.pathway_guidance&&typeof r.pathway_guidance==='object')?r.pathway_guidance:{}
   };
 }
 function hex(c,fallback){const v=String(c||'').toUpperCase();if(v==='#17365D')return '#0B4F8A';if(v==='#D9A441')return '#16A36A';return /^#[0-9A-F]{6}$/i.test(v)?v:fallback;}
@@ -71,7 +73,124 @@ function drawSubjectBars(doc,subjects,x,y,w,h,primary,label){
    text(doc,fmt(v),bx+bw+3,yy,w-bw-(bx-x)-7,4.4,true,primary,'right');
  });
 }
-function drawGrading(doc,bands,x,y,w,h,primary){text(doc,'GRADING SCALE',x,y,w,5.8,true,primary);rounded(doc,x,y+10,w,h-10,4,'#fff','#111111');const bs=(bands||[]).slice().sort((a,b)=>Number(b.min_mark)-Number(a.min_mark));if(!bs.length){text(doc,'Configured grading system',x+5,y+24,w-10,5.5,false,'#1F3347','center');return;}const rh=Math.min(10,(h-12)/bs.length);bs.forEach((b,i)=>{const yy=y+11+i*rh;if(i%2===0){doc.save().fillColor('#F1F4F7').rect(x+1,yy,w-2,rh).fill().restore();}text(doc,`${b.min_mark}–${b.max_mark}`,x+4,yy+1,52,4.7,false,'#1F3347');text(doc,b.label,x+59,yy+1,28,4.8,true,gradeColor(b.label),'center');text(doc,b.descriptor||b.remark||'',x+91,yy+1,w-96,4.6,false,'#26384A');});}
+function drawGrading(doc,bands,x,y,w,h,primary){
+ text(doc,'GRADING SCALE',x,y,w,5.8,true,primary);
+ rounded(doc,x,y+10,w,h-10,4,'#fff','#111111');
+ const seen=new Set(),bs=(bands||[]).filter(b=>{const key=String(b.label||'').trim().toUpperCase();if(!key||seen.has(key))return false;seen.add(key);return true;}).slice().sort((a,b)=>Number(b.min_mark)-Number(a.min_mark));
+ if(!bs.length){text(doc,'GRADING CONFIGURATION REQUIRED',x+5,y+24,w-10,5.5,true,'#991B1B','center');return;}
+ const rows=Math.ceil(bs.length/2),rh=Math.min(9.5,(h-12)/Math.max(1,rows)),half=(w-2)/2;
+ bs.forEach((b,i)=>{
+   const col=Math.floor(i/rows),row=i%rows,xx=x+1+col*half,yy=y+11+row*rh;
+   if(row%2===0)doc.save().fillColor('#F1F4F7').rect(xx,yy,half,rh).fill().restore();
+   if(row===0&&col===1)line(doc,xx,yy,xx,yy+rh*rows,'#CBD5E1',.5);
+   text(doc,b.label,xx+3,yy+1,24,4.8,true,gradeColor(b.label),'center');
+   text(doc,`${b.min_mark}–${b.max_mark}`,xx+29,yy+1,43,4.5,false,'#1F3347','center');
+   text(doc,b.descriptor||b.remark||'',xx+74,yy+1,half-78,4.3,false,'#26384A','left',{ellipsis:true,height:rh,lineBreak:false});
+ });
+}
+const JSS_PATHWAYS=[
+ {code:'STEM',label:'STEM',icon:'S',description:'Science, technology & mathematics',subjects:/MATHEMAT|SCIENCE|TECHNOLOGY|ENGINEER|COMPUTER|DIGITAL|AGRICULTURE|PRE.?TECH/i},
+ {code:'SOCIAL_SCIENCES',label:'SOCIAL SCIENCES',icon:'SS',description:'People, society & citizenship',subjects:/SOCIAL|CITIZEN|HISTORY|GEOGRAPH|RELIG|CRE|IRE|HRE|ENGLISH|KISWAHILI|LANGUAGE|FRENCH|ARABIC/i},
+ {code:'ARTS_SPORTS_SCIENCE',label:'ARTS & SPORTS SCIENCE',icon:'AS',description:'Creative, artistic & sporting abilities',subjects:/ART|MUSIC|SPORT|PHYSICAL EDUCATION|\bP\.E\b|DANCE|DRAMA|CREATIVE/i}
+];
+function parseTemplateConfig(value){if(value&&typeof value==='object')return value;if(typeof value==='string'){try{return JSON.parse(value);}catch{}}return {};}
+function resolveGuidanceMode(report){
+ const template=String(report.school_template_code||'').toUpperCase(),section=String(report.section_code||'').toUpperCase(),level=String(report.level_code||'').toUpperCase(),type=String(report.report_template_type||'').toUpperCase();
+ const config=parseTemplateConfig(report.report_template_config),custom=config.pathway_guidance||config.pathways;
+ if(template==='COMPLEX'){
+   const entries=Array.isArray(custom)?custom:(Array.isArray(custom?.pathways)?custom.pathways:[]);
+  if(entries.length)return {mode:'CUSTOM',pathways:entries.map((p,i)=>({code:String(p.code||`PATHWAY_${i+1}`).toUpperCase(),label:p.name||p.label||p.code||`Pathway ${i+1}`,description:p.description||'',icon:String(p.icon||p.code||'P').slice(0,2),subjects:Array.isArray(p.subjects)&&p.subjects.length?new RegExp(p.subjects.map(v=>String(v).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|'),'i'):null}))};
+   if(section==='SENIOR'&&type==='SENIOR_A4'&&/^GRADE_(10|11|12)$/.test(level))return {mode:'SENIOR',config};
+   return {mode:'UNAVAILABLE',label:report.section_name||report.level_name||'Configured Complex curriculum'};
+ }
+ if(template==='JUNIOR'&&type==='JUNIOR_A4'&&/^GRADE_(7|8|9)$/.test(level))return {mode:'JSS',pathways:JSS_PATHWAYS};
+ if(template==='SENIOR'&&type==='SENIOR_A4'&&/^GRADE_(10|11|12)$/.test(level))return {mode:'SENIOR',config};
+ return {mode:'UNAVAILABLE',label:report.section_name||report.level_name||'Configured curriculum'};
+}
+function buildPathwayEvidence(report,pathways){
+ const source=report.pathway_guidance||{},recorded=source.pathway_evidence&&typeof source.pathway_evidence==='object'?source.pathway_evidence:{};
+ const subjects=(report.subjects||[]).filter(s=>(report.report_kind==='ANNUAL'?s.annual_average:s.average)!=null);
+ return pathways.map(pathway=>{
+   const matcher=pathway.subjects instanceof RegExp?pathway.subjects:null;
+   const related=matcher?subjects.filter(s=>matcher.test(`${s.subject_code||''} ${s.subject_name||''}`)):[];
+   const observed=recorded[pathway.code]||{};
+   const averageOf=subject=>Number(report.report_kind==='ANNUAL'?subject.annual_average:subject.average);
+   const average=related.length?related.reduce((sum,s)=>sum+averageOf(s),0)/related.length:null;
+   const humanEvidence=related.map(s=>`${s.subject_name}: ${fmt(averageOf(s))}`).slice(0,3).join('; ');
+   return {...pathway,related,average,humanEvidence,observed,teacherGuidance:observed.teacher_guidance||''};
+ });
+}
+function resolvePathwayGuidance(report){
+ const context=resolveGuidanceMode(report),source=report.pathway_guidance||{};
+ if(context.mode==='JSS'){
+   const pathways=buildPathwayEvidence(report,context.pathways);
+   const ranked=pathways.filter(p=>p.related.length>=2).slice().sort((a,b)=>b.average-a.average);
+   const enough=ranked.length>=2;
+   return {...context,pathways,strongest:enough?ranked[0]:null,developing:enough?ranked[1]:null,sufficient:enough,source};
+ }
+ if(context.mode==='CUSTOM')return {...context,pathways:buildPathwayEvidence(report,context.pathways),source};
+ return {...context,source,report_subjects:report.subjects||[],report_kind:report.report_kind};
+}
+function drawPathwayIcon(doc,code,x,y,color){
+ doc.save().strokeColor(color).lineWidth(.8).circle(x+5,y+5,5).stroke().fillColor(color).font('Helvetica-Bold').fontSize(4).text(String(code||'P').slice(0,2),x+1,y+3.4,{width:8,align:'center',lineBreak:false});doc.restore();
+}
+function drawJssGuidance(doc,guidance,x,y,w,h){
+ const green='#13804A',innerY=y+10,innerH=h-10,recommendW=230,gap=5,cardGap=3,cardW=(w-recommendW-gap-2*cardGap)/3;
+ guidance.pathways.forEach((p,i)=>{
+   const xx=x+i*(cardW+cardGap);rounded(doc,xx,innerY,cardW,innerH,3,'#F4FAF6','#B8D7C2');
+   drawPathwayIcon(doc,p.icon,xx+4,innerY+4,green);
+   text(doc,p.label,xx+16,innerY+4,cardW-19,4.4,true,green,'left',{ellipsis:true,height:6,lineBreak:false});
+   const status=p===guidance.strongest?'STRONGEST EMERGING':p===guidance.developing?'DEVELOPING EVIDENCE':p.related.length?'EVIDENCE RECORDED':'INSUFFICIENT EVIDENCE';
+  text(doc,p.description,xx+4,innerY+11,cardW-8,3.5,false,'#475569','left',{ellipsis:true,height:5,lineBreak:false});
+  text(doc,p.observed.strength||status,xx+4,innerY+18,cardW-8,3.9,true,'#334155','left',{ellipsis:true,height:6,lineBreak:false});
+  text(doc,p.observed.evidence||p.humanEvidence||'No relevant assessed results recorded',xx+4,innerY+26,cardW-8,3.7,false,'#475569','left',{height:15,lineBreak:true,ellipsis:true});
+  if(p.teacherGuidance)text(doc,p.teacherGuidance,xx+4,innerY+43,cardW-8,3.5,false,'#475569','left',{height:innerH-45,lineBreak:true,ellipsis:true});
+ });
+ const rx=x+3*cardW+2*cardGap+gap;
+ rounded(doc,rx,innerY,recommendW,innerH,3,'#F8FAFC','#B8D7C2');
+ text(doc,'EXPLORATORY GUIDANCE',rx+6,innerY+4,recommendW-12,4.5,true,green,'left');
+ if(guidance.sufficient){
+   const strongest=guidance.strongest,developing=guidance.developing;
+   text(doc,`Strongest emerging area: ${strongest.label}`,rx+6,innerY+12,recommendW-12,4.2,true,'#26384A','left',{ellipsis:true,height:6,lineBreak:false});
+   text(doc,`Evidence: ${strongest.humanEvidence||strongest.observed.evidence||'Recorded learning-area results'}`,rx+6,innerY+20,recommendW-12,3.9,false,'#475569','left',{height:11,lineBreak:true,ellipsis:true});
+   text(doc,`Developing area: ${developing.label}`,rx+6,innerY+33,recommendW-12,4.1,true,'#26384A','left',{ellipsis:true,height:6,lineBreak:false});
+   text(doc,strongest.teacherGuidance||guidance.source.teacher_guidance||'Continue exploring through practical activities and learner-teacher discussion.',rx+6,innerY+41,recommendW-12,3.9,false,'#475569','left',{height:innerH-43,lineBreak:true,ellipsis:true});
+ }else{
+   text(doc,'INSUFFICIENT EVIDENCE FOR PATHWAY GUIDANCE',rx+6,innerY+14,recommendW-12,4.2,true,'#7C4A03','left',{height:12,lineBreak:true,ellipsis:true});
+   text(doc,guidance.source.teacher_guidance||'Explore interests and demonstrated abilities with the learner and teachers; this is not a placement decision.',rx+6,innerY+28,recommendW-12,3.9,false,'#475569','left',{height:innerH-31,lineBreak:true,ellipsis:true});
+ }
+}
+function drawSeniorGuidance(doc,guidance,x,y,w,h){
+ const source=guidance.source,green='#13804A',innerY=y+10,innerH=h-10,pathway=source.selected_pathway||'';
+ rounded(doc,x,innerY,w,innerH,3,'#F8FAFC','#B8D7C2');
+ text(doc,`SELECTED PATHWAY: ${pathway||'PATHWAY NOT RECORDED'}`,x+7,innerY+5,w-14,4.8,true,green,'left',{ellipsis:true,height:7,lineBreak:false});
+ text(doc,`TRACK / SPECIALISATION: ${source.track_specialisation||'Not recorded'}`,x+7,innerY+14,w-14,4.2,true,'#334155','left',{ellipsis:true,height:6,lineBreak:false});
+ const col=(w-20)/2,left=x+7,right=x+13+col,top=innerY+23;
+ const selected=String(pathway).toUpperCase(),definition=JSS_PATHWAYS.find(p=>p.code===selected||p.label.toUpperCase()===selected),related=definition?buildPathwayEvidence({subjects:guidance.report_subjects||[],report_kind:guidance.report_kind},[definition])[0].related:[];
+ const subjectEvidence=related.slice().sort((a,b)=>Number(b.average)-Number(a.average)).slice(0,3).map(s=>`${s.subject_name} (${fmt(s.average)})`).join(', ');
+ const fields=[['STRENGTHS',source.strengths|| (subjectEvidence?`Recorded results: ${subjectEvidence}`:'No relevant subject evidence recorded')],['COMPETENCY DEVELOPMENT',source.competency_development||'No competency record available'],['DEVELOPMENT AREA',source.development_area||'No development area recorded'],['CAREER EXPLORATION',pathway?(source.career_exploration||'No career guidance recorded'):'Requires a recorded pathway']];
+ fields.forEach((field,i)=>{const xx=i%2?right:left,yy=top+Math.floor(i/2)*15;text(doc,field[0],xx,yy,col,3.8,true,green);text(doc,field[1],xx,yy+5,col,3.9,false,'#475569','left',{ellipsis:true,height:8,lineBreak:false});});
+}
+function drawCustomGuidance(doc,guidance,x,y,w,h){
+ const green='#13804A',innerY=y+10,innerH=h-10,recommendW=190,gap=5,cardGap=3,pathwayCount=guidance.pathways.length,cardW=(w-recommendW-gap-Math.max(0,pathwayCount-1)*cardGap)/Math.max(1,pathwayCount);
+ guidance.pathways.forEach((p,i)=>{const xx=x+i*(cardW+cardGap);rounded(doc,xx,innerY,cardW,innerH,3,'#F4FAF6','#B8D7C2');drawPathwayIcon(doc,p.icon,xx+4,innerY+4,green);text(doc,p.label,xx+16,innerY+4,cardW-19,4.3,true,green,'left',{ellipsis:true,height:6,lineBreak:false});text(doc,p.description,xx+4,innerY+11,cardW-8,3.5,false,'#475569','left',{ellipsis:true,height:5,lineBreak:false});text(doc,p.observed.strength||'STRENGTH NOT RECORDED',xx+4,innerY+18,cardW-8,3.8,true,'#334155','left',{ellipsis:true,height:6,lineBreak:false});text(doc,p.observed.evidence||p.humanEvidence||'No evidence recorded',xx+4,innerY+26,cardW-8,3.7,false,'#475569','left',{height:15,lineBreak:true,ellipsis:true});if(p.teacherGuidance)text(doc,p.teacherGuidance,xx+4,innerY+43,cardW-8,3.5,false,'#475569','left',{height:innerH-45,lineBreak:true,ellipsis:true});});
+ const rx=x+pathwayCount*cardW+Math.max(0,pathwayCount-1)*cardGap+gap;
+ rounded(doc,rx,innerY,recommendW,innerH,3,'#F8FAFC','#B8D7C2');
+ text(doc,guidance.source.selected_pathway?`RECORDED PATHWAY: ${guidance.source.selected_pathway}`:'PATHWAY GUIDANCE',rx+6,innerY+5,recommendW-12,4.3,true,green,'left',{ellipsis:true,height:6,lineBreak:false});
+ text(doc,guidance.source.teacher_guidance||'No learner-specific recommendation recorded.',rx+6,innerY+16,recommendW-12,3.9,false,'#475569','left',{height:innerH-19,lineBreak:true,ellipsis:true});
+}
+function drawPathwayGuidance(doc,report,x,y,w,h,primary){
+ const green='#13804A',guidance=resolvePathwayGuidance(report);
+ text(doc,'LEARNER STRENGTHS & PATHWAY GUIDANCE',x,y,w,6,true,green);
+ if(guidance.mode==='JSS')drawJssGuidance(doc,guidance,x,y,w,h);
+ else if(guidance.mode==='CUSTOM')drawCustomGuidance(doc,guidance,x,y,w,h);
+ else if(guidance.mode==='SENIOR')drawSeniorGuidance(doc,guidance,x,y,w,h);
+ else{
+   rounded(doc,x,y+10,w,h-10,3,'#F8FAFC','#B8D7C2');
+   text(doc,`PATHWAY STRUCTURE UNAVAILABLE FOR CONFIGURED CURRICULUM: ${guidance.label}`,x+7,y+20,w-14,4.5,true,'#7C4A03','left',{ellipsis:true,height:7,lineBreak:false});
+   text(doc,'No pathway recommendation has been inferred.',x+7,y+31,w-14,4.1,false,'#475569');
+ }
+}
 function fitRows(n,available,min,max){return Math.max(min,Math.min(max,Math.floor(available/Math.max(1,n))));}
 function drawReportPage(doc,report){
  const primary=hex(report.primary_color,'#12355B'),accent=hex(report.secondary_color,'#B8860B');
@@ -134,32 +253,27 @@ function drawReportPage(doc,report){
      y+=rh;
    });
  } else {
+   const subjectRows=report.subjects||[];
+   const tableCapacity=Math.max(110,482-(y+25));
+   const subjectLayoutWarning=subjectRows.length>Math.floor(tableCapacity/8);
    // Give the report-table title its own clear band. The previous underline sat
    // too close to the title and could visually cut through the heading when PDF
    // text metrics differed between viewers.
    rounded(doc,x,y-2,w,21,3,'#F8FAFC','#111111');
-   text(doc,'SUBJECT PERFORMANCE AND TEACHER FEEDBACK',x+8,y+4,w-16,7.2,true,primary,'left',{height:11,lineBreak:false,ellipsis:true});
+   text(doc,'SUBJECT PERFORMANCE AND TEACHER FEEDBACK',x+8,y+4,subjectLayoutWarning?310:w-16,7.2,true,primary,'left',{height:11,lineBreak:false,ellipsis:true});
+   if(subjectLayoutWarning)text(doc,'ONE-PAGE READABILITY LIMIT: ALL SUBJECTS RETAINED',x+315,y+7,w-323,4.2,true,'#991B1B','right',{height:7,lineBreak:false,ellipsis:true});
    y+=25;
    // Build the exam columns from the assessments configured by the administrator.
    // There is intentionally no Term 3 special-case here: 2 configured main exams
    // produce 2 exam columns; 3 configured main exams produce 3 exam columns.
-   const configured=(report.exam_columns||[])
-     .filter(a=>['OPENER','MID_TERM','END_TERM'].includes(String(a.type||'').toUpperCase()))
-     .map(a=>({type:String(a.type||'').toUpperCase(),label:`${String(a.name||a.type||'').toUpperCase()}\n(OUT OF ${Number(a.max_mark)||100})`}));
-   const standard=configured;
-   if(!standard.length){text(doc,'NO MAIN ASSESSMENTS CONFIGURED FOR THIS CLASS / TERM',x,y,w,5.8,true,'#991B1B','center');y+=12;}
-   // REPORT-CARD MASTER TABLE
-   // The order is fixed and every item has its own physical cell:
-   // SUBJECT | OPENER | [MID TERM] | END TERM | AVERAGE | GRADE | TEACHER | COMMENT
-   // Never derive the teacher position from text length or from the database columns.
-   // This prevents the teacher name from ever being drawn over the GRADE cell.
+   // The report card summarizes all configured assessment activity in one continuous
+   // five-column table; individual exam columns remain available in the report data.
    const columns=[
-     {key:'subject',label:'SUBJECT',width:92,align:'left'},
-     ...standard.map(ec=>({key:ec.type,label:ec.label,width:43,align:'center'})),
-     {key:'average',label:'AVERAGE',width:45,align:'center'},
-     {key:'grade',label:'GRADE',width:45,align:'center'},
-     {key:'teacher',label:'TEACHER',width:104,align:'center'},
-     {key:'comment',label:'COMMENT',width:167,align:'left'}
+     {key:'subject',label:'SUBJECT',width:127,align:'left'},
+     {key:'average',label:'AVERAGE',width:65,align:'center'},
+     {key:'grade',label:'GRADE',width:55,align:'center'},
+     {key:'teacher',label:'TEACHER',width:112,align:'center'},
+     {key:'comment',label:'COMMENT',width:159,align:'left'}
    ];
    // Reconcile the final column to the exact printable width so no rounding can
    // create a hidden/overlapping column at the right edge of the A4 page.
@@ -168,7 +282,7 @@ function drawReportPage(doc,report){
    const c=[x];
    columns.forEach(col=>c.push(c[c.length-1]+col.width));
 
-   rounded(doc,x,y,w,25,2,primary);
+  rounded(doc,x,y,w,25,2,primary);
    columns.forEach((col,i)=>{
      const xx=c[i],cw=col.width;
      text(doc,col.label,xx+2,y+(col.key==='subject'?5:3),cw-4,col.key==='comment'||col.key==='teacher'?4.7:4.4,true,'#fff',col.align==='left'?'left':'center',{height:20,lineBreak:col.key!=='subject'&&col.key!=='comment'&&col.key!=='teacher',ellipsis:true});
@@ -180,7 +294,7 @@ function drawReportPage(doc,report){
    // and automatic-comment column. The minimum row height prevents text collision.
    // A4-safe: allocate only the physical space available before the summary.
    // Many subjects must shrink their row height instead of flowing beyond the page.
-   const availableTableHeight=Math.max(110, 482-y);
+  const availableTableHeight=Math.max(110, 482-y);
    const rh=rows.length?Math.max(5.2,Math.min(22,availableTableHeight/rows.length)):22;
    rows.forEach((s,i)=>{
      if(i%2===0)doc.save().fillColor('#FBFCFD').rect(x,y,w,rh).fill().restore();
@@ -190,20 +304,17 @@ function drawReportPage(doc,report){
        doc.save().strokeColor('#111111').lineWidth(.9).rect(c[ci],y,col.width,rh).stroke().restore();
      });
 
-     const as=s.assessments||[];
-     const find=(type)=>as.find(v=>String(v.type||'').toUpperCase()===type);
      const teacher=(s.teacher_name||'').trim();
      const initials=(s.teacher_initials||'').trim();
      const teacherLabel=teacher && initials ? `${teacher}\n(${initials})` : (teacher || initials || '');
 
      const values={
        subject:s.subject_name||'Subject',
-       average:s.average==null?'':fmt(s.average),
-       grade:s.grade||'',
+       average:s.average==null?'NOT ASSESSED':fmt(s.average),
+       grade:s.grade||'—',
        teacher:teacherLabel,
        comment:s.comment||''
      };
-     standard.forEach(ec=>{const a=find(ec.type);values[ec.type]=a?.mark==null?'':fmt(a.mark);});
 
      columns.forEach((col,ci)=>{
        const xx=c[ci],cw=col.width;
@@ -226,58 +337,38 @@ function drawReportPage(doc,report){
  }
  // Overall summary
  y+=7;
- const cardW=(w-30)/6, cards=[
+ const assessedCount=(report.subjects||[]).filter(s=>report.report_kind==='ANNUAL'?s.annual_average!=null:s.average!=null).length;
+ const subjectCount=(report.subjects||[]).length;
+ const gradeBand=(report.grading_bands||[]).find(b=>String(b.label||'').toUpperCase()===String(report.overall_grade||'').toUpperCase());
+ const performanceStatus=assessedCount===0
+   ? ((report.exam_columns||[]).length?'NOT EVALUATED':'ASSESSMENT PENDING')
+   : assessedCount<subjectCount?`PARTIAL RESULTS ${assessedCount}/${subjectCount}`:(gradeBand?.descriptor||gradeBand?.remark||'ASSESSED');
+ const cardW=(w-18)/4, cards=[
    ['TOTAL MARKS',report.overall_total_marks==null?'—':`${fmt(report.overall_total_marks)} / ${fmt(report.overall_total_marks_possible||0)}`],
    ['OVERALL AVERAGE',report.overall_average==null?'—':fmt(report.overall_average)],
    ['OVERALL GRADE',report.overall_grade||'—'],
-   ['STREAM RANK',report.stream_rank==null?'—':`${report.stream_rank}${report.stream_rank_total?` / ${report.stream_rank_total}`:''}`],
-   ['CLASS RANK',report.overall_class_rank==null?'—':`${report.overall_class_rank}${report.class_rank_total?` / ${report.class_rank_total}`:''}`],
-   ['DESIGNATION',String(report.designation||'—').replace(/_/g,' ')]
+   ['PERFORMANCE STATUS',performanceStatus]
  ];
- cards.forEach((a,i)=>{const xx=x+i*(cardW+6),highlight=i===1?gradeColor(a[1]):i===3?designationColor(a[1]):null;rounded(doc,xx,y,cardW,34,4,highlight||'#F8FAFC',highlight||'#111111');text(doc,a[0],xx+4,y+5,cardW-8,4.0,true,highlight?'#fff':primary,'center');text(doc,a[1],xx+4,y+17,cardW-8,i===4?5.7:8,true,highlight?'#fff':'#0F172A','center');});
+ cards.forEach((a,i)=>{const xx=x+i*(cardW+6);rounded(doc,xx,y,cardW,34,3,'#F8FAFC','#111111');text(doc,a[0],xx+4,y+5,cardW-8,4.0,true,primary,'center',{ellipsis:true,height:6,lineBreak:false});text(doc,a[1],xx+4,y+17,cardW-8,i===3?5.2:7,true,i===3&&assessedCount===0?'#7C4A03':'#0F172A','center',{ellipsis:true,height:10,lineBreak:false});});
  y+=42;
 
- // Explicitly show the grading system actually assigned to this learner/class.
- // This is the same resolved grading used to calculate the displayed grades.
- if(report.grading_system){
-   const gs=report.grading_system;
-   text(doc,`GRADING USED: ${String(gs.name||'Configured grading system').toUpperCase()}${gs.code?` (${gs.code})`:''}`,x,y,w,5.8,true,primary,'left');
-   y+=9;
-   drawGrading(doc,report.grading_bands||[],x,y,w,54,primary);
-   y+=62;
- }
+ const gs=report.grading_system,hasGradingConfig=Boolean(gs||(report.grading_bands||[]).length);
+ text(doc,gs?`GRADING USED: ${String(gs.name||'Configured grading system').toUpperCase()}${gs.code?` (${gs.code})`:''}`:hasGradingConfig?'CONFIGURED GRADING SCALE':'GRADING CONFIGURATION REQUIRED',x,y,w,5.8,true,hasGradingConfig?primary:'#991B1B','left');
+ y+=9;
+ drawGrading(doc,report.grading_bands||[],x,y,w,54,primary);
+ y+=61;
 
- // Pivotal visual performance graphs retained on the report card.
- const graphW=(w-8)/2, graphH=78;
- if(y+graphH+10<760){
-   drawSubjectTrend(doc,report,x,y+10,graphW,graphH,primary,'SUBJECT TREND — COMPARATIVE LINES');
-   drawSubjectBars(doc,report.subjects||[],x+graphW+8,y+10,graphW,graphH,primary,'SUBJECT PERFORMANCE');
-   y+=graphH+20;
- }
+ drawPathwayGuidance(doc,report,x,y,w,67,primary);
+ y+=73;
 
- // Remarks are generated from actual performance when teacher remarks were not recorded.
- const rw=(w-8)/2, rh=50;
+ // Keep recorded remarks; generated default remarks are supplied by the report engine.
+ const rw=(w-8)/2, rh=43;
  rounded(doc,x,y,rw,rh,4,'#fff','#111111');rounded(doc,x+rw+8,y,rw,rh,4,'#fff','#111111');
- text(doc,"CLASS TEACHER'S REMARK",x+7,y+6,rw-14,4.7,true,primary);
- text(doc,report.recorded_teacher_comment||report.class_teacher_remark||'—',x+7,y+17,rw-14,5,false,'#334155','left',{height:29,lineBreak:true});
- text(doc,"HEAD TEACHER'S REMARK",x+rw+15,y+6,rw-14,4.7,true,primary);
- text(doc,report.recorded_headteacher_comment||report.head_teacher_remark||'—',x+rw+15,y+17,rw-14,5,false,'#334155','left',{height:29,lineBreak:true});
- y+=66;
-
- // Compact designation, attendance and learner-support record.
- const dy=y, dh=34;
- rounded(doc,x,dy,w,dh,4,'#F8FAFC','#111111');
- text(doc,'REPORT CARD DESIGNATION',x+7,dy+5,115,4.5,true,primary);
- text(doc,String(report.designation||'—').replace(/_/g,' '),x+7,dy+15,115,6.5,true,designationColor(report.designation));
- text(doc,'PROGRESSION DECISION',x+128,dy+5,104,4.5,true,primary);
- text(doc,String(report.progression_decision||'—').replace(/_/g,' '),x+128,dy+15,104,6.5,true,primary);
- text(doc,'ATTENDANCE',x+242,dy+5,76,4.5,true,primary);
- text(doc,report.attendance_days==null?'Not recorded':`${report.attendance_days}/${report.school_open_days??'—'} days`,x+242,dy+15,76,5.5,true,'#334155');
- text(doc,'CONDUCT / EFFORT',x+328,dy+5,94,4.5,true,primary);
- text(doc,[report.conduct,report.effort].filter(Boolean).join(' / ')||'Not recorded',x+328,dy+15,94,5.2,true,'#334155');
- text(doc,'NEXT TARGET',x+431,dy+5,100,4.5,true,primary);
- text(doc,report.next_term_target==null?'Not recorded':`${fmt(report.next_term_target)}%`,x+431,dy+15,100,6.2,true,'#334155');
- y+=42;
+ text(doc,"CLASS TEACHER'S REMARK",x+7,y+5,rw-14,4.7,true,primary);
+ text(doc,report.recorded_teacher_comment||report.class_teacher_remark||'—',x+7,y+14,rw-14,5,false,'#334155','left',{height:25,lineBreak:true});
+ text(doc,"HEAD TEACHER'S REMARK",x+rw+15,y+5,rw-14,4.7,true,primary);
+ text(doc,report.recorded_headteacher_comment||report.head_teacher_remark||'—',x+rw+15,y+14,rw-14,5,false,'#334155','left',{height:25,lineBreak:true});
+ y+=51;
 
  // Signature / stamp strip
  const sy=Math.min(y+5,748);
@@ -441,4 +532,4 @@ async function streamReportPdfs(reportFactory,res,opts={}){
    throw e;
  }
 }
-module.exports={reportPdf,reportPdfs,buildReportPdfsBuffer,streamReportPdfs,drawReportPage,invalidateReportPdfCache};
+module.exports={reportPdf,reportPdfs,buildReportPdfsBuffer,streamReportPdfs,drawReportPage,resolvePathwayGuidance,invalidateReportPdfCache};

@@ -6,6 +6,7 @@ const router=express.Router();router.use(authenticate);
 const classReportPdfCache=new Map();
 function getClassReportPdf(key){const hit=classReportPdfCache.get(key);if(hit&&hit.expires>Date.now())return hit.value;if(hit)classReportPdfCache.delete(key);return null;}
 function putClassReportPdf(key,value){classReportPdfCache.set(key,{value,expires:Date.now()+15000});if(classReportPdfCache.size>24){const oldest=[...classReportPdfCache.entries()].sort((a,b)=>a[1].expires-b[1].expires)[0];if(oldest)classReportPdfCache.delete(oldest[0]);}}
+function pathwayGuidanceError(res,error){const missing=error?.code==='42P01';return res.status(missing?503:error.status||400).json({error:missing?'Pathway guidance is not installed. Apply database/035_report_pathway_guidance.sql first.':error.message});}
 async function enforceClassTeacherLearner(req,learnerId,yearId){
  if(req.user.role!=='CLASS_TEACHER')return;
  const ok=(await db.query(`SELECT 1 FROM learners l JOIN class_teacher_assignments a ON a.class_id=l.class_id AND a.school_id=l.school_id JOIN teachers t ON t.id=a.teacher_id WHERE l.id=$1 AND l.school_id=$2 AND a.academic_year_id=$3 AND t.user_id=$4 AND COALESCE(t.is_active,true)=true LIMIT 1`,[learnerId,req.params.schoolId,yearId,req.user.user_id])).rows[0];
@@ -67,6 +68,40 @@ if((b.comment_text||'').trim().length>2000)
 b.comment_type=b.comment_type.trim();
 b.comment_text=(b.comment_text||'').trim();
 await assertBelongs('learners',b.learner_id,req.params.schoolId);await assertBelongs('academic_years',b.academic_year_id,req.params.schoolId);await assertBelongs('terms',b.term_id,req.params.schoolId);const q=await db.query(`INSERT INTO report_comments(school_id,learner_id,academic_year_id,term_id,comment_type,comment_text,created_by) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(learner_id,academic_year_id,term_id,comment_type) DO UPDATE SET comment_text=EXCLUDED.comment_text,created_by=EXCLUDED.created_by,updated_at=now() RETURNING *`,[req.params.schoolId,b.learner_id,b.academic_year_id,b.term_id,b.comment_type,b.comment_text||"",req.user.user_id]);res.json(q.rows[0]);}catch(e){res.status(e.status||400).json({error:e.message});}});
+router.get('/:schoolId/pathway-guidance/:learnerId/:yearId/:termId',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER'),async(req,res)=>{try{
+ await enforceClassTeacherLearner(req,req.params.learnerId,req.params.yearId);
+ const q=await db.query(`SELECT selected_pathway,track_specialisation,pathway_evidence,strengths,competency_development,development_area,career_exploration,teacher_guidance
+  FROM report_pathway_guidance WHERE school_id=$1 AND learner_id=$2 AND academic_year_id=$3 AND term_id=$4`,[req.params.schoolId,req.params.learnerId,req.params.yearId,req.params.termId]);
+ res.json(q.rows[0]||{});
+}catch(e){pathwayGuidanceError(res,e);}});
+router.put('/:schoolId/pathway-guidance',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER'),async(req,res)=>{try{
+ const b=req.body||{};
+ if(!b.learner_id||!b.academic_year_id||!b.term_id)return res.status(400).json({error:'Learner, academic year and term are required'});
+ await enforceClassTeacherLearner(req,b.learner_id,b.academic_year_id);
+ const {assertBelongs}=require('../services/tenant');
+ await assertBelongs('learners',b.learner_id,req.params.schoolId);await assertBelongs('academic_years',b.academic_year_id,req.params.schoolId);await assertBelongs('terms',b.term_id,req.params.schoolId);
+ const termContext=(await db.query('SELECT 1 FROM terms WHERE id=$1 AND school_id=$2 AND academic_year_id=$3',[b.term_id,req.params.schoolId,b.academic_year_id])).rows[0];
+ if(!termContext)return res.status(400).json({error:'Selected term does not belong to the selected academic year.'});
+ const textFields=['selected_pathway','track_specialisation','strengths','competency_development','development_area','career_exploration','teacher_guidance'];
+ const values={};
+ for(const field of textFields){
+   const value=b[field]==null?'':b[field];
+   if(typeof value!=='string'||value.trim().length>1000)return res.status(400).json({error:`Invalid ${field.replace(/_/g,' ')} value`});
+   values[field]=value.trim()||null;
+ }
+ const evidence=b.pathway_evidence==null?{}:b.pathway_evidence;
+ if(typeof evidence!=='object'||Array.isArray(evidence)||Object.keys(evidence).length>12)return res.status(400).json({error:'Pathway evidence must be an object with no more than 12 pathway entries'});
+ for(const [key,item] of Object.entries(evidence)){
+   if(!/^[A-Z0-9_-]{1,60}$/i.test(key)||!item||typeof item!=='object'||Array.isArray(item))return res.status(400).json({error:'Invalid pathway evidence entry'});
+   for(const field of ['strength','evidence','teacher_guidance'])if(item[field]!=null&&(typeof item[field]!=='string'||item[field].trim().length>500))return res.status(400).json({error:`Invalid ${field} in pathway evidence`});
+ }
+ const q=await db.query(`INSERT INTO report_pathway_guidance(school_id,learner_id,academic_year_id,term_id,selected_pathway,track_specialisation,pathway_evidence,strengths,competency_development,development_area,career_exploration,teacher_guidance,updated_by)
+  VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13)
+  ON CONFLICT(school_id,learner_id,academic_year_id,term_id) DO UPDATE SET selected_pathway=EXCLUDED.selected_pathway,track_specialisation=EXCLUDED.track_specialisation,pathway_evidence=EXCLUDED.pathway_evidence,strengths=EXCLUDED.strengths,competency_development=EXCLUDED.competency_development,development_area=EXCLUDED.development_area,career_exploration=EXCLUDED.career_exploration,teacher_guidance=EXCLUDED.teacher_guidance,updated_by=EXCLUDED.updated_by,updated_at=now()
+  RETURNING selected_pathway,track_specialisation,pathway_evidence,strengths,competency_development,development_area,career_exploration,teacher_guidance`,[req.params.schoolId,b.learner_id,b.academic_year_id,b.term_id,values.selected_pathway,values.track_specialisation,JSON.stringify(evidence),values.strengths,values.competency_development,values.development_area,values.career_exploration,values.teacher_guidance,req.user.user_id]);
+ invalidateReportCaches();invalidateReportPdfCache();
+ res.json(q.rows[0]);
+}catch(e){pathwayGuidanceError(res,e);}});
 router.get('/:schoolId/designation/:learnerId/:yearId/:termId',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','CLASS_TEACHER','SENIOR_TEACHER','TEACHER'),async(req,res)=>{try{
  const q=await db.query(`SELECT designation,decision,attendance_days,school_open_days,conduct,effort,next_term_target,intervention_plan,teacher_comment,headteacher_comment
   FROM report_card_designations WHERE school_id=$1 AND learner_id=$2 AND academic_year_id=$3 AND term_id=$4`,[req.params.schoolId,req.params.learnerId,req.params.yearId,req.params.termId]);

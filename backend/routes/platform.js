@@ -366,7 +366,7 @@ router.delete('/schools/:schoolId',async(req,res)=>{
     const ordered=[
       'school_fee_payment_reversals','school_fee_payment_allocations',
       'school_fee_payments','school_fee_charges','school_fee_structures',
-      'marks','report_comments','report_document_snapshots','learner_movement_events',
+      'marks','report_comments','report_pathway_guidance','report_document_snapshots','learner_movement_events',
       'learner_enrollments','communication_messages','class_teacher_assignments',
       'teacher_subject_assignments','assessment_configurations','assessments','merit_runs',
       'report_templates','grading_systems','audit_log','billing_payments','billing_notifications',
