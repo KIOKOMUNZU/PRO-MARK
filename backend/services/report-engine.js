@@ -1,4 +1,10 @@
 const db = require("../db");
+const {
+  buildExamColumns,
+  subjectEntries,
+  scoreSubject,
+  computeRanks
+} = require("./term-score");
 
 function finite(n) { const x = Number(n); return Number.isFinite(x) ? x : null; }
 function avg(values) {
@@ -66,22 +72,18 @@ function cached(key,ttl,loader){
   });
   return value;
 }
-function configuredMainAssessments(assessments,classId,subjectId=null){
-  const isIncluded=a=>a.include_in_final!==false&&!String(a.assessment_type||'').toUpperCase().startsWith('CAT')&&
-    (a.class_id==null || String(a.class_id)===String(classId)) &&
-    (subjectId==null || a.subject_id==null || String(a.subject_id)===String(subjectId));
-  let main=(assessments||[]).filter(isIncluded);
-  const byType=new Map();
-  for(const a of main){
-    const type=String(a.assessment_type||'').toUpperCase();
-    const key=['OPENER','MID_TERM','END_TERM'].includes(type)?type:String(a.id);
-    const score=(Number(a.mark_count||0)>0?100000+Number(a.mark_count):0)+(a.subject_id!=null&&subjectId!=null&&String(a.subject_id)===String(subjectId)?4000:0)+(a.class_id!=null&&String(a.class_id)===String(classId)?2000:0);
-    const current=byType.get(key);const currentScore=current?.__specificity??-1;
-    if(!current || score>currentScore || (score===currentScore && (Number(a.assessment_order||0)<Number(current.assessment_order||0) || (Number(a.assessment_order||0)===Number(current.assessment_order||0) && String(a.created_at||'')>String(current.created_at||''))))){
-      byType.set(key,{...a,__specificity:score});
+async function loadMeritProfile(schoolId,yearId,termId,classId){
+  return cached(`merit-profile|${schoolId}|${yearId}|${termId}|${classId}`,15000,async()=>{
+    try{
+      return (await db.query(`SELECT selected_assessment_ids,cat_group_mode,custom_weights
+        FROM merit_flex_profiles
+        WHERE school_id=$1 AND academic_year_id=$2 AND term_id=$3 AND class_id=$4`,
+        [schoolId,yearId,termId,classId])).rows[0]||null;
+    }catch(e){
+      if(e.code==='42P01'||e.code==='42703')return null;
+      throw e;
     }
-  }
-  return [...byType.values()].sort((a,b)=>Number(a.assessment_order||0)-Number(b.assessment_order||0)||String(a.created_at||'').localeCompare(String(b.created_at||''))).map(({__specificity,...a})=>a);
+  });
 }
 
 
@@ -239,7 +241,8 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
       CASE WHEN tsa.term_id=$4 THEN 0 WHEN tsa.term_id IS NULL THEN 1 ELSE 2 END,
       CASE WHEN COALESCE(tsa.is_active,true)=true THEN 0 ELSE 1 END,
         tsa.created_at DESC,tsa.id DESC`,[schoolId,meta.class_id,yearId,termId])).rows);
-      const [assessments,marks,assignedSubjects]=await Promise.all([assessmentsPromise,marksPromise,assignedSubjectsPromise]);
+      const [assessments,marks,assignedSubjects,meritProfile]=await Promise.all([assessmentsPromise,marksPromise,assignedSubjectsPromise,loadMeritProfile(schoolId,yearId,termId,meta.class_id)]);
+  const examColumns=buildExamColumns(assessments,meta.class_id);
 
   // Report-card subjects come from the current class assignments PLUS any marks
   // actually recorded for this learner in the selected year/term.  This prevents a
@@ -255,37 +258,15 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
   const subjects = await Promise.all(subjectIds.map(async subjectId => {
     const sm = marksBySubject.get(subjectId)||[];
     const assigned = assignedSubjects.find(x=>x.subject_id===subjectId);
-    // The administrator's configured assessment records are authoritative. We do
-    // not reduce Term 3 to two hard-coded columns, and we do not group by assessment
-    // type when calculating marks. Each configured main assessment keeps its own id,
-    // name and mark so three configured exams remain three distinct report columns.
-    const configured = configuredMainAssessments(assessments,meta.class_id,subjectId);
-    const configuredIds=new Set(configured.map(a=>String(a.id)));
-    const marksByAssessment=new Map();
-    for(const m of sm){
-      if(!configuredIds.has(String(m.assessment_id)))continue;
-      const current=marksByAssessment.get(String(m.assessment_id));
-      const mTime=Date.parse(m.updated_at||m.created_at||'')||0;
-      const cTime=current?Date.parse(current.updated_at||current.created_at||'')||0:-1;
-      if(!current || mTime>=cTime)marksByAssessment.set(String(m.assessment_id),m);
-    }
-    const byAssessment=configured.map(a=>{
-      const m=marksByAssessment.get(String(a.id));
-      const max=Number(a.max_mark)||100;
-      const raw=m?finite(m.mark):null;
-      return {
-        ...(m||{}),assessment_id:a.id,assessment_name:a.name,assessment_type:String(a.assessment_type||'').toUpperCase(),
-        assessment_order:a.assessment_order,max_mark:a.max_mark||100,weight:a.weight||0,
-        include_in_term_average:m?.include_in_term_average!==false,
-        mark:raw,percent:raw===null?null:(raw/max)*100
-      };
-    });
-    const included=byAssessment.filter(m=>m.percent!==null && m.include_in_term_average!==false);
-    // Equal-average policy is retained: the administrator controls which main
-    // assessments exist and whether each is included. No Term 3 two-exam fallback is
-    // used when configured records exist.
-    const subjectAverage=avg(included.map(m=>m.percent));
-    const grading=await resolveGrading(schoolId,meta,included[0]?.assessment_id,subjectId);
+    // Every exam configured for this class and term becomes a report column,
+    // including CATs. A saved merit profile decides how the columns combine;
+    // without one the historical equal main-exam average is preserved.
+    const entries=subjectEntries(sm,assessments,meta.class_id,subjectId,examColumns);
+    const scoring=scoreSubject({subjectId,entries,profile:meritProfile,assessments,classId:meta.class_id});
+    const countedColumns=new Set(scoring.counted_keys);
+    const subjectAverage=scoring.average;
+    const gradingAssessment=entries.find(e=>e.percent!==null&&e.assessment_id!=null);
+    const grading=await resolveGrading(schoolId,meta,gradingAssessment?.assessment_id,subjectId);
     const grade=gradeFor(subjectAverage,grading.bands);
     const assignedReal=assigned && !isPlaceholderTeacher(assigned) ? assigned : null;
     const markTeacher=sm.find(x=>(x.teacher_first_name||x.teacher_last_name) && !isPlaceholderTeacher({teacher_first_name:x.teacher_first_name,teacher_last_name:x.teacher_last_name,staff_no:x.staff_no}))
@@ -297,11 +278,15 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
     const ts=teacher===markTeacher ? (teacher?.staff_no || teacher?.entered_teacher_staff_no) : teacher?.staff_no;
     return {
       subject_id:subjectId,subject_code:sm[0]?.subject_code||assigned?.subject_code||'',subject_name:sm[0]?.subject_name||assigned?.subject_name||'Subject',
-      average:subjectAverage,grade:grade?.label||"",points:grade?.points??"",descriptor:grade?.descriptor||"",remark:grade?.remark||"",
+      average:subjectAverage,average_basis:scoring.basis,grade:grade?.label||"",points:grade?.points??"",descriptor:grade?.descriptor||"",remark:grade?.remark||"",
       teacher_initials:teacher?teacherInitials(tf,tl,ts):"",
       teacher_name:teacher?teacherDisplay(tf,tl,ts):'',
       comment:sm.map(x=>String(x.remark||'').trim()).find(Boolean)||'',
-      assessments:byAssessment.map(m=>({id:m.assessment_id,name:m.assessment_name,type:m.assessment_type,mark:m.mark,max_mark:m.max_mark,percent:m.percent,weight:m.weight,include_in_term_average:m.include_in_term_average}))
+      assessments:entries.map(e=>({
+        id:e.assessment_id,name:e.name,type:e.type,mark:e.mark,max_mark:e.max_mark,
+        percent:e.percent,weight:e.weight,include_in_term_average:e.include_in_term_average,
+        column_key:e.column_key,cat:e.cat,counts_toward_average:countedColumns.has(e.column_key)
+      }))
     };
   }));
   subjects.sort((a,b)=>a.subject_name.localeCompare(b.subject_name));
@@ -314,36 +299,48 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
   // Keep the subject rank on each subject row as well as in the separate ranking list.
   const subjectRankMap=new Map(subjectRanking.map(x=>[String(x.subject_id),x.subject_rank]));
   subjects.forEach(s=>{s.subject_rank=subjectRankMap.get(String(s.subject_id))??null;});
-  // Rank this learner in every subject against the selected class, and capture year-on-year deviation.
-  const reportAssessmentSql = "'OPENER','MID_TERM','END_TERM'";
-  const rankRows=await cached(`subject-ranks|${schoolId}|${meta.class_id}|${yearId}|${termId}`,15000,async()=> (await db.query(`
-    WITH standard_marks AS (
-      SELECT DISTINCT ON (m.learner_id,m.subject_id,a.assessment_type)
-             m.learner_id,m.subject_id,m.mark,a.max_mark,a.created_at,a.id
+  // Ranks are computed from the same subject scores shown on the report. The
+  // former SQL ranking only counted three hard-coded assessment types, so a
+  // learner's position could disagree with the average printed beside it.
+  const peerClasses=await cached(`rank-classes|${schoolId}|${meta.class_name||meta.class_id}`,30000,async()=>{
+    if(!meta.class_name)return (await db.query(`SELECT id,name FROM classes WHERE school_id=$1 AND id=$2`,[schoolId,meta.class_id])).rows;
+    return (await db.query(`SELECT id,name FROM classes WHERE school_id=$1 AND name=$2`,[schoolId,meta.class_name])).rows;
+  });
+  const rankTable=await cached(`report-ranks|${schoolId}|${meta.class_id}|${yearId}|${termId}`,15000,async()=>{
+    const classIds=peerClasses.map(c=>String(c.id));
+    if(!classIds.length)return new Map();
+    const learners=(await db.query(`
+      SELECT DISTINCT m.learner_id,m.class_id
       FROM marks m
-      JOIN assessments a ON a.id=m.assessment_id
-      JOIN terms t ON t.id=m.term_id
-      WHERE m.school_id=$1 AND m.class_id=$2 AND m.academic_year_id=$3 AND m.term_id=$4
-        AND m.mark IS NOT NULL
-        AND a.assessment_type IN (${reportAssessmentSql})
-        AND EXISTS (
-          SELECT 1 FROM teacher_subject_assignments tsa
-          WHERE tsa.school_id=m.school_id AND tsa.subject_id=m.subject_id
-            AND tsa.class_id=m.class_id AND tsa.academic_year_id=m.academic_year_id
-            AND (tsa.term_id=m.term_id OR tsa.term_id IS NULL)
-        )
-      ORDER BY m.learner_id,m.subject_id,a.assessment_type,a.created_at,a.id
-    ),
-    per_learner_subject AS (
-      SELECT learner_id,subject_id,AVG((mark/NULLIF(max_mark,0))*100.0) average
-      FROM standard_marks
-      GROUP BY learner_id,subject_id
-    )
-    SELECT learner_id,subject_id,average,
-           DENSE_RANK() OVER(PARTITION BY subject_id ORDER BY average DESC) subject_rank,
-           COUNT(*) OVER(PARTITION BY subject_id) subject_learner_count
-    FROM per_learner_subject`,[schoolId,meta.class_id,yearId,termId])).rows);
-  const currentRanks=new Map(rankRows.filter(r=>r.learner_id===learnerId).map(r=>[r.subject_id,r]));
+      WHERE m.school_id=$1 AND m.academic_year_id=$2 AND m.term_id=$3
+        AND m.class_id=ANY($4::uuid[]) AND m.mark IS NOT NULL`,
+      [schoolId,yearId,termId,classIds])).rows;
+    const peerMarks=(await db.query(`
+      SELECT m.learner_id,m.class_id,m.subject_id,m.assessment_id,m.mark,
+        COALESCE((SELECT ac.include_in_term_average FROM assessment_configurations ac
+          WHERE ac.school_id=m.school_id AND ac.assessment_id=m.assessment_id
+            AND (ac.subject_id=m.subject_id OR ac.subject_id IS NULL)
+            AND (ac.section_id=$5 OR ac.section_id IS NULL) AND (ac.level_id=$6 OR ac.level_id IS NULL)
+          ORDER BY (ac.subject_id IS NOT NULL) DESC,(ac.level_id IS NOT NULL) DESC,(ac.section_id IS NOT NULL) DESC LIMIT 1),true) include_in_term_average
+      FROM marks m
+      WHERE m.school_id=$1 AND m.academic_year_id=$2 AND m.term_id=$3
+        AND m.class_id=ANY($4::uuid[]) AND m.mark IS NOT NULL`,
+      [schoolId,yearId,termId,classIds,meta.section_id,meta.level_id])).rows;
+    let profilesByClass=new Map();
+    try{
+      profilesByClass=new Map((await db.query(`
+        SELECT class_id,selected_assessment_ids,cat_group_mode,custom_weights
+        FROM merit_flex_profiles
+        WHERE school_id=$1 AND academic_year_id=$2 AND term_id=$3 AND class_id=ANY($4::uuid[])`,
+        [schoolId,yearId,termId,classIds])).rows.map(row=>[String(row.class_id),row]));
+    }catch(e){
+      if(e.code!=='42P01'&&e.code!=='42703')throw e;
+    }
+    return computeRanks({learners,marks:peerMarks,assessments,profilesByClass,classes:peerClasses});
+  });
+  const rankRow=rankTable.get(String(learnerId))||null;
+  const currentRanks=new Map(Object.entries(rankRow?.subject_ranks||{}).map(([subjectId,value])=>[subjectId,{subject_rank:value.rank,subject_learner_count:value.total}]));
+  const reportAssessmentSql = "'OPENER','MID_TERM','END_TERM'";
   const priorRows=(await db.query(`
     WITH latest_terms AS (
       SELECT DISTINCT ON (ay.id) ay.id ay_id,t.id term_id,ay.year_label,t.term_no
@@ -360,27 +357,9 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
   const priorBySubject=new Map();for(const r of priorRows){if(!priorBySubject.has(r.subject_id))priorBySubject.set(r.subject_id,[]);priorBySubject.get(r.subject_id).push(r);}
   subjects.forEach(s=>{const rr=currentRanks.get(s.subject_id);const priors=priorBySubject.get(s.subject_id)||[];s.subject_rank=rr?Number(rr.subject_rank):null;s.subject_rank_total=rr?Number(rr.subject_learner_count):null;s.previous_years=priors.map(r=>({year_label:r.year_label,average:Number(r.average)}));const immediate=priors[0];s.previous_year_average=immediate?Number(immediate.average):null;s.previous_year_deviation=(immediate&&s.average!=null)?Number(s.average)-Number(immediate.average):null;});
   const overall=avg(subjects.map(s=>s.average));
-  // Rank within the selected stream/class and, where multiple streams share the same
-  // class name, rank across all streams of that class. The two positions are kept
-  // separate so a learner in Grade 7A can see both their Grade 7A position and their
-  // overall Grade 7 position.
-  const rankSql=reportAssessmentSql;
-  const rankBase=`WITH standard_marks AS (
-      SELECT DISTINCT ON (m.learner_id,m.subject_id,a.assessment_type) m.learner_id,m.subject_id,m.mark,a.max_mark,m.class_id
-      FROM marks m JOIN assessments a ON a.id=m.assessment_id
-      WHERE m.school_id=$1 AND m.academic_year_id=$2 AND m.term_id=$3
-        AND m.mark IS NOT NULL AND a.assessment_type IN (${rankSql})
-      ORDER BY m.learner_id,m.subject_id,a.assessment_type,m.created_at,a.id
-    ), per_subject AS (SELECT learner_id,class_id,subject_id,AVG(mark/NULLIF(max_mark,0)*100.0) average FROM standard_marks GROUP BY learner_id,class_id,subject_id),
-    learner_totals AS (SELECT learner_id,class_id,AVG(average) overall_average FROM per_subject GROUP BY learner_id,class_id),
-    peer AS (SELECT lt.*,c.name class_name,c.stream FROM learner_totals lt JOIN classes c ON c.id=lt.class_id WHERE c.school_id=$1)
-    SELECT learner_id,overall_average,class_id,class_name,stream,
-      ROW_NUMBER() OVER(PARTITION BY class_id ORDER BY overall_average DESC,learner_id) stream_rank,
-      ROW_NUMBER() OVER(PARTITION BY class_name ORDER BY overall_average DESC,learner_id) class_rank,
-      COUNT(*) OVER(PARTITION BY class_id) stream_count,COUNT(*) OVER(PARTITION BY class_name) class_count
-    FROM peer`;
-  const overallRankRows=await cached(`overall-ranks|${schoolId}|${yearId}|${termId}`,15000,async()=> (await db.query(rankBase,[schoolId,yearId,termId])).rows);
-  const rankFor=overallRankRows.find(r=>String(r.learner_id)===String(learnerId));
+  // Stream and whole-class positions come from computeRanks, the same scorer used
+  // for the subject averages above. A learner in Grade 7A therefore sees both the
+  // 7A position and the combined Grade 7 position across streams.
   const staffContext=await cached(`report-staff|${schoolId}|${meta.class_id}|${yearId}|${termId}`,15000,async()=>{
     let classTeacher=(await db.query(`SELECT tr.id,tr.first_name,tr.last_name,tr.staff_no,tr.signature_url FROM class_teacher_assignments cta JOIN teachers tr ON tr.id=cta.teacher_id WHERE cta.school_id=$1 AND cta.class_id=$2 AND cta.academic_year_id=$3 AND (cta.term_id=$4 OR cta.term_id IS NULL) AND tr.is_active=true AND upper(trim(coalesce(tr.last_name,'')))<>'TEACHER' ORDER BY (cta.term_id IS NOT NULL) DESC,cta.created_at DESC LIMIT 1`,[schoolId,meta.class_id,yearId,termId])).rows[0];
     if(!classTeacher) classTeacher=(await db.query(`SELECT tr.id,tr.first_name,tr.last_name,tr.staff_no,tr.signature_url FROM teacher_subject_assignments tsa JOIN teachers tr ON tr.id=tsa.teacher_id WHERE tsa.school_id=$1 AND tsa.class_id=$2 AND tsa.academic_year_id=$3 AND (tsa.term_id=$4 OR tsa.term_id IS NULL) AND COALESCE(tsa.is_class_teacher,false)=true AND tr.is_active=true AND upper(trim(coalesce(tr.last_name,'')))<>'TEACHER' ORDER BY (tsa.term_id IS NOT NULL) DESC,tsa.created_at DESC,tsa.id DESC LIMIT 1`,[schoolId,meta.class_id,yearId,termId])).rows[0];
@@ -399,6 +378,8 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
   );
   const overallGrading=await resolveGrading(schoolId,meta,null,null);
   const overallGrade=gradeFor(overall,overallGrading.bands);
+  const averageBases=[...new Set(subjects.map(s=>s.average_basis).filter(Boolean))];
+  const termAverageBasis=averageBases.length===1?averageBases[0]:(averageBases.length?'MIXED':null);
   const sorted=[...subjects].filter(s=>s.average!==null).sort((a,b)=>b.average-a.average);
   const strongest=sorted[0], weakest=sorted[sorted.length-1];
   const trend=subjects.flatMap(s=>s.assessments.filter(a=>a.percent!==null).map(a=>a.percent));
@@ -439,19 +420,19 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
     subjects,
     subject_ranking:subjectRanking,
     // Class rank is calculated from the same subject-level averages used on this report.
-    // ROW_NUMBER gives every learner a unique position; only learners enrolled in this
-    // class/year and with reportable marks are ranked, so a two-learner class can only
-    // produce ranks 1 and 2 (never rank 3 because of unrelated learners/assessments).
-    overall_class_rank: rankFor?Number(rankFor.class_rank):null,
-    stream_rank: rankFor?Number(rankFor.stream_rank):null,
-    stream_rank_total: rankFor?Number(rankFor.stream_count):null,
-    class_rank_total: rankFor?Number(rankFor.class_count):null,
+    // Only learners with reportable marks participate, so a two-learner class can only
+    // produce ranks 1 and 2.
+    overall_class_rank: rankRow?Number(rankRow.class_rank):null,
+    stream_rank: rankRow?Number(rankRow.stream_rank):null,
+    stream_rank_total: rankRow?Number(rankRow.stream_rank_total):null,
+    class_rank_total: rankRow?Number(rankRow.class_rank_total):null,
     previous_year_deviations: [...new Set(priorRows.map(p=>p.year_label))].map(year_label=>{const vals=subjects.flatMap(s=>(s.previous_years||[]).filter(p=>p.year_label===year_label).map(p=>({current:s.average,previous:p.average}))).filter(x=>x.current!=null);return {year_label,deviation:vals.length?vals.reduce((a,x)=>a+(x.current-x.previous),0)/vals.length:null};}).filter(x=>x.deviation!=null).sort((a,b)=>String(b.year_label).localeCompare(String(a.year_label))),
     assessments,
-    // Assessment columns are driven entirely by what the administrator configured
-    // for this class/term. Term 3 is NOT hard-coded to two exams: if Opener, Mid
-    // Term and End Term exist, all three are exposed to the report renderer.
-    exam_columns: configuredMainAssessments(assessments,meta.class_id).map(a=>({id:a.id,type:String(a.assessment_type||'').toUpperCase(),name:a.name,max_mark:a.max_mark,weight:a.weight})),
+    // Every exam configured for the class/term is exposed to the renderer, including
+    // CATs. The PDF prints one column per distinct exam name.
+    exam_columns: examColumns.map(column=>({id:column.ids[0],key:column.key,type:column.type,name:column.name,max_mark:column.max_mark,weight:column.weight,cat:column.cat})),
+    merit_profile_applied:Boolean(meritProfile),
+    term_average_basis:termAverageBasis,
     overall_total_marks:subjects.reduce((sum,s)=>sum+(s.average==null?0:Number(s.average)),0),
     overall_total_marks_possible:subjects.filter(s=>s.average!=null).length*100,
     overall_average:overall,

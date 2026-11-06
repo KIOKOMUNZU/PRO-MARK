@@ -263,18 +263,26 @@ function drawReportPage(doc,report){
    text(doc,'SUBJECT PERFORMANCE AND TEACHER FEEDBACK',x+8,y+4,subjectLayoutWarning?310:w-16,7.2,true,primary,'left',{height:11,lineBreak:false,ellipsis:true});
    if(subjectLayoutWarning)text(doc,'ONE-PAGE READABILITY LIMIT: ALL SUBJECTS RETAINED',x+315,y+7,w-323,4.2,true,'#991B1B','right',{height:7,lineBreak:false,ellipsis:true});
    y+=25;
-   // Build the exam columns from the assessments configured by the administrator.
-   // There is intentionally no Term 3 special-case here: 2 configured main exams
-   // produce 2 exam columns; 3 configured main exams produce 3 exam columns.
-   // The report card summarizes all configured assessment activity in one continuous
-   // five-column table; individual exam columns remain available in the report data.
+   // One column per exam captured this term, including CATs. The remaining
+   // columns keep the report-card layout intact and every column is scaled to
+   // the printable A4 width.
+   const examColumns=report.exam_columns||[];
    const columns=[
-     {key:'subject',label:'SUBJECT',width:127,align:'left'},
-     {key:'average',label:'AVERAGE',width:65,align:'center'},
-     {key:'grade',label:'GRADE',width:55,align:'center'},
-     {key:'teacher',label:'TEACHER',width:112,align:'center'},
-     {key:'comment',label:'COMMENT',width:159,align:'left'}
+     {key:'subject',label:'SUBJECT',weight:1.9,align:'left'},
+     ...examColumns.map(column=>({
+       key:`exam:${column.key}`,
+       label:String(column.name||column.type||'EXAM').toUpperCase(),
+       weight:0.75,
+       align:'center',
+       exam:column
+     })),
+     {key:'average',label:'AVERAGE',weight:0.75,align:'center'},
+     {key:'grade',label:'GRADE',weight:0.6,align:'center'},
+     {key:'teacher',label:'TEACHER',weight:1.0,align:'center'},
+     {key:'comment',label:'COMMENT',weight:2.1,align:'left'}
    ];
+   const weightSum=columns.reduce((n,col)=>n+col.weight,0);
+   columns.forEach(col=>{col.width=(w*col.weight)/weightSum;});
    // Reconcile the final column to the exact printable width so no rounding can
    // create a hidden/overlapping column at the right edge of the A4 page.
    const widthSum=columns.reduce((n,col)=>n+col.width,0);
@@ -282,10 +290,24 @@ function drawReportPage(doc,report){
    const c=[x];
    columns.forEach(col=>c.push(c[c.length-1]+col.width));
 
+   const examEntry=(subject,column)=>{
+     const list=subject.assessments||[];
+     return list.find(a=>String(a.column_key||'')===String(column.key))
+       || list.find(a=>column.id!=null&&String(a.id)===String(column.id))
+       || list.find(a=>String(a.name||'').toUpperCase()===String(column.name||'').toUpperCase());
+   };
+   const examValue=(subject,column)=>{
+     const entry=examEntry(subject,column);
+     if(!entry||entry.mark==null)return '';
+     const max=Number(entry.max_mark)||100;
+     return Math.abs(max-100)<0.001?fmt(entry.mark):`${fmt(entry.mark)}/${fmt(max)}`;
+   };
+
   rounded(doc,x,y,w,25,2,primary);
    columns.forEach((col,i)=>{
      const xx=c[i],cw=col.width;
-     text(doc,col.label,xx+2,y+(col.key==='subject'?5:3),cw-4,col.key==='comment'||col.key==='teacher'?4.7:4.4,true,'#fff',col.align==='left'?'left':'center',{height:20,lineBreak:col.key!=='subject'&&col.key!=='comment'&&col.key!=='teacher',ellipsis:true});
+     const headerSize=col.exam?Math.max(3.5,Math.min(4.2,cw/9)):(col.key==='comment'||col.key==='teacher'?4.7:4.4);
+     text(doc,col.label,xx+2,y+(col.key==='subject'?5:3),cw-4,headerSize,true,'#fff',col.align==='left'?'left':'center',{height:20,lineBreak:col.key!=='subject'&&col.key!=='comment'&&col.key!=='teacher',ellipsis:true});
      if(i<columns.length-1)line(doc,c[i+1],y,c[i+1],y+25,'#FFFFFF',1);
    });
    y+=25;
@@ -315,6 +337,7 @@ function drawReportPage(doc,report){
        teacher:teacherLabel,
        comment:s.comment||''
      };
+     for(const column of examColumns)values[`exam:${column.key}`]=examValue(s,column);
 
      columns.forEach((col,ci)=>{
        const xx=c[ci],cw=col.width;
@@ -328,6 +351,8 @@ function drawReportPage(doc,report){
          text(doc,value,xx+5,y+Math.max(2,(rh-8)/2),cw-10,Math.max(3.5,Math.min(4.8,rh-3)),false,'#334155','left',{height:Math.max(3,rh-2),lineBreak:true,ellipsis:true});
        }else if(col.key==='subject'){
          text(doc,value,xx+4,y+Math.max(2,(rh-9)/2),cw-8,Math.max(4,Math.min(5.8,rh-2)),true,'#111827','left',{height:Math.max(3,rh-2),lineBreak:false,ellipsis:true});
+       }else if(col.exam){
+         text(doc,value,xx+1,y+Math.max(2,(rh-9)/2),cw-2,Math.max(3.6,Math.min(4.8,rh-2)),true,'#1F2937','center',{height:Math.max(3,rh-2),lineBreak:false,ellipsis:true});
        }else{
          text(doc,value,xx+2,y+Math.max(2,(rh-9)/2),cw-4,Math.max(4,col.key==='grade'?Math.min(6,rh-2):Math.min(5.5,rh-2)),true,col.key==='grade'?gradeColor(s.grade):'#1F2937','center',{height:Math.max(3,rh-2),lineBreak:false,ellipsis:true});
        }

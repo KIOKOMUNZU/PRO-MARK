@@ -207,6 +207,7 @@ router.post('/:schoolId/:yearId/:termId/class-bulk',schoolBoundary,roles('SCHOOL
       }
       await client.query('COMMIT');
     }catch(e){await client.query('ROLLBACK');throw e}finally{client.release()}
+    invalidateReportCaches(); invalidateReportPdfCache();
     res.status(201).json({created:created.length,skipped:skipped.length,assessments:created,subjects:subjects.length,message:`Created ${created.length} assessment(s) for ${subjects.length} subject(s).`});
   }catch(e){res.status(e.status||400).json({error:e.message});}
 });
@@ -269,6 +270,7 @@ router.post('/:schoolId/marks',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEAD
       RETURNING *`,
       [sid,b.learner_id,b.subject_id,b.class_id,b.academic_year_id,a.term_id,b.assessment_id,mark,req.user.user_id,String(b.remark||'').trim()||null]
     );
+    invalidateReportCaches(); invalidateReportPdfCache();
     res.json(q.rows);
   }catch(e){res.status(e.status||400).json({error:e.message});}
 });
@@ -461,6 +463,7 @@ router.post('/:schoolId/:yearId/:termId',schoolBoundary,roles('SCHOOL_ADMIN','AD
        b.deadline_at||null,b.class_id||null,b.subject_id||null,
        !!(b.cat_enabled===true||String(b.cat_enabled)==='true'),
        Number(b.final_conversion_weight||weight||0)]);
+    invalidateReportCaches(); invalidateReportPdfCache();
     res.status(201).json(q.rows[0]);
   }catch(e){res.status(e.status||400).json({error:e.message||'Unable to create assessment'});}
 });
@@ -585,6 +588,7 @@ router.patch('/:schoolId/:yearId/:termId/:assessmentId',schoolBoundary,roles('SC
         updatedCount=Math.max(1,peers.rowCount);
       }
       await client.query('COMMIT');
+      invalidateReportCaches(); invalidateReportPdfCache();
       res.json({...(q.rows[0]||current),updated_count:updatedCount,deadline_at:deadline,status});
     }catch(e){await client.query('ROLLBACK');throw e}finally{client.release();}
   }catch(e){
@@ -607,6 +611,7 @@ router.delete('/:schoolId/:yearId/:termId/:assessmentId',schoolBoundary,roles('S
     await c.query('DELETE FROM assessment_configurations WHERE school_id=$1 AND assessment_id=$2',[sid,assessmentId]);
     const q=await c.query('DELETE FROM assessments WHERE id=$1 AND school_id=$2 AND academic_year_id=$3 AND term_id=$4 RETURNING id,name',[assessmentId,sid,yearId,termId]);
     await c.query('COMMIT');
+    invalidateReportCaches(); invalidateReportPdfCache();
     res.json({ok:true,removed:q.rows[0]});
   }catch(e){try{await c.query('ROLLBACK')}catch{}res.status(e.status||400).json({error:e.message||'Unable to remove assessment.'});}finally{c.release();}
 });

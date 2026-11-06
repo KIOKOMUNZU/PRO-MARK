@@ -3,6 +3,8 @@
 const express=require('express'),db=require('../db');
 const {authenticate,schoolBoundary,roles}=require('../middleware/auth');
 const {calculate}=require('../services/merit-flex-engine');
+const {invalidateReportCaches}=require('../services/report-engine');
+const {invalidateReportPdfCache}=require('../services/report-pdf');
 const router=express.Router();router.use(authenticate);
 const view=roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER');
 const edit=roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER');
@@ -58,7 +60,7 @@ if(mode==='CUSTOM'){
       });
   }
 }
-const saved=await db.query(`INSERT INTO merit_flex_profiles(school_id,academic_year_id,term_id,class_id,selected_assessment_ids,cat_group_mode,custom_weights) VALUES($1,$2,$3,$4,$5::jsonb,$6,$7::jsonb) ON CONFLICT(school_id,academic_year_id,term_id,class_id) DO UPDATE SET selected_assessment_ids=excluded.selected_assessment_ids,cat_group_mode=excluded.cat_group_mode,custom_weights=excluded.custom_weights,updated_at=now() RETURNING *`,[sid,q.academic_year_id,q.term_id,q.class_id,JSON.stringify(ids),mode,JSON.stringify(mode==='CUSTOM'?weights:{})]);res.json({profile:saved.rows[0]});}catch(e){fail(res,e)}});
+const saved=await db.query(`INSERT INTO merit_flex_profiles(school_id,academic_year_id,term_id,class_id,selected_assessment_ids,cat_group_mode,custom_weights) VALUES($1,$2,$3,$4,$5::jsonb,$6,$7::jsonb) ON CONFLICT(school_id,academic_year_id,term_id,class_id) DO UPDATE SET selected_assessment_ids=excluded.selected_assessment_ids,cat_group_mode=excluded.cat_group_mode,custom_weights=excluded.custom_weights,updated_at=now() RETURNING *`,[sid,q.academic_year_id,q.term_id,q.class_id,JSON.stringify(ids),mode,JSON.stringify(mode==='CUSTOM'?weights:{})]);invalidateReportCaches();invalidateReportPdfCache();res.json({profile:saved.rows[0]});}catch(e){fail(res,e)}});
 
 router.get('/:schoolId/preview',schoolBoundary,view,async(req,res)=>{
  try{
@@ -356,6 +358,8 @@ router.post('/:schoolId/cats',schoolBoundary,edit,async(req,res)=>{
     }
 
     await client.query('COMMIT');
+    invalidateReportCaches();
+    invalidateReportPdfCache();
     res.status(201).json({
       name,created,skipped,subjects:subjects.length,
       message:`${name}: ${created} created, ${skipped} already existed.`

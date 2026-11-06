@@ -12,7 +12,8 @@
     "validate": "node migration/validate_kauti.js",
     "check": "node scripts/smoke-check.js",
     "import:kauti": "node migration/import_kauti_workbook.js --commit",
-    "audit:integrations": "node scripts/integration-audit.js"
+    "audit:integrations": "node scripts/integration-audit.js",
+    "test": "node --test \"tests/*.test.js\""
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
