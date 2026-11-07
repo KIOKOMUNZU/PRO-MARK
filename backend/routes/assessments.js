@@ -18,6 +18,27 @@ async function requireMarkEntryAccess(req,sid){
   if(!q.rows[0])throw Object.assign(new Error('Mark Entry is not activated for your account. Ask the administrator to activate it.'),{status:403});
 }
 
+// A user with mark-entry rights may still not be the teacher for the selected
+// class/subject. Admins and heads retain school-wide entry; classroom staff must
+// hold either the subject assignment or the class-teacher assignment.
+async function enforceMarkEntryScope(req,sid,{classId,subjectId,academicYearId,termId}){
+  if(['PLATFORM_OWNER','SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER'].includes(req.user.role))return;
+  const teacher=(await db.query(`SELECT id FROM teachers WHERE school_id=$1 AND user_id=$2 AND COALESCE(is_active,true)=true LIMIT 1`,[sid,req.user.user_id])).rows[0];
+  if(!teacher)throw Object.assign(new Error('No active teacher profile is linked to this account.'),{status:403});
+  const subjectScope=(await db.query(`
+    SELECT 1 FROM teacher_subject_assignments
+    WHERE school_id=$1 AND teacher_id=$2 AND class_id=$3 AND subject_id=$4
+      AND academic_year_id=$5 AND (term_id=$6 OR term_id IS NULL OR $6::uuid IS NULL)
+      AND COALESCE(is_active,true)=true LIMIT 1`,
+    [sid,teacher.id,classId,subjectId,academicYearId,termId||null])).rows[0];
+  if(subjectScope)return;
+  const classScope=(await db.query(`
+    SELECT 1 FROM class_teacher_assignments
+    WHERE school_id=$1 AND teacher_id=$2 AND class_id=$3 AND academic_year_id=$4 LIMIT 1`,
+    [sid,teacher.id,classId,academicYearId])).rows[0];
+  if(!classScope)throw Object.assign(new Error('You can only enter marks for classes and subjects assigned to you.'),{status:403});
+}
+
 const validTypes=new Set(['OPENER','CAT','TEST','MID_TERM','END_TERM','MOCK','FINAL','CUSTOM']);
 
 // Resolve the assessment selected by the UI to the one assessment belonging to
@@ -256,6 +277,7 @@ router.post('/:schoolId/marks',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEAD
     if(a.subject_id && String(a.subject_id)!==String(b.subject_id))return res.status(400).json({error:'Assessment does not belong to the selected subject'});
     if(String(a.status||'OPEN').toUpperCase()!=='OPEN')return res.status(403).json({error:'Assessment is closed'});
     if(a.deadline_at && new Date(a.deadline_at)<=new Date())return res.status(403).json({error:'The assessment deadline has passed'});
+    await enforceMarkEntryScope(req,sid,{classId:b.class_id,subjectId:b.subject_id,academicYearId:b.academic_year_id,termId:a.term_id});
 
     const mark=parseZelimuMark(b.mark,a.max_mark);
     if(mark!==null&&(!Number.isFinite(mark)||mark<0||mark>Number(a.max_mark))){

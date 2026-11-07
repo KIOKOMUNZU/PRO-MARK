@@ -7,6 +7,7 @@ function validateBands(bands){
  const sorted=bands.map(b=>({label:String(b.label||'').trim(),min:Number(b.min_mark),max:Number(b.max_mark),points:Number(b.points||0),descriptor:String(b.descriptor||''),remark:String(b.remark||'')}));
  if(sorted.some(b=>!b.label||!Number.isFinite(b.min)||!Number.isFinite(b.max)||b.min<0||b.max>100||b.min>b.max))throw Error('Every grading band needs a label and valid min/max marks between 0 and 100');
  sorted.sort((a,b)=>a.min-b.min);
+ if(sorted[0].min!==0||sorted[sorted.length-1].max!==100)throw Error('Grading bands must cover the full 0 to 100 mark range');
  const integerBands=sorted.every(b=>Number.isInteger(b.min)&&Number.isInteger(b.max));
  for(let i=1;i<sorted.length;i++){
   const prev=sorted[i-1],cur=sorted[i];

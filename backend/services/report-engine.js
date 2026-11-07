@@ -110,7 +110,14 @@ async function getContext(schoolId, learnerId, yearId, termId) {
     JOIN academic_years ay ON ay.id=$3 AND ay.school_id=l.school_id
     JOIN terms t ON t.id=$4 AND t.school_id=l.school_id AND t.academic_year_id=ay.id
     LEFT JOIN terms nt ON nt.school_id=l.school_id AND nt.academic_year_id=ay.id AND nt.term_no=t.term_no+1
-    LEFT JOIN learner_enrollments le ON le.school_id=l.school_id AND le.learner_id=l.id AND le.academic_year_id=ay.id
+    LEFT JOIN LATERAL (
+      SELECT le.class_id
+      FROM learner_enrollments le
+      WHERE le.school_id=l.school_id AND le.learner_id=l.id AND le.academic_year_id=ay.id
+        AND COALESCE(le.status,'ACTIVE') IN ('ACTIVE','COMPLETED')
+      ORDER BY (COALESCE(le.status,'ACTIVE')='ACTIVE') DESC,le.created_at DESC
+      LIMIT 1
+    ) le ON true
     LEFT JOIN classes c ON c.id=COALESCE(le.class_id,l.class_id)
     LEFT JOIN school_levels sl ON sl.id=c.school_level_id
     LEFT JOIN school_sections ss ON ss.id=sl.school_section_id
@@ -343,7 +350,7 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
   const reportAssessmentSql = "'OPENER','MID_TERM','END_TERM'";
   const priorRows=(await db.query(`
     WITH latest_terms AS (
-      SELECT DISTINCT ON (ay.id) ay.id ay_id,t.id term_id,ay.year_label,t.term_no
+      SELECT DISTINCT ON (ay.id) ay.id ay_id,t.id term_id,ay.year_label,t.term_no,ay.start_date
       FROM academic_years ay JOIN terms t ON t.academic_year_id=ay.id AND t.school_id=ay.school_id
       WHERE ay.school_id=$1 AND ay.id<>$2 AND t.term_no=$3
       ORDER BY ay.id DESC,t.term_no DESC
@@ -353,7 +360,8 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
       JOIN assessments a ON a.id=m.assessment_id
     WHERE m.school_id=$1 AND m.learner_id=$4 AND m.mark IS NOT NULL
       AND a.assessment_type IN (${reportAssessmentSql})
-    GROUP BY ay.year_label,m.subject_id`,[schoolId,yearId,meta.term_no,learnerId])).rows;
+    GROUP BY ay.year_label,ay.start_date,m.subject_id
+    ORDER BY ay.start_date DESC NULLS LAST,ay.year_label DESC,m.subject_id`,[schoolId,yearId,meta.term_no,learnerId])).rows;
   const priorBySubject=new Map();for(const r of priorRows){if(!priorBySubject.has(r.subject_id))priorBySubject.set(r.subject_id,[]);priorBySubject.get(r.subject_id).push(r);}
   subjects.forEach(s=>{const rr=currentRanks.get(s.subject_id);const priors=priorBySubject.get(s.subject_id)||[];s.subject_rank=rr?Number(rr.subject_rank):null;s.subject_rank_total=rr?Number(rr.subject_learner_count):null;s.previous_years=priors.map(r=>({year_label:r.year_label,average:Number(r.average)}));const immediate=priors[0];s.previous_year_average=immediate?Number(immediate.average):null;s.previous_year_deviation=(immediate&&s.average!=null)?Number(s.average)-Number(immediate.average):null;});
   const overall=avg(subjects.map(s=>s.average));

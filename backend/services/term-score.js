@@ -344,13 +344,13 @@ function computeRanks({
     );
     let rank = 0;
     let previous = null;
-    for (const item of items) {
+    items.forEach((item, index) => {
       if (previous === null || Math.abs(item.subject.average - previous) > 1e-8) {
-        rank += 1;
+        rank = index + 1;
         previous = item.subject.average;
       }
       item.rank = rank;
-    }
+    });
     for (const item of items) {
       item.row.subject_ranks = item.row.subject_ranks || {};
       item.row.subject_ranks[String(item.subject.subject_id)] = {
@@ -370,8 +370,16 @@ function computeRanks({
     }
     for (const partition of partitions.values()) {
       partition.sort((a, b) => compareDescending(a, b, row => row.overall_average));
+      // Tied averages share a position so printed ranks never contradict the
+      // identical averages shown beside them.
+      let rank = 0;
+      let previous = null;
       partition.forEach((row, index) => {
-        row[rankField] = index + 1;
+        if (previous === null || Math.abs(row.overall_average - previous) > 1e-8) {
+          rank = index + 1;
+          previous = row.overall_average;
+        }
+        row[rankField] = rank;
         row[totalField] = partition.length;
       });
     }

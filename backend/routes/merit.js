@@ -31,6 +31,17 @@ function setMeritCache(key,value){
 function clearMeritCache(){
  meritCache.clear();
 }
+// Merit lists expose whole-class results, so classroom staff must be linked to
+// the selected class: class teachers through their class assignment, subject
+// teachers through an active subject assignment for that class and year.
+async function enforceMeritClassAccess(req,sid,classId,yearId){
+ if(!['CLASS_TEACHER','TEACHER'].includes(req.user.role))return;
+ if(!classId)throw Object.assign(new Error('Select your assigned class.'),{status:400});
+ const classTeacher=(await db.query(`SELECT 1 FROM class_teacher_assignments a JOIN teachers th ON th.id=a.teacher_id AND th.school_id=a.school_id WHERE a.school_id=$1 AND a.class_id=$2 AND a.academic_year_id=$3 AND th.user_id=$4 AND COALESCE(th.is_active,true)=true LIMIT 1`,[sid,classId,yearId,req.user.user_id])).rows[0];
+ if(classTeacher)return;
+ const subjectTeacher=(await db.query(`SELECT 1 FROM teacher_subject_assignments tsa JOIN teachers th ON th.id=tsa.teacher_id AND th.school_id=tsa.school_id WHERE tsa.school_id=$1 AND tsa.class_id=$2 AND tsa.academic_year_id=$3 AND th.user_id=$4 AND COALESCE(tsa.is_active,true)=true AND COALESCE(th.is_active,true)=true LIMIT 1`,[sid,classId,yearId,req.user.user_id])).rows[0];
+ if(!subjectTeacher)throw Object.assign(new Error('You can only view merit for a class you are assigned to.'),{status:403});
+}
 function drawTextWatermark(doc,name,motto,cx,cy,width,opacity=.035){const title=String(name||'').trim();if(!title)return false;try{doc.save().opacity(opacity).fillColor('#334155').font('Helvetica-Bold').fontSize(34).text(title,cx-width/2,cy-20,{width,align:'center',lineBreak:false,ellipsis:true});if(motto)doc.font('Helvetica').fontSize(13).text(String(motto),cx-width/2,cy+22,{width,align:'center',lineBreak:false,ellipsis:true});doc.restore();return true;}catch{try{doc.restore();}catch{}return false;}}
 function fmt(v){const n=Number(v);return Number.isFinite(n)?(Math.abs(n-Math.round(n))<0.00001?String(Math.round(n)):n.toFixed(2).replace(/0+$/,'').replace(/\.$/,'')):'—';}
 function calc(values){const usable=values.filter(x=>Number.isFinite(x.percent));return usable.length?usable.reduce((s,x)=>s+x.percent,0)/usable.length:null;}
@@ -40,8 +51,8 @@ async function compute(sid,yearId,termId,classId=null,assessmentId=null){
  if(cached)return cached;
 
  await assertBelongs('academic_years',yearId,sid);await assertBelongs('terms',termId,sid);
- const termInfo=(await db.query(`SELECT term_no FROM terms WHERE id=$1 AND school_id=$2`,[termId,sid])).rows[0];
- if(!termInfo)throw Object.assign(new Error('Term not found'),{status:404});
+ const termInfo=(await db.query(`SELECT term_no FROM terms WHERE id=$1 AND school_id=$2 AND academic_year_id=$3`,[termId,sid,yearId])).rows[0];
+ if(!termInfo)throw Object.assign(new Error('Term not found for the selected academic year'),{status:404});
  const classMeta=classId?(await db.query(`SELECT id,name,stream,school_level_id FROM classes WHERE id=$1 AND school_id=$2`,[classId,sid])).rows[0]:null;
  if(classId&&!classMeta)throw Object.assign(new Error('Selected class was not found.'),{status:404});
  const meritLevelId=classMeta?.school_level_id||null;
@@ -206,12 +217,12 @@ if(rows.length){
  setMeritCache(cacheKey,result);
  return result;
 }
-router.get('/:schoolId',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER'),async(req,res)=>{try{const sid=req.params.schoolId,cls=req.query.class_id||null,y=req.query.academic_year_id||null,t=req.query.term_id||null,a=req.query.assessment_id||null;if(req.user.role==='CLASS_TEACHER'){if(!cls)return res.status(400).json({error:'Select your assigned class.'});const ok=(await db.query(`SELECT 1 FROM class_teacher_assignments a JOIN teachers th ON th.id=a.teacher_id WHERE a.school_id=$1 AND a.class_id=$2 AND a.academic_year_id=$3 AND th.user_id=$4 AND COALESCE(th.is_active,true)=true LIMIT 1`,[sid,cls,y,req.user.user_id])).rows[0];if(!ok)return res.status(403).json({error:'You can only view merit for your assigned class.'});}res.json(await compute(sid,y,t,cls,a));}catch(e){res.status(e.status||400).json({error:e.message});}});
+router.get('/:schoolId',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER'),async(req,res)=>{try{const sid=req.params.schoolId,cls=req.query.class_id||null,y=req.query.academic_year_id||null,t=req.query.term_id||null,a=req.query.assessment_id||null;await enforceMeritClassAccess(req,sid,cls,y);res.json(await compute(sid,y,t,cls,a));}catch(e){res.status(e.status||400).json({error:e.message});}});
 router.post('/:schoolId/runs',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER'),async(req,res)=>{try{const b=req.body,r=await compute(req.params.schoolId,b.academic_year_id,b.term_id,b.class_id||null,b.assessment_id||null);const q=await db.query(`INSERT INTO merit_runs(school_id,academic_year_id,term_id,basis,filters,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,[req.params.schoolId,b.academic_year_id,b.term_id,b.basis||'AVERAGE',JSON.stringify(b.filters||{}),req.user.user_id]);res.status(201).json({run:q.rows[0],...r});}catch(e){res.status(e.status||400).json({error:e.message});}});
 router.get('/:schoolId/pdf',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER'),async(req,res)=>{try{
  const sid=req.params.schoolId,yearId=req.query.academic_year_id,termId=req.query.term_id,classId=req.query.class_id||null,assessmentId=req.query.assessment_id||null;
  if(!classId)return res.status(400).json({error:'Select a class before generating the merit PDF.'});
- if(req.user.role==='CLASS_TEACHER'){const ok=(await db.query(`SELECT 1 FROM class_teacher_assignments a JOIN teachers th ON th.id=a.teacher_id WHERE a.school_id=$1 AND a.class_id=$2 AND a.academic_year_id=$3 AND th.user_id=$4 AND COALESCE(th.is_active,true)=true LIMIT 1`,[sid,classId,yearId,req.user.user_id])).rows[0];if(!ok)return res.status(403).json({error:'You can only download merit for your assigned class.'});}
+ await enforceMeritClassAccess(req,sid,classId,yearId);
  const r=await compute(sid,yearId,termId,classId,assessmentId);
  const meta=(await db.query(`SELECT s.name school_name,s.code school_code,si.logo_url,si.motto,si.address,si.contact_phone,si.contact_email,si.primary_color,si.secondary_color,si.watermark_enabled,
    (SELECT file_url FROM school_document_assets da WHERE da.school_id=s.id AND da.asset_type='STAMP' AND da.is_active=true ORDER BY da.effective_from DESC,da.created_at DESC LIMIT 1) stamp_url,
