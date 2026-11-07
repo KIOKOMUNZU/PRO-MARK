@@ -11,6 +11,12 @@ router.use(authenticate);
 const clean=v=>String(v??'').trim();
 const MANAGED_ROLES=['SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER'];
 const UNIQUE_ROLES=new Set(['SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER']);
+const ADMIN_ROLES=new Set(['SCHOOL_ADMIN','ADMIN']);
+async function hasOtherActiveAdmin(c,sid,excludeUserId){
+  const q=await c.query(`SELECT 1 FROM user_school_roles r JOIN users u ON u.id=r.user_id
+    WHERE r.school_id=$1 AND r.role IN ('SCHOOL_ADMIN','ADMIN') AND COALESCE(u.is_active,true)=true AND r.user_id<>$2 LIMIT 1`,[sid,excludeUserId]);
+  return Boolean(q.rows[0]);
+}
 
 // USER / ROLE CONTROL
 // School administrators can activate/deactivate accounts, enable/disable Mark Entry,
@@ -39,7 +45,26 @@ router.patch('/:schoolId/user-roles/:roleId',schoolBoundary,roles('SCHOOL_ADMIN'
       WHERE r.id=$1 AND r.school_id=$2`,[req.params.roleId,sid])).rows[0];
     if(!current)return res.status(404).json({error:'User role not found.'});
 
+    if(String(current.user_id)===String(req.user.user_id)){
+      if(typeof b.is_active==='boolean'&&b.is_active===false)
+        return res.status(400).json({error:'You cannot deactivate your own account. Ask another administrator.'});
+      if(b.role!==undefined&&String(b.role).toUpperCase()!==String(current.role).toUpperCase())
+        return res.status(400).json({error:'You cannot change your own role. Ask another administrator or the Platform Owner.'});
+    }
+
     await c.query('BEGIN');
+
+    const currentRole=String(current.role).toUpperCase();
+    const willDeactivate=typeof b.is_active==='boolean'&&b.is_active===false;
+    const nextRole=b.role!==undefined?String(b.role||'').toUpperCase():currentRole;
+    // A school must always keep at least one active administrator. Losing the
+    // last one locks every school administrator out of role and staff control.
+    if(ADMIN_ROLES.has(currentRole)&&(willDeactivate||!ADMIN_ROLES.has(nextRole))&&!(await hasOtherActiveAdmin(c,sid,current.user_id)))
+      throw Object.assign(new Error('This is the last active school administrator. Assign another administrator before changing or deactivating this account.'),{status:400});
+    if(willDeactivate){
+      const elsewhere=(await c.query('SELECT 1 FROM user_school_roles WHERE user_id=$1 AND school_id<>$2 LIMIT 1',[current.user_id,sid])).rows[0];
+      if(elsewhere)throw Object.assign(new Error('This account also belongs to another school or the platform. Deactivate it from the Platform Owner console so access is not removed from other schools accidentally.'),{status:400});
+    }
 
     if(typeof b.is_active==='boolean'){
       await c.query('UPDATE users SET is_active=$2 WHERE id=$1',[current.user_id,b.is_active]);
@@ -89,6 +114,8 @@ router.delete('/:schoolId/user-roles/:roleId',schoolBoundary,roles('SCHOOL_ADMIN
       WHERE r.id=$1 AND r.school_id=$2`,[req.params.roleId,sid])).rows[0];
     if(!r)return res.status(404).json({error:'User role not found.'});
     if(r.user_id===req.user.user_id) return res.status(400).json({error:'You cannot remove your own active school role. Another administrator must do this.'});
+    if(ADMIN_ROLES.has(String(r.role).toUpperCase())&&!(await hasOtherActiveAdmin(c,sid,r.user_id)))
+      return res.status(400).json({error:'This is the last active school administrator. Assign another administrator before removing this role.'});
     await c.query('BEGIN');
     await c.query('DELETE FROM user_school_roles WHERE id=$1 AND school_id=$2',[r.id,sid]);
     // Removing a school role does not delete the person, teacher profile, marks,
@@ -441,6 +468,16 @@ router.post('/:schoolId/teacher-accounts/link-requests/:requestId/confirm',
 router.patch('/:schoolId/learners/:learnerId/identifiers',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','CLASS_TEACHER','SENIOR_TEACHER'),async(req,res)=>{
  try{
   await assertBelongs('learners',req.params.learnerId,req.params.schoolId);
+  if(req.user.role==='CLASS_TEACHER'){
+   const allowed=(await db.query(`SELECT 1 FROM learners l
+     WHERE l.id=$1 AND l.school_id=$2 AND EXISTS (
+       SELECT 1 FROM class_teacher_assignments cta
+       JOIN teachers t ON t.id=cta.teacher_id AND t.school_id=cta.school_id
+       WHERE cta.school_id=l.school_id AND cta.class_id=l.class_id AND t.user_id=$3
+         AND cta.academic_year_id=(SELECT id FROM academic_years WHERE school_id=l.school_id ORDER BY year_label DESC LIMIT 1)
+     ) LIMIT 1`,[req.params.learnerId,req.params.schoolId,req.user.user_id])).rows[0];
+   if(!allowed)return res.status(403).json({error:'You can only edit admission and assessment numbers for learners in your assigned class.'});
+  }
   const q=await db.query(`UPDATE learners SET admission_no=$3,assessment_no=$4 WHERE id=$1 AND school_id=$2 RETURNING *`,[req.params.learnerId,req.params.schoolId,clean(req.body?.admission_no)||null,clean(req.body?.assessment_no)||null]);
   res.json(q.rows[0]);
  }catch(e){res.status(e.status||400).json({error:e.code==='23505'?'That admission number already exists in this school.':e.message});}
@@ -561,10 +598,20 @@ router.patch('/:schoolId/learners/:learnerId',schoolBoundary,roles('SCHOOL_ADMIN
       [sid,req.user.user_id,classId,yearId])).rows[0];
     if(!ok)return res.status(403).json({error:'You can only edit learners in your assigned class.'});
   }
-  const q=await db.query(`UPDATE learners SET admission_no=$3,assessment_no=$4,first_name=$5,middle_name=$6,last_name=$7,date_of_birth=$8,gender=$9,parent_phone=$10,class_id=$11,is_active=COALESCE($12,is_active)
+  // PATCH must not silently erase fields the caller did not send.
+  const firstName=b.first_name===undefined?current.first_name:clean(b.first_name);
+  const lastName=b.last_name===undefined?current.last_name:clean(b.last_name);
+  if(!clean(firstName)||!clean(lastName))return res.status(400).json({error:'Learner first name and last name are required.'});
+  const admissionNo=b.admission_no===undefined?current.admission_no:(clean(b.admission_no)||null);
+  const assessmentNo=b.assessment_no===undefined?current.assessment_no:(clean(b.assessment_no)||null);
+  const middleName=b.middle_name===undefined?current.middle_name:(clean(b.middle_name)||null);
+  const dob=b.date_of_birth===undefined?current.date_of_birth:(b.date_of_birth||null);
+  const gender=b.gender===undefined?current.gender:(clean(b.gender)||null);
+  const parentPhone=b.parent_phone===undefined?current.parent_phone:(clean(b.parent_phone)||null);
+  const active=b.is_active===undefined?null:(b.is_active===true||b.is_active==='true');
+  const q=await db.query(`UPDATE learners SET admission_no=$3,assessment_no=$4,first_name=$5,middle_name=$6,last_name=$7,date_of_birth=$8,gender=$9,parent_phone=$10,class_id=$11,is_active=COALESCE($12::boolean,is_active)
     WHERE id=$1 AND school_id=$2 RETURNING *`,
-    [learnerId,sid,clean(b.admission_no)||null,clean(b.assessment_no)||null,clean(b.first_name),clean(b.middle_name)||null,clean(b.last_name),
-     b.date_of_birth||null,clean(b.gender)||null,clean(b.parent_phone)||null,classId,b.is_active===undefined?null:Boolean(b.is_active)]);
+    [learnerId,sid,admissionNo,assessmentNo,firstName,middleName,lastName,dob,gender,parentPhone,classId,active]);
   if(!q.rows[0])return res.status(404).json({error:'Learner not found.'});
   if(b.academic_year_id&&classId){
     await db.query(`INSERT INTO learner_enrollments(school_id,learner_id,academic_year_id,class_id,status)
@@ -678,7 +725,21 @@ router.patch('/:schoolId/admission-applications/:id',schoolBoundary,admissionRol
  const q=await db.query(`UPDATE learner_admission_applications SET status=$3,payload=$4::jsonb,review_note=$5,updated_at=now() WHERE id=$1 AND school_id=$2 RETURNING id,status`,[req.params.id,sid,status,JSON.stringify(payload),clean(b.review_note)||current.review_note]);res.json(q.rows[0]);
  }catch(e){res.status(400).json({error:e.message});}
 });
-router.get('/:schoolId/learners',schoolBoundary,async(req,res)=>{try{let extra='';const params=[req.params.schoolId];if(req.user.role==='CLASS_TEACHER'){extra=` AND EXISTS (SELECT 1 FROM class_teacher_assignments cta JOIN teachers ct ON ct.id=cta.teacher_id WHERE cta.school_id=l.school_id AND cta.class_id=l.class_id AND ct.user_id=$2 AND cta.academic_year_id=(SELECT id FROM academic_years WHERE school_id=l.school_id ORDER BY year_label DESC LIMIT 1))`;params.push(req.user.user_id);}res.json((await db.query(`SELECT l.*,cl.name class_name,cl.stream,lv.name level_name,ss.name section_name FROM learners l LEFT JOIN classes cl ON cl.id=l.class_id LEFT JOIN school_levels lv ON lv.id=cl.school_level_id LEFT JOIN school_sections ss ON ss.id=lv.school_section_id WHERE l.school_id=$1${extra} ORDER BY l.last_name,l.first_name`,params)).rows)}catch(e){res.status(500).json({error:'Unable to load learners'});}});
+router.get('/:schoolId/learners',schoolBoundary,async(req,res)=>{
+ try{
+  const role=String(req.user.role||'').toUpperCase();
+  let extra='';
+  const params=[req.params.schoolId];
+  if(role==='CLASS_TEACHER'||role==='TEACHER'){
+   params.push(req.user.user_id);
+   const latestYear=`(SELECT id FROM academic_years WHERE school_id=l.school_id ORDER BY year_label DESC LIMIT 1)`;
+   const classTeacher=`EXISTS (SELECT 1 FROM class_teacher_assignments cta JOIN teachers ct ON ct.id=cta.teacher_id AND ct.school_id=cta.school_id WHERE cta.school_id=l.school_id AND cta.class_id=l.class_id AND ct.user_id=$2 AND cta.academic_year_id=${latestYear})`;
+   const subjectTeacher=`EXISTS (SELECT 1 FROM teacher_subject_assignments tsa JOIN teachers tt ON tt.id=tsa.teacher_id AND tt.school_id=tsa.school_id WHERE tsa.school_id=l.school_id AND tsa.class_id=l.class_id AND tt.user_id=$2 AND tsa.academic_year_id=${latestYear} AND COALESCE(tsa.is_active,true)=true)`;
+   extra=role==='CLASS_TEACHER'?` AND ${classTeacher}`:` AND (${classTeacher} OR ${subjectTeacher})`;
+  }
+  res.json((await db.query(`SELECT l.*,cl.name class_name,cl.stream,lv.name level_name,ss.name section_name FROM learners l LEFT JOIN classes cl ON cl.id=l.class_id LEFT JOIN school_levels lv ON lv.id=cl.school_level_id LEFT JOIN school_sections ss ON ss.id=lv.school_section_id WHERE l.school_id=$1${extra} ORDER BY l.last_name,l.first_name`,params)).rows);
+ }catch(e){res.status(500).json({error:'Unable to load learners'});}
+});
 router.post('/:schoolId/learners',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','CLASS_TEACHER','SENIOR_TEACHER'),async(req,res)=>{const b=req.body,sid=req.params.schoolId,c=await db.pool.connect();try{if(!clean(b.first_name)||!clean(b.last_name))return res.status(400).json({error:'First name and last name are required'});if(b.class_id)await assertBelongs('classes',b.class_id,sid);if(req.user.role==='CLASS_TEACHER'){if(!b.class_id)return res.status(400).json({error:'Class Teacher must select the assigned class.'});const ok=(await db.query(`SELECT 1 FROM class_teacher_assignments a JOIN teachers t ON t.id=a.teacher_id WHERE a.school_id=$1 AND t.user_id=$2 AND a.class_id=$3 AND a.academic_year_id=$4 AND (a.term_id=$5 OR a.term_id IS NULL) LIMIT 1`,[sid,req.user.user_id,b.class_id,b.academic_year_id,b.term_id||null])).rows[0];if(!ok)return res.status(403).json({error:'You can only add learners to a class assigned to you as Class Teacher.'});}if(b.academic_year_id)await assertBelongs('academic_years',b.academic_year_id,sid);
 if(b.admission_workflow==='CONFIRMED'&&(!b.academic_year_id||!b.class_id))return res.status(400).json({error:'Academic year and class are required for admission.'});
 if(b.admission_no||b.assessment_no){const dup=await c.query(`SELECT id,admission_no,assessment_no,first_name,last_name FROM learners WHERE school_id=$1 AND ((NULLIF(trim($2::text),'') IS NOT NULL AND lower(trim(admission_no))=lower(trim($2::text))) OR (NULLIF(trim($3::text),'') IS NOT NULL AND lower(trim(assessment_no))=lower(trim($3::text)))) LIMIT 1`,[sid,b.admission_no||'',b.assessment_no||'']);if(dup.rows.length)return res.status(409).json({error:'An existing learner has this admission or assessment number. Search Learner Enrollment & Promotion before registering.',existing_learner_id:dup.rows[0].id});}

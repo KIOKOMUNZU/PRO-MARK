@@ -11,6 +11,54 @@ async function tableColumns(table){
   return new Set(q.rows.map(r=>r.column_name));
 }
 
+// Password fingerprint carried inside the token. When the stored hash changes
+// (self-service change, administrator reset, recovery email) every older token
+// is rejected immediately by the authenticate middleware.
+function passwordFingerprint(hash){
+  return crypto.createHash('sha256').update(String(hash||'')).digest('hex').slice(0,16);
+}
+
+// Brute-force protection. Failures are tracked per email+IP so a school cannot
+// be locked out by an attacker working from a different network.
+const LOGIN_MAX_FAILURES=10;
+const LOGIN_WINDOW_MS=15*60*1000;
+const LOGIN_LOCK_MS=15*60*1000;
+const loginFailures=new Map();
+function loginKey(req,email){
+  const ip=String(req.headers['x-forwarded-for']||'').split(',')[0].trim()||req.ip||'unknown';
+  return `${ip}|${email}`;
+}
+function loginLockMinutes(key){
+  const r=loginFailures.get(key);
+  if(!r)return 0;
+  const now=Date.now();
+  if(r.blockedUntil&&r.blockedUntil>now)return Math.ceil((r.blockedUntil-now)/60000);
+  if(now-r.first>LOGIN_WINDOW_MS)loginFailures.delete(key);
+  return 0;
+}
+function recordLoginFailure(key){
+  const now=Date.now();
+  let r=loginFailures.get(key);
+  if(!r||now-r.first>LOGIN_WINDOW_MS){r={count:0,first:now,blockedUntil:0};loginFailures.set(key,r);}
+  r.count+=1;
+  if(r.count>=LOGIN_MAX_FAILURES)r.blockedUntil=now+LOGIN_LOCK_MS;
+  if(loginFailures.size>20000){
+    for(const [k,v] of loginFailures)if(now-v.first>LOGIN_WINDOW_MS)loginFailures.delete(k);
+  }
+}
+
+// Recovery-email abuse protection: five requests per address per 15 minutes.
+const resetRequests=new Map();
+const RESET_WINDOW_MS=15*60*1000;
+const RESET_MAX=5;
+function resetRequestBlocked(email){
+  const now=Date.now(),r=resetRequests.get(email);
+  if(!r){resetRequests.set(email,{count:1,first:now});return false;}
+  if(now-r.first>RESET_WINDOW_MS){resetRequests.set(email,{count:1,first:now});return false;}
+  r.count+=1;
+  return r.count>RESET_MAX;
+}
+
 router.post('/login',async(req,res)=>{
   try{
     const email=String(req.body.email||'').trim().toLowerCase();
@@ -18,6 +66,9 @@ router.post('/login',async(req,res)=>{
     const requestedRole=String(req.body.role||'').trim().toUpperCase();
     const requestedSchoolId=String(req.body.school_id||'').trim();
     if(!email||!password)return res.status(400).json({error:'Email and password are required'});
+    const failKey=loginKey(req,email);
+    const lockedFor=loginLockMinutes(failKey);
+    if(lockedFor)return res.status(429).json({error:`Too many failed sign-in attempts for this account from this device. Try again in ${lockedFor} minute${lockedFor===1?'':'s'}.`});
 
     // IMPORTANT: existing ZELIMU CBC installations are not all on the same schema.
     // Login must therefore discover optional columns/tables instead of assuming
@@ -29,10 +80,10 @@ router.post('/login',async(req,res)=>{
     }
 
     const uq=await db.query(`SELECT id,email,password_hash,${usersCols.has('first_name')?'first_name':'NULL::text AS first_name'},${usersCols.has('last_name')?'last_name':'NULL::text AS last_name'},${usersCols.has('is_active')?'is_active':'true AS is_active'} FROM users WHERE LOWER(email)=$1 LIMIT 1`,[email]);
-    if(!uq.rows.length)return res.status(401).json({error:'Invalid email or password'});
+    if(!uq.rows.length){recordLoginFailure(failKey);return res.status(401).json({error:'Invalid email or password'});}
     const base=uq.rows[0];
     if(base.is_active===false)return res.status(403).json({error:'This account is inactive.'});
-    if(!base.password_hash || !(await bcrypt.compare(password,base.password_hash)))return res.status(401).json({error:'Invalid email or password'});
+    if(!base.password_hash || !(await bcrypt.compare(password,base.password_hash))){recordLoginFailure(failKey);return res.status(401).json({error:'Invalid email or password'});}
 
     const roleRows=[];
     const roleCols=await tableColumns('user_school_roles');
@@ -95,7 +146,8 @@ router.post('/login',async(req,res)=>{
       role:chosen.role,school_id:chosen.school_id||null,school_name:chosen.school_name||null,
       mark_entry_enabled:chosen.mark_entry_enabled!==false
     };
-    const token=jwt.sign({user_id:base.id,email:base.email,role:chosen.role,school_id:chosen.school_id||null},process.env.JWT_SECRET,{expiresIn:'8h'});
+    loginFailures.delete(failKey);
+    const token=jwt.sign({user_id:base.id,email:base.email,role:chosen.role,school_id:chosen.school_id||null,pv:passwordFingerprint(base.password_hash)},process.env.JWT_SECRET,{expiresIn:'8h'});
     return res.json({token,user});
   }catch(e){
     console.error('LOGIN ERROR:',e && e.stack ? e.stack : e);
@@ -119,6 +171,7 @@ router.post('/forgot-password',async(req,res)=>{
     // Generic response prevents account enumeration.
     const generic={ok:true,message:'If an account exists for that email, password-reset instructions will be sent.'};
     if(!email||email.length>254||!/^\S+@\S+\.\S+$/.test(email))return res.json(generic);
+    if(resetRequestBlocked(email))return res.status(429).json({error:'Too many password-reset requests for this email. Please try again in 15 minutes.'});
     const configured=Boolean(process.env.RESEND_API_KEY&&process.env.PASSWORD_RESET_FROM&&process.env.APP_BASE_URL);
     if(!configured)return res.status(503).json({error:'Self-service password reset is not configured yet. Please contact your school administrator.'});
     const uq=await db.query('SELECT id,email FROM users WHERE LOWER(email)=$1 LIMIT 1',[email]);
@@ -161,7 +214,10 @@ router.post('/change-password',authenticate,async(req,res)=>{
     if(!current || !(await bcrypt.compare(current,q.rows[0].password_hash)))return res.status(401).json({error:'Current password is incorrect.'});
     const hash=await bcrypt.hash(next,12);
     await db.query('UPDATE users SET password_hash=$2,updated_at=now() WHERE id=$1',[req.user.user_id,hash]);
-    res.json({ok:true,message:'Password changed successfully.'});
+    // Every other session is invalidated by the password fingerprint. Issue a
+    // fresh token so the person who made the change stays signed in.
+    const token=jwt.sign({user_id:req.user.user_id,email:req.user.email,role:req.user.role,school_id:req.user.school_id||null,pv:passwordFingerprint(hash)},process.env.JWT_SECRET,{expiresIn:'8h'});
+    res.json({ok:true,token,message:'Password changed successfully. All other sessions have been signed out.'});
   }catch(e){console.error('CHANGE PASSWORD ERROR:',e);res.status(500).json({error:'Unable to change password.'});}
 });
 

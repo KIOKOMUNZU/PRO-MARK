@@ -347,19 +347,30 @@ router.post('/schools/import/commit',async(req,res)=>{
 });
 router.get('/schools/import/jobs/:jobId',async(req,res)=>{const j=importJobs.get(req.params.jobId);if(!j)return res.status(404).json({error:'Import job was not found. It may have completed before this server restart; check Registered schools.'});res.json(j);if(['COMPLETED','FAILED'].includes(j.status)){setTimeout(()=>importJobs.delete(j.id),10*60*1000);}});
 router.get("/templates",async(req,res)=>{try{const q=await db.query(`SELECT t.id,t.code,t.name,t.description,COALESCE(json_agg(json_build_object('code',s.code,'name',s.name,'levels',(SELECT COALESCE(json_agg(json_build_object('code',l.code,'name',l.name) ORDER BY l.sort_order),'[]') FROM template_levels l WHERE l.template_section_id=s.id)) ORDER BY s.sort_order) FILTER(WHERE s.id IS NOT NULL),'[]') sections FROM school_templates t LEFT JOIN template_sections s ON s.template_id=t.id GROUP BY t.id ORDER BY t.code`);res.json(q.rows);}catch(e){console.error('Platform templates failed:',e);res.status(500).json({error:'Unable to load school templates.'});}});
-router.get("/templates",async(req,res)=>{const q=await db.query(`SELECT t.id,t.code,t.name,t.description,COALESCE(json_agg(json_build_object('code',s.code,'name',s.name,'levels',(SELECT COALESCE(json_agg(json_build_object('code',l.code,'name',l.name) ORDER BY l.sort_order),'[]') FROM template_levels l WHERE l.template_section_id=s.id)) ORDER BY s.sort_order) FILTER(WHERE s.id IS NOT NULL),'[]') sections FROM school_templates t LEFT JOIN template_sections s ON s.template_id=t.id GROUP BY t.id ORDER BY t.code`);res.json(q.rows);});
 router.get("/schools",async(req,res)=>{const q=await db.query(`SELECT s.id,s.code,s.name,s.status,t.code template_code,s.created_at,u.email admin_email FROM schools s JOIN school_templates t ON t.id=s.template_id LEFT JOIN LATERAL (SELECT u.email FROM users u JOIN user_school_roles r ON r.user_id=u.id WHERE r.school_id=s.id AND r.role='SCHOOL_ADMIN' ORDER BY r.created_at LIMIT 1) u ON true ORDER BY s.created_at DESC`);res.json(q.rows);});
 router.post("/schools",async(req,res)=>{const c=await db.pool.connect();try{const b=req.body;if(!b.code||!b.name||!b.template_code||!b.admin_email||String(b.admin_password||"").length<10)return res.status(400).json({error:"School code, name, template and admin credentials are required"});await c.query("BEGIN");const existingUser=(await c.query(`SELECT u.id,r.role,r.school_id FROM users u JOIN user_school_roles r ON r.user_id=u.id WHERE LOWER(u.email)=LOWER($1) LIMIT 10`,[b.admin_email.trim()])).rows;if(existingUser.some(x=>x.role==='PLATFORM_OWNER'))throw Object.assign(new Error('Platform Owner email cannot be used as a school admin email. Use a separate school-admin email.'),{status:409});if(existingUser.length)throw Object.assign(new Error('That email is already attached to a ZELIMU CBC account. Use a unique school-admin email.'),{status:409});const t=(await c.query("SELECT id FROM school_templates WHERE code=$1 AND is_system=true",[b.template_code])).rows[0];if(!t)throw Error("Invalid master template");const s=(await c.query(`INSERT INTO schools(code,name,template_id) VALUES($1,$2,$3) RETURNING id,code,name,status`,[b.code.trim().toUpperCase(),b.name.trim(),t.id])).rows[0];await c.query(`INSERT INTO school_identity(school_id,motto) VALUES($1,'')`,[s.id]);await c.query(`INSERT INTO school_sections(school_id,template_section_id,code,name,sort_order) SELECT $1,id,code,name,sort_order FROM template_sections WHERE template_id=$2`,[s.id,t.id]);await c.query(`INSERT INTO school_levels(school_section_id,template_level_id,code,name,sort_order) SELECT ss.id,tl.id,tl.code,tl.name,tl.sort_order FROM school_sections ss JOIN template_levels tl ON tl.template_section_id=ss.template_section_id WHERE ss.school_id=$1`,[s.id]);const hash=await bcrypt.hash(b.admin_password,12);const u=(await c.query(`INSERT INTO users(email,password_hash,first_name,last_name) VALUES($1,$2,$3,$4) ON CONFLICT(email) DO UPDATE SET password_hash=EXCLUDED.password_hash,is_active=true RETURNING id`,[b.admin_email.trim().toLowerCase(),hash,b.admin_first_name||"",b.admin_last_name||""])).rows[0];await c.query(`INSERT INTO user_school_roles(user_id,school_id,role) VALUES($1,$2,'SCHOOL_ADMIN') ON CONFLICT DO NOTHING`,[u.id,s.id]);await c.query(`INSERT INTO report_templates(school_id,section_code,name,template_type,primary_color,secondary_color,config) SELECT $1,code,CASE WHEN code='JUNIOR' THEN 'Junior Report' WHEN code='SENIOR' THEN 'Senior Report' ELSE 'Transitional Report' END,CASE WHEN code='JUNIOR' THEN 'JUNIOR_A4' WHEN code='SENIOR' THEN 'SENIOR_A4' ELSE 'TRANSITIONAL_A4' END,$2,$3,'{}'::jsonb FROM school_sections WHERE school_id=$1`,[s.id,'#17365D','#D9A441']);const defaultPlan=(await c.query(`SELECT * FROM billing_plans WHERE code='ANNUAL_STANDARD' AND is_active=true LIMIT 1`)).rows[0];if(defaultPlan){const start=new Date().toISOString().slice(0,10);const due=new Date(Date.UTC(new Date().getUTCFullYear()+1,new Date().getUTCMonth(),new Date().getUTCDate())).toISOString().slice(0,10);await c.query(`INSERT INTO school_subscriptions(school_id,plan_id,plan_name_snapshot,amount,currency,billing_cycle,starts_on,next_due_on,grace_days,status,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'ACTIVE','Auto-created during school creation') ON CONFLICT DO NOTHING`,[s.id,defaultPlan.id,defaultPlan.name,defaultPlan.amount,defaultPlan.currency,defaultPlan.billing_cycle,start,due,defaultPlan.grace_days]);}await c.query("COMMIT");res.status(201).json({school:s});}catch(e){await c.query("ROLLBACK");res.status(400).json({error:e.message});}finally{c.release();}});
 router.patch("/schools/:schoolId/status",async(req,res)=>{const status=String(req.body.status||"").toUpperCase();if(!["ACTIVE","SUSPENDED","ARCHIVED"].includes(status))return res.status(400).json({error:"Invalid status"});const q=await db.query(`UPDATE schools SET status=$2,updated_at=now() WHERE id=$1 RETURNING id,code,name,status`,[req.params.schoolId,status]);if(!q.rows[0])return res.status(404).json({error:"School not found"});res.json(q.rows[0]);});
-// Permanent school deletion is deliberately restricted to schools with no operational data.
+// Permanent school deletion. The caller must echo the school code so a stray
+// click can never wipe a live school, and platform audit records are preserved.
 router.delete('/schools/:schoolId',async(req,res)=>{
   const sid=req.params.schoolId;
+  const confirmCode=String(req.body?.confirm_code||req.query?.confirm_code||'').trim().toUpperCase();
   let c;
   try{
     c=await db.pool.connect();
     await c.query('BEGIN');
     const s=(await c.query('SELECT id,code,name,status FROM schools WHERE id=$1',[sid])).rows[0];
     if(!s){await c.query('ROLLBACK');return res.status(404).json({error:'School not found'});}
+    if(!confirmCode||confirmCode!==String(s.code||'').toUpperCase()){
+      await c.query('ROLLBACK');
+      return res.status(400).json({error:`Type the school code ${s.code} to confirm permanent deletion.`});
+    }
+
+    // Accounts whose only role belongs to this school are deactivated (never
+    // deleted) so an orphaned login cannot be left behind. Audit history is
+    // detached from the school but kept for the platform owner.
+    const affected=(await c.query('SELECT DISTINCT user_id FROM user_school_roles WHERE school_id=$1',[sid])).rows.map(r=>r.user_id);
+    await c.query('UPDATE audit_log SET school_id=NULL WHERE school_id=$1',[sid]).catch(e=>{if(e.code!=='42P01')throw e;});
 
     // This is a true permanent delete. It is deliberately explicit and
     // transactional so it cannot leave a half-deleted school behind.
@@ -369,15 +380,18 @@ router.delete('/schools/:schoolId',async(req,res)=>{
       'marks','report_comments','report_pathway_guidance','report_document_snapshots','learner_movement_events',
       'learner_enrollments','communication_messages','class_teacher_assignments',
       'teacher_subject_assignments','assessment_configurations','assessments','merit_runs',
-      'report_templates','grading_systems','audit_log','billing_payments','billing_notifications',
+      'report_templates','grading_systems','billing_payments','billing_notifications',
       'billing_invoices','school_subscriptions','mark_entry_policies','portal_announcements',
-      'school_announcements','school_document_assets','migration_runs','parent_guardians',
-      'terms','academic_years','learners','teachers','classes','subjects','school_levels',
-      'school_sections','school_identity','user_school_roles'
+      'school_announcements','school_document_assets','migration_runs','teacher_account_link_requests',
+      'parent_guardians','terms','academic_years','learners','teachers','classes','subjects',
+      'school_levels','school_sections','school_identity','user_school_roles'
     ];
     for(const table of ordered){
       const exists=(await c.query(`SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 AND column_name='school_id' LIMIT 1`,[table])).rows[0];
       if(exists)await c.query(`DELETE FROM ${table} WHERE school_id=$1`,[sid]);
+    }
+    if(affected.length){
+      await c.query(`UPDATE users u SET is_active=false,updated_at=now() WHERE u.id=ANY($1::uuid[]) AND u.is_active=true AND NOT EXISTS(SELECT 1 FROM user_school_roles r WHERE r.user_id=u.id)`,[affected]);
     }
     await c.query('DELETE FROM schools WHERE id=$1',[sid]);
     await c.query('COMMIT');

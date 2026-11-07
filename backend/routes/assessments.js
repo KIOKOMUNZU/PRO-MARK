@@ -410,8 +410,8 @@ router.post('/:schoolId/:yearId/:termId',schoolBoundary,roles('SCHOOL_ADMIN','AD
     const sid=req.params.schoolId,yearId=req.params.yearId,termId=req.params.termId;
     await assertBelongs('academic_years',yearId,sid);
     await assertBelongs('terms',termId,sid);
-    const term=(await db.query(`SELECT term_no FROM terms WHERE id=$1 AND school_id=$2`,[termId,sid])).rows[0];
-    if(!term)return res.status(404).json({error:'Term not found.'});
+    const term=(await db.query(`SELECT term_no FROM terms WHERE id=$1 AND school_id=$2 AND academic_year_id=$3`,[termId,sid,yearId])).rows[0];
+    if(!term)return res.status(404).json({error:'Term not found for this academic year.'});
 
     let type=String(b.assessment_type||'CUSTOM').trim().toUpperCase();
     const aliases={'MID TERM':'MID_TERM','MID-TERM':'MID_TERM','END TERM':'END_TERM','END-TERM':'END_TERM'};
