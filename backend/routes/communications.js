@@ -666,6 +666,33 @@ router.post('/:schoolId/result-publications/:publicationId/notifications',school
  }
 });
 router.post('/:schoolId/publish-grade-results',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{try{const sid=req.params.schoolId,b=req.body||{};if(!b.academic_year_id||!b.term_id||!b.level_id)return res.status(400).json({error:'Academic year, term and grade are required'});const learners=(await db.query(`SELECT DISTINCT l.id,l.first_name,l.middle_name,l.last_name FROM learner_enrollments e JOIN learners l ON l.id=e.learner_id JOIN classes c ON c.id=e.class_id WHERE e.school_id=$1 AND e.academic_year_id=$2 AND c.school_level_id=$3 AND COALESCE(e.status,'ACTIVE')='ACTIVE'`,[sid,b.academic_year_id,b.level_id])).rows;let queued=0,skipped=0,failed=0;for(const l of learners){const report=await buildTermReport(sid,l.id,b.academic_year_id,b.term_id);if(!report){skipped++;continue}const guardians=(await db.query(`SELECT pg.id,pg.phone FROM parent_guardians pg JOIN learner_guardians lg ON lg.parent_guardian_id=pg.id WHERE pg.school_id=$1 AND lg.learner_id=$2 AND pg.is_active AND pg.sms_enabled AND pg.communication_consent AND COALESCE(trim(pg.phone),'')<>''`,[sid,l.id])).rows;if(!guardians.length){skipped++;continue}const subjectSummary=(report.subjects||[]).map(x=>`${x.subject_code||x.subject_name}:${x.average==null?'—':Number(x.average).toFixed(1)}${x.grade?'/'+x.grade:''}`).join(', ');const body=String(b.message_template||`${report.school_name}: ${report.learner_name} ${report.term_name||'term'} results. Average ${report.overall_average==null?'—':Number(report.overall_average).toFixed(2)}, grade ${report.overall_grade||'—'}. Marks: ${subjectSummary||'See portal for full report.'}`).replaceAll('{learner}',report.learner_name).replaceAll('{average}',report.overall_average==null?'—':Number(report.overall_average).toFixed(2)).replaceAll('{grade}',report.overall_grade||'—').replaceAll('{marks}',subjectSummary);for(const g of guardians){let status='QUEUED',provider=process.env.SMS_PROVIDER||'UNCONFIGURED',reason=null;try{const d=await deliverSms({phone:g.phone,message:body,school_id:sid,learner_id:l.id});status=d.status;provider=d.provider;}catch(e){reason=e.message;status='FAILED';failed++;}await db.query(`INSERT INTO communication_messages(school_id,learner_id,parent_guardian_id,channel,message_type,body,status,provider,failure_reason,created_by,sent_at) VALUES($1,$2,$3,'SMS','PUBLISHED_RESULTS',$4,$5,$6,$7,$8,CASE WHEN $5='SENT' THEN now() ELSE NULL END)`,[sid,l.id,g.id,body,status,provider,reason,req.user.user_id]);if(status==='SENT'||status==='QUEUED')queued++;}}res.status(201).json({learners:learners.length,queued,skipped,failed,message:(String(process.env.SMS_PROVIDER||'').toUpperCase()==='TOPMEDIA'&&process.env.SMS_TOPMEDIA_API_KEY)?'Results sent through TopMediaSMS.':(String(process.env.SMS_PROVIDER||'').toUpperCase()==='AFRICASTALKING'&&process.env.SMS_AFRICA_TALKING_API_KEY)?"Results sent through Africa's Talking SMS.":(process.env.SMS_WEBHOOK_URL?'Results sent through the configured SMS webhook.':'Results queued safely; configure an SMS provider for live delivery.')});}catch(e){res.status(400).json({error:e.message})}});
+router.get('/:schoolId/publication-class-overview',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{
+ try{
+  const sid=req.params.schoolId,yearId=String(req.query.academic_year_id||''),termId=String(req.query.term_id||'');
+  await ensureResultsCentreSchema();
+  await validatePublicationScope(sid,yearId,termId,[],[]);
+  const q=await db.query(`
+   SELECT c.id class_id,c.name class_name,c.stream,lv.name level_name,
+    COUNT(DISTINCT l.id)::int learners,
+    COUNT(DISTINCT m.learner_id)::int learners_with_results,
+    COUNT(DISTINCT a.id)::int assessments_used,
+    COUNT(DISTINCT pgr.learner_id)::int results_published,
+    COUNT(DISTINCT pg.id)::int eligible_parents
+   FROM classes c
+   LEFT JOIN school_levels lv ON lv.id=c.school_level_id
+   LEFT JOIN learner_enrollments e ON e.class_id=c.id AND e.school_id=c.school_id AND e.academic_year_id=$2 AND COALESCE(e.status,'ACTIVE') IN ('ACTIVE','COMPLETED')
+   LEFT JOIN learners l ON l.id=e.learner_id AND l.school_id=c.school_id AND COALESCE(l.is_active,true)=true
+   LEFT JOIN marks m ON m.learner_id=e.learner_id AND m.school_id=c.school_id AND m.academic_year_id=e.academic_year_id AND m.term_id=$3 AND m.mark IS NOT NULL
+   LEFT JOIN assessments a ON a.id=m.assessment_id AND a.school_id=c.school_id
+   LEFT JOIN result_publication_records pgr ON pgr.learner_id=e.learner_id AND pgr.school_id=c.school_id AND pgr.academic_year_id=e.academic_year_id AND pgr.term_id=$3
+   LEFT JOIN learner_guardians lg ON lg.learner_id=e.learner_id
+   LEFT JOIN parent_guardians pg ON pg.id=lg.parent_guardian_id AND pg.school_id=c.school_id AND COALESCE(pg.is_active,false)=true AND COALESCE(pg.sms_enabled,false)=true AND COALESCE(pg.communication_consent,false)=true AND COALESCE(trim(pg.phone),'')<>''
+   WHERE c.school_id=$1 AND COALESCE(c.is_active,true)=true
+   GROUP BY c.id,lv.id,lv.name,lv.sort_order
+   ORDER BY lv.sort_order,c.name,c.stream`,[sid,yearId,termId]);
+  res.json({academic_year_id:yearId,term_id:termId,classes:q.rows});
+ }catch(e){res.status(e.status||400).json({error:e.message})}
+});
 // Subject-level descriptive analytics. Official merit and report calculations remain separate.
 router.get('/:schoolId/analytics/subjects',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER'),async(req,res)=>{
  let stage='authorization';
