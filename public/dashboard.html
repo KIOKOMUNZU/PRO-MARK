@@ -417,23 +417,7 @@ body, main, .main-content, .dashboard-main {
 <div class="bulk-mark-wrap"><table class="bulk-mark-table"><thead><tr><th>No.</th><th>Learner</th><th>Admission No.</th><th>Mark</th><th>Status</th></tr></thead><tbody id="bulkMarkRows"><tr><td colspan="5">Choose an assessment, class and subject to load learners.</td></tr></tbody></table></div>
 </section>
 <div class="grid three zelimu-legacy-stats"><div class="stat card"><span class="muted">Learners</span><b id="learnerCount">—</b></div><div class="stat card"><span class="muted">Teachers</span><b id="teacherCount">—</b></div><div class="stat card"><span class="muted">School template</span><b id="template">—</b></div></div>
-<section class="zelimu-command zelimu-command-v1" aria-label="School Command Centre">
-  <div class="zelimu-command-top"><span class="zelimu-kicker">● LIVE SCHOOL OPERATIONS</span><h2>School Command Centre</h2><p>School-wide operations, insights and departmental workspaces</p></div>
-  <div class="zelimu-command-grid zelimu-shortcuts">
-   <button type="button" data-target="pm24_4"><span class="zcc-icon">🎓</span><strong>Learners</strong><small><span id="zccLearners">—</span> enrolled · Open management</small></button>
-   <button type="button" data-target="pm24_3"><span class="zcc-icon">👩‍🏫</span><strong>Staff</strong><small><span id="zccTeachers">—</span> teachers · Staff &amp; assignments</small></button>
-   <button type="button" data-target="pm24_13"><span class="zcc-icon">🕘</span><strong>Attendance</strong><small>Daily class registers</small></button>
-   <button type="button" data-target="pm24_28"><span class="zcc-icon">💳</span><strong>School Finance</strong><small>Fees, receipts &amp; balances</small></button>
-   <button type="button" data-target="pm24_7"><span class="zcc-icon">📝</span><strong>Assessments</strong><small>Assessment management</small></button>
-   <button type="button" data-target="pm24_17"><span class="zcc-icon">🔐</span><strong>Exam Control</strong><small>Review exam workflow</small></button>
-  </div>
-  <div class="zelimu-command-panels">
-   <div class="zcc-panel"><h3>📈 Academic Performance &amp; Analytics</h3><p>Open academic reports for class comparisons, learner progress and assessment trends.</p><button type="button" class="zcc-action" data-target="pm24_10">Open Academic Reports →</button></div>
-   <div class="zcc-panel"><h3>📅 School Calendar &amp; Timetable</h3><p>Access school schedules, timetables and daily activities.</p><button type="button" class="zcc-action" data-target="pm24_19">Open Timetable →</button></div>
-   <div class="zcc-panel"><h3>📋 Pending School Work</h3><p>Continue learner admissions, mark entry and school reports from your existing workspaces.</p><button type="button" class="zcc-action" data-target="pm24_8">Open Mark Entry →</button></div>
-   <div class="zcc-panel"><h3>💰 Fee Collection Overview</h3><p>Open the finance workspace for verified collections, balances and receipts.</p><button type="button" class="zcc-action" data-target="pm24_28">Open Finance →</button></div>
-  </div>
-</section>
+<section class="zelimu-command zelimu-command-v1" aria-label="School Command Centre"><div class="notice" role="status">Loading school command centre…</div></section>
  <section class="card admin-menu-shell pm-workflow-intro">
  <div class="section-title"><div><h2>School Management Workspaces</h2><p class="muted small">Choose a department or search for a module. Your existing workspaces and permissions are preserved.</p></div><span class="pill">School administration · academics · operations</span></div>
  <div class="zelimu-module-toolbar"><label for="zelimuModuleSearch">Find a module</label><input id="zelimuModuleSearch" type="search" placeholder="Search learners, marks, reports, finance…" autocomplete="off"><button type="button" id="zelimuClearSearch" class="btn secondary">Clear</button><span id="zelimuModuleCount" role="status" aria-live="polite"></span></div>
@@ -2655,7 +2639,7 @@ wireAllCore();load().catch(e=>{console.error('Dashboard load error:',e);document
  filter();
 })();
 </script>
-<script id="zelimu-quick-access">document.querySelectorAll('.zelimu-shortcuts button[data-target]').forEach(button=>button.addEventListener('click',()=>{const target=button.getAttribute('data-target');const original=document.querySelector('#navTabs button[data-target="'+target+'"]');if(original){original.click();document.getElementById('pm24_workspace')?.scrollIntoView({behavior:'smooth',block:'start'});}}));</script>
+
 <script id="zelimu-workspace-mount-fix">
 (function(){
  const main=document.querySelector('main.page')||document.querySelector('main');
@@ -2730,7 +2714,7 @@ $('leavingCertificateForm')?.addEventListener('submit',async e=>{e.preventDefaul
 document.querySelectorAll('#navTabs button[data-target="feeStructurePrint"],#navTabs button[data-target="leavingCertificates"]').forEach(b=>b.addEventListener('click',()=>{if(b.dataset.target==='feeStructurePrint')fees();else certificates()}));
 })();
 </script>
-<script id="zelimu-command-counter-sync">(function(){function sync(){for(const pair of [['learnerCount','zccLearners'],['teacherCount','zccTeachers']]){const from=document.getElementById(pair[0]),to=document.getElementById(pair[1]);if(from&&to&&to.textContent!==from.textContent)to.textContent=from.textContent;}}document.addEventListener('DOMContentLoaded',function(){sync();for(const id of ['learnerCount','teacherCount']){const node=document.getElementById(id);if(node)new MutationObserver(sync).observe(node,{childList:true,characterData:true,subtree:true});}});})();</script>
+
 <script defer src="/js/zelimu-sidebar-clean-v5.js?v=1"></script>
 
 
