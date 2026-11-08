@@ -95,12 +95,50 @@
 
   function gradeClass(label) {
     var key = String(label || '').toUpperCase();
-    if (key === 'A' || key === 'EE') return 'gA';
-    if (key === 'B' || key === 'ME') return 'gB';
-    if (key === 'C' || key === 'AE') return 'gC';
-    if (key === 'D' || key === 'BE') return 'gD';
-    if (key === 'E') return 'gE';
+    if (key === 'A' || key.indexOf('EE') === 0) return 'gA';
+    if (key === 'B' || key.indexOf('ME') === 0) return 'gB';
+    if (key === 'C' || key.indexOf('AE') === 0) return 'gC';
+    if (key === 'D' || key.indexOf('BE') === 0) return 'gD';
+    if (key.indexOf('E') === 0) return 'gE';
     return '';
+  }
+
+  var BAND_COLORS = {
+    EE1: '#1b5e20', EE2: '#43a047', EE: '#43a047',
+    ME1: '#1565c0', ME2: '#38bdf8', ME: '#38bdf8',
+    AE1: '#b4690e', AE2: '#c98a1e', AE: '#c98a1e',
+    BE1: '#f0923b', BE2: '#e05c5c', BE: '#e05c5c',
+    E: '#a51f1f', A: '#1b5e20', B: '#1565c0', C: '#c98a1e', D: '#e05c5c'
+  };
+
+  function bandColor(label) {
+    return BAND_COLORS[String(label || '').toUpperCase()] || '#8a94a3';
+  }
+
+  function tint(hex, alpha) {
+    var n = parseInt(String(hex).slice(1), 16);
+    return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + alpha + ')';
+  }
+
+  function gradeChip(label, mini) {
+    if (!label) return mini ? '' : '<span class="zrc-grade none">—</span>';
+    return '<span class="zrc-grade ' + gradeClass(label) + (mini ? ' mini' : '') + '">' + esc(label) + '</span>';
+  }
+
+  function bandHeadCells(labels) {
+    return (labels || []).map(function (label) {
+      return '<th class="num band-col" style="--bc:' + bandColor(label) + '"><span class="band-dot"></span>' + esc(label) + '</th>';
+    }).join('');
+  }
+
+  function bandCountCells(counts, labels) {
+    return (labels || []).map(function (label) {
+      var count = counts && counts[label] ? Number(counts[label]) : 0;
+      var color = bandColor(label);
+      return '<td class="num band-count">' + (count
+        ? '<b style="background:' + tint(color, 0.16) + ';color:' + color + '">' + count + '</b>'
+        : '<span class="zero">0</span>') + '</td>';
+    }).join('');
   }
 
   function cellClass(percent) {
@@ -391,7 +429,7 @@
         if (!found || found.average == null) {
           html.push('<td class="num">—</td>');
         } else {
-          html.push('<td class="num" title="' + esc(found.grade || '') + '">' + num(found.average, 1) + '</td>');
+          html.push('<td class="num markcell" title="' + esc((found.subject_name || '') + (found.grade ? ' · ' + found.grade : '')) + '">' + num(found.average, 1) + '<br>' + gradeChip(found.grade, true) + '</td>');
         }
       });
       html.push('<td class="num total">' + num(row.total, 1) + '</td>');
@@ -408,7 +446,7 @@
       (data.subject_rankings || []).forEach(function (s) { ranking[String(s.subject_id)] = s; });
       subjects.forEach(function (s) {
         var r = ranking[String(s.subject_id)];
-        html.push('<td class="num total">' + (r ? num(r.average, 1) : '—') + '</td>');
+        html.push('<td class="num total markcell">' + (r ? num(r.average, 1) + '<br>' + gradeChip(r.grade, true) : '—') + '</td>');
       });
       html.push('<td></td><td></td><td></td><td></td></tr></tfoot>');
     }
@@ -461,7 +499,19 @@
     html.push('<button class="zrc-btn" type="button" data-zrc-action="merit-copy">Copy table</button>');
     html.push('<button class="zrc-btn" type="button" data-zrc-action="merit-print">Print</button>');
     html.push('</aside><div class="zrc-merit-main">');
-    html.push('<div class="zrc-card"><div class="zrc-card-head"><div><h3>Ranked merit register</h3><div class="zrc-sub">' + esc(data.context.assessment_label || 'Term score') + ' · ' + rows.length + ' learner(s) shown</div></div><div class="zrc-sub">' + esc(data.context.year_label || '') + ' · ' + esc(data.context.term_name || '') + '</div></div>' + meritTable(view) + '</div>');
+    var toppers = data.subject_toppers || [];
+    if (toppers.length) {
+      html.push('<div class="zrc-card"><div class="zrc-card-head"><div><h3>Subject toppers</h3><div class="zrc-sub">Best learner per subject in this reproduction — graded with the bands the admin saved.</div></div></div><div class="zrc-toppers">');
+      toppers.forEach(function (t, index) {
+        html.push('<div class="zrc-topper" style="--tc:' + bandColor(t.grade) + ';animation-delay:' + (index * 60) + 'ms">' +
+          '<div class="t-sub">' + esc(t.subject_code || t.subject_name) + '</div>' +
+          '<div class="t-name">' + esc(t.name) + '</div>' +
+          '<div class="t-meta">' + esc(t.class_name || '—') + '</div>' +
+          '<div class="t-score">' + num(t.average, 1) + gradeChip(t.grade, true) + '</div></div>');
+      });
+      html.push('</div></div>');
+    }
+    html.push('<div class="zrc-card"><div class="zrc-card-head"><div><h3>Ranked merit register</h3><div class="zrc-sub">' + esc(data.context.assessment_label || 'Term score') + ' · ' + rows.length + ' learner(s) shown · every subject carries its grade</div></div><div class="zrc-sub">' + esc(data.context.year_label || '') + ' · ' + esc(data.context.term_name || '') + '</div></div>' + meritTable(view) + '</div>');
     html.push('</div></div>');
     panel('merit').innerHTML = html.join('');
     var status = root.querySelector('[data-zrc-status]');
@@ -576,7 +626,10 @@
 
   var DONUT_COLORS = ['#17365d', '#2e5f96', '#b8860b', '#0f7a52', '#a45a0b', '#a51f1f', '#8a94a3', '#6b4f9e'];
 
-  function donut(items, label) {
+  function donut(items, label, colorFor) {
+    function sliceColor(item, index) {
+      return colorFor ? colorFor(item.label) : DONUT_COLORS[index % DONUT_COLORS.length];
+    }
     var total = items.reduce(function (sum, item) { return sum + Number(item.count || 0); }, 0);
     if (!total) return '<div class="zrc-empty">No graded learners yet.</div>';
     var W = 300, H = 220, cx = 110, cy = 110, r = 78, inner = 48;
@@ -590,7 +643,7 @@
       var x2 = cx + r * Math.cos(end), y2 = cy + r * Math.sin(end);
       var x3 = cx + inner * Math.cos(end), y3 = cy + inner * Math.sin(end);
       var x4 = cx + inner * Math.cos(angle), y4 = cy + inner * Math.sin(angle);
-      body.push('<path class="zrc-donut-seg" style="animation-delay:' + (index * 90) + 'ms" fill="' + DONUT_COLORS[index % DONUT_COLORS.length] + '" d="M' + x1.toFixed(1) + ' ' + y1.toFixed(1) +
+      body.push('<path class="zrc-donut-seg" style="animation-delay:' + (index * 90) + 'ms" fill="' + sliceColor(item, index) + '" d="M' + x1.toFixed(1) + ' ' + y1.toFixed(1) +
         ' A' + r + ' ' + r + ' 0 ' + large + ' 1 ' + x2.toFixed(1) + ' ' + y2.toFixed(1) +
         ' L' + x3.toFixed(1) + ' ' + y3.toFixed(1) +
         ' A' + inner + ' ' + inner + ' 0 ' + large + ' 0 ' + x4.toFixed(1) + ' ' + y4.toFixed(1) + ' Z"><title>' + esc(item.label + ': ' + item.count) + '</title></path>');
@@ -604,7 +657,7 @@
     body.push('<text x="' + cx + '" y="' + (cy - 2) + '" text-anchor="middle" style="font:700 24px Georgia,serif;fill:#0f2745">' + total + '</text>');
     body.push('<text x="' + cx + '" y="' + (cy + 16) + '" text-anchor="middle" style="font:600 10px Segoe UI,sans-serif;fill:#7b8695;letter-spacing:.08em">LEARNERS</text>');
     var legend = items.map(function (item, index) {
-      return '<span><i style="background:' + DONUT_COLORS[index % DONUT_COLORS.length] + '"></i>' + esc(item.label) + ' · <b>' + item.count + '</b> (' + Math.round((Number(item.count) / total) * 100) + '%)</span>';
+      return '<span><i style="background:' + sliceColor(item, index) + '"></i>' + esc(item.label) + ' · <b>' + item.count + '</b> (' + Math.round((Number(item.count) / total) * 100) + '%)</span>';
     }).join('');
     return svg(W, H, body.join(''), label) + '<div class="zrc-legend-row">' + legend + '</div>';
   }
@@ -696,15 +749,23 @@
     var k = data.kpis || {};
     var trend = data.trend || [];
     var spark = trend.map(function (t) { return Number(t.mean) || 0; });
+    var labels = data.band_labels || [];
     var html = [contextBar(state.analyticsSel)];
     if (data.context && data.context.year_state === 'HISTORICAL') {
       html.push('<div class="zrc-notice warn"><b>Historical year selected.</b> Charts compare terms inside ' + esc(data.context.year_label) + '. The current year is not substituted.</div>');
     }
+    html.push('<div class="zrc-downloads"><div class="zrc-downloads-txt"><b>Official performance analysis</b><span>The same numbers as this screen — subject grades, band counts, the full register and movement — ready for the staffroom file.</span></div><div class="zrc-downloads-actions">' +
+      '<button class="zrc-btn primary" type="button" data-zrc-action="analysis-pdf">Analysis PDF</button>' +
+      '<button class="zrc-btn gold" type="button" data-zrc-action="analysis-csv">Excel / CSV</button>' +
+      '<button class="zrc-btn" type="button" data-zrc-action="analysis-copy">Copy analysis</button>' +
+      '</div></div>');
     html.push('<div class="zrc-analytics-kpis">');
     html.push(analyticsKpi('Mean score', num(k.mean, 2), '', deltaChip(k.mean_delta) + ' <span class="zrc-sub">vs ' + esc(data.by_class.series.length > 1 ? data.by_class.series[1].name : 'previous term') + '</span>', spark));
-    html.push(analyticsKpi('Mean grade', esc(k.mean_grade || '—'), '', 'Same grading bands as report cards', null));
+    html.push(analyticsKpi('Mean grade', esc(k.mean_grade || '—'), '', 'Admin-saved grading bands', null));
     html.push(analyticsKpi('Pass rate', pct(k.pass_rate), '', deltaChip(k.pass_delta) + ' <span class="zrc-sub">at ' + num(k.pass_mark, 0) + '%+</span>', null));
     html.push(analyticsKpi('Ranked learners', String(k.learners || 0), '', 'Learners with usable marks', null));
+    html.push(analyticsKpi('Deviation (σ)', num(k.deviation, 1), '', 'Spread of averages — lower is tighter', null));
+    html.push(analyticsKpi('Value addition', k.value_addition == null ? '—' : (Number(k.value_addition) > 0 ? '+' : '') + num(k.value_addition, 2), '', 'Mean movement vs previous term', null));
     html.push('</div>');
 
     html.push('<div class="zrc-chart-grid">');
@@ -714,8 +775,8 @@
         return '<span><i style="background:' + (index ? '#c9d3e2' : '#17365d') + '"></i>' + esc(s.name) + '</span>';
       }).join('') + '</div></div>');
 
-    html.push('<div class="zrc-chart-card"><h3>Grade distribution</h3><div class="zrc-sub">Every graded learner in this context.</div>' +
-      donut(data.grade_distribution || [], 'Grade distribution') + '</div>');
+    html.push('<div class="zrc-chart-card"><h3>Grade distribution</h3><div class="zrc-sub">Every graded learner in this context, on the admin-saved bands.</div>' +
+      donut(data.grade_distribution || [], 'Grade distribution', bandColor) + '</div>');
 
     html.push('<div class="zrc-chart-card"><h3>Term mean trend</h3><div class="zrc-sub">Every term in ' + esc(data.context.year_label) + ', computed on the same path.</div>' +
       lineChart(trend, 'Term mean trend') + '</div>');
@@ -726,6 +787,49 @@
     html.push('<div class="zrc-chart-card wide"><h3>Subject mastery by class</h3><div class="zrc-sub">Mean score per class and subject — darker red is support needed, green is secure.</div>' +
       heatmap(data.heatmap.rows, data.heatmap.cols, data.heatmap.values, 'Subject mastery by class') +
       '<div class="zrc-heat-scale"><i></i><div class="zrc-heat-ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div></div></div>');
+
+    if ((data.subject_analysis || []).length) {
+      html.push('<div class="zrc-chart-card wide"><h3>Subject performance &amp; teacher analysis</h3><div class="zrc-sub">Mean, grade, spread and movement per subject — grades come from the grading system the admin saved for this scope.</div><div class="zrc-table-wrap"><table class="zrc-table"><thead><tr><th>Subject</th><th>Teacher</th><th class="num">Mean</th><th class="center">Grade</th><th class="num">High</th><th class="num">Low</th><th class="num">Pass %</th><th class="num">σ</th><th class="num">Δ prev</th><th class="num">Scored</th></tr></thead><tbody>');
+      data.subject_analysis.forEach(function (s) {
+        html.push('<tr><td class="name">' + esc(s.subject_name) + '</td><td>' + esc(s.teacher || '—') + '</td><td class="num total">' + num(s.mean, 2) + '</td><td class="center">' + gradeChip(s.grade) + '</td><td class="num">' + num(s.high, 1) + '</td><td class="num">' + num(s.low, 1) + '</td><td class="num">' + num(s.pass, 1) + '%</td><td class="num">' + num(s.dev, 1) + '</td><td class="num">' + deltaChip(s.delta) + '</td><td class="num">' + s.scored + '</td></tr>');
+      });
+      html.push('</tbody></table></div></div>');
+    }
+
+    if ((data.subject_analysis || []).length && labels.length) {
+      html.push('<div class="zrc-chart-card wide"><h3>Grade bands per subject</h3><div class="zrc-sub">How many learners landed in each admin-saved band, per subject — the footer repeats the counts on learner averages.</div><div class="zrc-table-wrap"><table class="zrc-table zrc-bands"><thead><tr><th>Subject</th>' + bandHeadCells(labels) + '<th class="num">Scored</th><th class="num">Mean</th><th class="center">Grade</th></tr></thead><tbody>');
+      data.subject_analysis.forEach(function (s) {
+        html.push('<tr><td class="name">' + esc(s.subject_name) + '</td>' + bandCountCells(s.counts, labels) + '<td class="num">' + s.scored + '</td><td class="num total">' + num(s.mean, 1) + '</td><td class="center">' + gradeChip(s.grade) + '</td></tr>');
+      });
+      var dist = {};
+      (data.grade_distribution || []).forEach(function (d) { dist[d.label] = d.count; });
+      html.push('</tbody><tfoot><tr><td class="name">LEARNER AVERAGE</td>' + bandCountCells(dist, labels) + '<td class="num">' + (k.learners || 0) + '</td><td class="num total">' + num(k.mean, 1) + '</td><td class="center">' + gradeChip(k.mean_grade) + '</td></tr></tfoot></table></div></div>');
+    }
+
+    if ((data.class_bands || []).length && labels.length) {
+      html.push('<div class="zrc-chart-card wide"><h3>Grade bands per class &amp; subject</h3><div class="zrc-sub">Every class broken down by subject, with the class-average row in gold. Scroll inside the sheet — the headers stay put.</div><div class="zrc-vscroll"><table class="zrc-table zrc-bands"><thead><tr><th>Class / Subject</th>' + bandHeadCells(labels) + '<th class="num">Scored</th><th class="num">Mean</th><th class="center">Grade</th></tr></thead><tbody>');
+      data.class_bands.forEach(function (c) {
+        html.push('<tr class="zrc-classrow"><td colspan="' + (labels.length + 4) + '">' + esc(c.class_name) + '</td></tr>');
+        (c.subjects || []).forEach(function (s) {
+          html.push('<tr><td class="subj">' + esc(s.subject_name) + '</td>' + bandCountCells(s.counts, labels) + '<td class="num">' + s.scored + '</td><td class="num">' + num(s.mean, 1) + '</td><td class="center">' + gradeChip(s.grade) + '</td></tr>');
+        });
+        html.push('<tr class="zrc-avgrow"><td class="name">Class average</td>' + bandCountCells(c.average_counts, labels) + '<td class="num">' + c.scored + '</td><td class="num total">' + num(c.mean, 1) + '</td><td class="center">' + gradeChip(c.grade) + '</td></tr>');
+      });
+      html.push('</tbody></table></div></div>');
+    }
+
+    if ((data.teachers || []).length) {
+      html.push('<div class="zrc-chart-card"><h3>Teacher performance</h3><div class="zrc-sub">Mean across each teacher’s assigned subjects in this scope.</div>' +
+        hbars(data.teachers.slice(0, 8).map(function (t) { return { name: t.teacher, mean: t.mean }; }), 'Teacher performance') + '</div>');
+    }
+
+    if ((data.top_performers || []).length) {
+      html.push('<div class="zrc-chart-card"><h3>Top performers</h3><div class="zrc-sub">Highest averages in this scope, graded on the same bands.</div><div class="zrc-toplist">');
+      data.top_performers.forEach(function (p, index) {
+        html.push('<div class="zrc-toprow"><span class="pos">' + (index + 1) + '</span><span class="who"><b>' + esc(p.name) + '</b><em>' + esc(p.class_name || '') + '</em></span><span class="score zrc-num">' + num(p.average, 1) + '</span>' + gradeChip(p.grade) + '</div>');
+      });
+      html.push('</div></div>');
+    }
 
     if (data.progression && data.progression.length) {
       html.push('<div class="zrc-chart-card"><h3>Assessment-type progression</h3><div class="zrc-sub">How the cohort performed in each assessment form this term.</div>' +
@@ -738,30 +842,177 @@
     }
 
     var movement = data.movement || {};
-    html.push('<div class="zrc-chart-card"><h3>Learner movement</h3><div class="zrc-sub">Change against the previous term.</div><div class="zrc-chips" style="margin:0">');
+    html.push('<div class="zrc-chart-card wide"><h3>Movement &amp; support register</h3><div class="zrc-sub">Change against the previous term — support first, then the sharpest declines and the strongest gains.</div><div class="zrc-chips" style="margin:0 0 12px">');
     html.push('<div class="zrc-chip"><span>Improved</span><strong>' + (movement.improved || 0) + '</strong><em>+0.5 or more</em></div>');
     html.push('<div class="zrc-chip"><span>Stable</span><strong>' + (movement.stable || 0) + '</strong><em>within ±0.5</em></div>');
     html.push('<div class="zrc-chip"><span>Declined</span><strong>' + (movement.declined || 0) + '</strong><em>−0.5 or worse</em></div>');
     html.push('</div>');
-    if (movement.top && movement.top.length) {
-      html.push('<div class="zrc-sub" style="margin-top:12px;font-weight:700;color:#0f2745">Top improvers</div><ul class="zrc-pending">');
-      movement.top.slice(0, 4).forEach(function (m) {
-        html.push('<li><span><b>' + esc(m.name) + '</b> · ' + esc(m.class_name || '') + '</span><span class="pct">' + deltaChip(m.delta) + '</span></li>');
+    if ((data.movement_rows || []).length) {
+      html.push('<div class="zrc-table-wrap" style="max-height:360px"><table class="zrc-table"><thead><tr><th>Learner</th><th>Class</th><th class="num">Current</th><th class="num">Previous</th><th class="num">Change</th><th class="center">Grade</th><th class="center">Status</th></tr></thead><tbody>');
+      data.movement_rows.forEach(function (row) {
+        var status = String(row.status || '').toLowerCase();
+        html.push('<tr><td class="name">' + esc(row.name) + '</td><td>' + esc(row.class_name || '—') + '</td><td class="num">' + num(row.average, 1) + '</td><td class="num">' + num(row.previous, 1) + '</td><td class="num">' + deltaChip(row.delta) + '</td><td class="center">' + gradeChip(row.grade) + '</td><td class="center"><span class="zrc-status ' + status + '">' + esc(row.status || '') + '</span></td></tr>');
       });
-      html.push('</ul>');
+      html.push('</tbody></table></div>');
+    } else {
+      html.push('<div class="zrc-notice ok">No movement to report yet — it appears once a previous term has marks to compare against.</div>');
     }
     html.push('</div>');
-
-    if (data.at_risk && data.at_risk.length) {
-      html.push('<div class="zrc-chart-card wide"><h3>Learners needing support</h3><div class="zrc-sub">Below 40%, or down 5 points or more since the previous term.</div><div class="zrc-table-wrap" style="max-height:320px"><table class="zrc-table"><thead><tr><th>Learner</th><th>Class</th><th class="num">Current</th><th class="num">Previous</th><th class="num">Change</th></tr></thead><tbody>');
-      data.at_risk.forEach(function (row) {
-        html.push('<tr><td class="name">' + esc(row.name) + '</td><td>' + esc(row.class_name || '—') + '</td><td class="num">' + num(row.average, 1) + '</td><td class="num">' + num(row.previous, 1) + '</td><td class="num">' + deltaChip(row.delta) + '</td></tr>');
-      });
-      html.push('</tbody></table></div></div>');
-    }
 
     html.push('</div>');
     panel('analytics').innerHTML = html.join('');
+  }
+
+  function analysisPdfHtml() {
+    var a = state.analytics || {};
+    var k = a.kpis || {};
+    var ctx = a.context || {};
+    var id = state.identity || {};
+    var labels = a.band_labels || [];
+    var subjects = a.subject_columns || [];
+    function nCell(value, digits) { return '<td class="n">' + (value == null ? '—' : num(value, digits)) + '</td>'; }
+    function bandHead() {
+      return labels.map(function (l) { return '<th class="n" style="color:' + bandColor(l) + '">' + esc(l) + '</th>'; }).join('');
+    }
+    function bandCells(counts) {
+      return labels.map(function (l) {
+        var count = (counts || {})[l] || 0;
+        return '<td class="n" style="color:' + (count ? bandColor(l) : '#9aa4b2') + ';font-weight:' + (count ? 800 : 400) + '">' + count + '</td>';
+      }).join('');
+    }
+    var html = [];
+    html.push('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Official performance analysis — ' + esc(ctx.year_label || '') + ' · ' + esc(ctx.term_name || '') + '</title><style>');
+    html.push('*{box-sizing:border-box}body{margin:0;background:#e9edf3;font-family:"Segoe UI",system-ui,Arial,sans-serif;color:#1c2430}');
+    html.push('.toolbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;background:#0f2745;color:#fff;padding:12px 20px;border-bottom:3px solid #b8860b}');
+    html.push('.toolbar b{font-family:Georgia,serif;font-size:15px}.toolbar span{font-size:12px;color:#c9d5e6;flex:1}');
+    html.push('.toolbar button{appearance:none;border:0;border-radius:8px;padding:9px 18px;font-weight:800;font-size:13px;cursor:pointer;background:linear-gradient(180deg,#f0c465,#b8860b);color:#fff;box-shadow:0 2px 10px rgba(184,134,11,.5)}');
+    html.push('.sheet{max-width:1080px;margin:18px auto;background:#fff;padding:26px 30px;box-shadow:0 8px 30px rgba(16,35,60,.18);border-top:4px double #b8860b}');
+    html.push('header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #17365d;padding-bottom:12px;margin-bottom:14px}');
+    html.push('header img{width:52px;height:52px;object-fit:contain}header h1{font-family:Georgia,serif;font-size:21px;margin:0;color:#0f2745}header p{margin:2px 0 0;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#b8860b;font-weight:700}');
+    html.push('header .ref{margin-left:auto;text-align:right}header .ref b{display:block;font-size:11px;letter-spacing:.14em;color:#17365d}header .ref span{display:block;font-size:11px;color:#66707d;margin-top:3px}');
+    html.push('.summary{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:16px}');
+    html.push('.summary div{border:1px solid #e3e7ee;border-left:3px solid #b8860b;border-radius:8px;padding:8px 10px;background:#fbfcfd}');
+    html.push('.summary span{display:block;font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#66707d}.summary b{display:block;font-family:Georgia,serif;font-size:18px;color:#0f2745;margin-top:2px}');
+    html.push('h2{font-family:Georgia,serif;font-size:15px;color:#0f2745;margin:20px 0 8px;padding-bottom:5px;border-bottom:1px solid #e3e7ee}');
+    html.push('table{border-collapse:collapse;width:100%;font-size:9.5px;margin-bottom:6px}');
+    html.push('th{background:#17365d;color:#ecd6a4;font-size:8.5px;letter-spacing:.05em;text-transform:uppercase;padding:5px 6px;text-align:left;border:1px solid #24466f}');
+    html.push('td{padding:4px 6px;border:1px solid #e3e7ee}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}');
+    html.push('tbody tr:nth-child(even) td{background:#f7f9fc}.grp td{background:#17365d!important;color:#f0c465;font-weight:800;letter-spacing:.06em}');
+    html.push('.avg td{background:#fbf3dd!important;font-weight:800}.grade{font-weight:800}');
+    html.push('.status{font-weight:800;font-size:8.5px;letter-spacing:.05em}.status.support{color:#b42318}.status.declining{color:#b4690e}.status.improved{color:#0f7a52}');
+    html.push('footer{margin-top:18px;padding-top:10px;border-top:2px solid #17365d;font-size:10px;color:#66707d;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}');
+    html.push('@media print{body{background:#fff}.toolbar{display:none}.sheet{margin:0;max-width:none;box-shadow:none;padding:6mm}h2{break-after:avoid}table{break-inside:auto}tr{break-inside:avoid}}');
+    html.push('@page{size:A4;margin:10mm}</style></head><body>');
+    html.push('<div class="toolbar"><b>Official performance analysis</b><span>Review the document, then print or save it as PDF.</span><button type="button" onclick="window.print()">Print / Save PDF</button></div>');
+    html.push('<div class="sheet">');
+    html.push('<header>' + (id.logo_url ? '<img src="' + esc(id.logo_url) + '" alt="School logo">' : '') +
+      '<div><h1>' + esc(id.name || 'ZELIMU CBC SCHOOL') + '</h1><p>' + esc(id.motto || 'Official academic analysis') + '</p></div>' +
+      '<div class="ref"><b>OFFICIAL PERFORMANCE ANALYSIS</b><span>' + esc(ctx.year_label || '') + ' · ' + esc(ctx.term_name || '') + ' · ' + esc(ctx.class_name || 'All classes') + '</span></div></header>');
+    html.push('<div class="summary">' +
+      '<div><span>Mean score</span><b>' + num(k.mean, 2) + '</b></div>' +
+      '<div><span>Mean grade</span><b>' + esc(k.mean_grade || '—') + '</b></div>' +
+      '<div><span>Deviation σ</span><b>' + num(k.deviation, 1) + '</b></div>' +
+      '<div><span>Value addition</span><b>' + (k.value_addition == null ? '—' : (Number(k.value_addition) > 0 ? '+' : '') + num(k.value_addition, 2)) + '</b></div>' +
+      '<div><span>Pass rate</span><b>' + pct(k.pass_rate) + '</b></div>' +
+      '<div><span>Ranked</span><b>' + (k.learners || 0) + '</b></div></div>');
+
+    html.push('<h2>Subject analysis — grades from the admin-saved grading system</h2>');
+    html.push('<table><thead><tr><th>Subject</th><th>Teacher</th><th class="n">Mean</th><th>Grade</th><th class="n">High</th><th class="n">Low</th><th class="n">Pass %</th><th class="n">σ</th><th class="n">Δ prev</th>' + bandHead() + '<th class="n">Scored</th></tr></thead><tbody>');
+    (a.subject_analysis || []).forEach(function (s) {
+      html.push('<tr><td><b>' + esc(s.subject_name) + '</b></td><td>' + esc(s.teacher || '—') + '</td>' + nCell(s.mean, 2) +
+        '<td class="grade" style="color:' + bandColor(s.grade) + '">' + esc(s.grade || '—') + '</td>' + nCell(s.high, 1) + nCell(s.low, 1) +
+        '<td class="n">' + num(s.pass, 1) + '%</td>' + nCell(s.dev, 1) +
+        '<td class="n">' + (s.delta == null ? '—' : (Number(s.delta) > 0 ? '+' : '') + num(s.delta, 2)) + '</td>' + bandCells(s.counts) + nCell(s.scored, 0) + '</tr>');
+    });
+    html.push('</tbody></table>');
+
+    html.push('<h2>Grade bands per class &amp; subject</h2>');
+    html.push('<table><thead><tr><th>Class / Subject</th>' + bandHead() + '<th class="n">Scored</th><th class="n">Mean</th><th>Grade</th></tr></thead><tbody>');
+    (a.class_bands || []).forEach(function (c) {
+      html.push('<tr class="grp"><td colspan="' + (labels.length + 4) + '">' + esc(c.class_name) + '</td></tr>');
+      (c.subjects || []).forEach(function (s) {
+        html.push('<tr><td>' + esc(s.subject_name) + '</td>' + bandCells(s.counts) + nCell(s.scored, 0) + nCell(s.mean, 1) +
+          '<td class="grade" style="color:' + bandColor(s.grade) + '">' + esc(s.grade || '—') + '</td></tr>');
+      });
+      html.push('<tr class="avg"><td>Class average</td>' + bandCells(c.average_counts) + nCell(c.scored, 0) + nCell(c.mean, 1) +
+        '<td class="grade" style="color:' + bandColor(c.grade) + '">' + esc(c.grade || '—') + '</td></tr>');
+    });
+    html.push('</tbody></table>');
+
+    html.push('<h2>Learner register — mark and grade for every subject</h2>');
+    html.push('<table><thead><tr><th class="n">#</th><th>Learner</th><th>ADM</th><th>Class</th>' +
+      subjects.map(function (s) { return '<th class="n">' + esc(s.subject_code || s.subject_name) + '</th><th>Gr</th>'; }).join('') +
+      '<th class="n">Average</th><th>Grade</th></tr></thead><tbody>');
+    (a.register || []).forEach(function (row, index) {
+      var byId = {};
+      (row.subjects || []).forEach(function (s) { byId[String(s.subject_id)] = s; });
+      html.push('<tr><td class="n">' + (row.stream_rank != null ? row.stream_rank : (row.average == null ? '—' : index + 1)) + '</td><td><b>' + esc(row.name) + '</b></td><td>' + esc(row.admission_no || '—') + '</td><td>' + esc(row.class_name || '—') + '</td>');
+      subjects.forEach(function (s) {
+        var found = byId[String(s.subject_id)];
+        if (found && found.average != null) {
+          html.push(nCell(found.average, 1) + '<td class="grade" style="color:' + bandColor(found.grade) + '">' + esc(found.grade || '—') + '</td>');
+        } else {
+          html.push('<td class="n">—</td><td>—</td>');
+        }
+      });
+      html.push(nCell(row.average, 1) + '<td class="grade" style="color:' + bandColor(row.grade) + '">' + esc(row.grade || '—') + '</td></tr>');
+    });
+    html.push('</tbody></table>');
+
+    html.push('<h2>Movement &amp; support</h2>');
+    html.push('<table><thead><tr><th>Learner</th><th>Class</th><th class="n">Current</th><th class="n">Previous</th><th class="n">Change</th><th>Grade</th><th>Status</th></tr></thead><tbody>');
+    (a.movement_rows || []).forEach(function (row) {
+      html.push('<tr><td><b>' + esc(row.name) + '</b></td><td>' + esc(row.class_name || '—') + '</td>' + nCell(row.average, 1) + nCell(row.previous, 1) +
+        '<td class="n">' + (row.delta == null ? '—' : (Number(row.delta) > 0 ? '+' : '') + num(row.delta, 2)) + '</td>' +
+        '<td class="grade" style="color:' + bandColor(row.grade) + '">' + esc(row.grade || '—') + '</td>' +
+        '<td class="status ' + String(row.status || '').toLowerCase() + '">' + esc(row.status || '') + '</td></tr>');
+    });
+    html.push('</tbody></table>');
+    html.push('<footer><span>Generated by ZELIMU Results Command Centre · ' + esc(new Date().toLocaleDateString()) + '</span><span>Grading follows the system saved by the school administrator.</span></footer>');
+    html.push('</div></body></html>');
+    return html.join('');
+  }
+
+  function openAnalysisPdf() {
+    if (!state.analytics) { toast('Analytics are still loading.', 'warn'); return; }
+    var win = window.open('', '_blank');
+    if (!win) { toast('Allow pop-ups for this site to open the analysis PDF.', 'error'); return; }
+    win.document.open();
+    win.document.write(analysisPdfHtml());
+    win.document.close();
+    toast('Analysis opened in a new tab — print it or save it as PDF.');
+  }
+
+  function copyAnalysis() {
+    var a = state.analytics;
+    if (!a || !(a.subject_analysis || []).length) { toast('Nothing to copy yet.', 'warn'); return; }
+    var labels = a.band_labels || [];
+    function bandValues(counts) {
+      return labels.map(function (l) { return (counts || {})[l] || 0; });
+    }
+    var lines = [];
+    lines.push(['SUBJECT', 'TEACHER', 'MEAN', 'GRADE', 'HIGH', 'LOW', 'PASS %', 'DEVIATION', 'DELTA PREV'].concat(labels, ['SCORED']).join('\t'));
+    (a.subject_analysis || []).forEach(function (s) {
+      lines.push([s.subject_name, s.teacher || '', s.mean, s.grade || '', s.high, s.low, s.pass, s.dev, s.delta == null ? '' : s.delta].concat(bandValues(s.counts), [s.scored]).join('\t'));
+    });
+    lines.push('');
+    lines.push(['CLASS', 'SUBJECT'].concat(labels, ['SCORED', 'MEAN', 'GRADE']).join('\t'));
+    (a.class_bands || []).forEach(function (c) {
+      (c.subjects || []).forEach(function (s) {
+        lines.push([c.class_name, s.subject_name].concat(bandValues(s.counts), [s.scored, s.mean, s.grade || '']).join('\t'));
+      });
+      lines.push([c.class_name, 'AVERAGE'].concat(bandValues(c.average_counts), [c.scored, c.mean, c.grade || '']).join('\t'));
+    });
+    lines.push('');
+    lines.push(['LEARNER', 'CLASS', 'CURRENT', 'PREVIOUS', 'CHANGE', 'GRADE', 'STATUS'].join('\t'));
+    (a.movement_rows || []).forEach(function (m) {
+      lines.push([m.name, m.class_name || '', m.average, m.previous == null ? '' : m.previous, m.delta == null ? '' : m.delta, m.grade || '', m.status || ''].join('\t'));
+    });
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(lines.join('\n')).then(function () { toast('Analysis copied — paste it straight into Excel.'); }, function () { toast('Copy failed. Use Excel / CSV instead.', 'error'); });
+    } else {
+      toast('Copy is not available in this browser. Use Excel / CSV.', 'warn');
+    }
   }
 
   function loadAnalytics() {
@@ -909,6 +1160,16 @@
         } else {
           toast('Copy is not available in this browser. Use Excel / CSV.', 'warn');
         }
+        return;
+      }
+      if (action === 'analysis-pdf') { openAnalysisPdf(); return; }
+      if (action === 'analysis-copy') { copyAnalysis(); return; }
+      if (action === 'analysis-csv') {
+        var analyticsScope = state.analyticsSel;
+        download('/api/results-centre/' + sid + '/analysis.csv?' + qs({
+          academic_year_id: analyticsScope.year, term_id: analyticsScope.term, class_id: analyticsScope.class
+        })).catch(function (error) { toast(error.message, 'error'); });
+        return;
       }
     });
 

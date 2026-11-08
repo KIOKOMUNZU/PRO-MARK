@@ -427,6 +427,206 @@ function competitionRanks(items, valueOf) {
   return { sorted, ranks, total: sorted.length };
 }
 
+function deviationOf(values) {
+  const nums = (values || []).filter(v => v != null && isFinite(Number(v))).map(Number);
+  if (!nums.length) return null;
+  const mean = nums.reduce((a, b) => a + b, 0) / nums.length;
+  return Math.sqrt(nums.reduce((a, v) => a + (v - mean) ** 2, 0) / nums.length);
+}
+
+// Band columns follow the admin-saved order (highest band first), unioning every
+// system actually in scope so mixed-class counts never lose a label.
+function bandLabelOrder(grading, classRecords) {
+  const labels = [];
+  const push = system => (system ? system.bands : []).forEach(b => {
+    if (b.label && !labels.includes(b.label)) labels.push(b.label);
+  });
+  if (grading) {
+    push(grading.defaultSystem);
+    (classRecords || []).forEach(c => push(systemForClass(grading, c)));
+    grading.systems.forEach(system => push(system));
+  }
+  return labels;
+}
+
+function countBands(grades, labels) {
+  const counts = {};
+  (labels || []).forEach(label => { counts[label] = 0; });
+  (grades || []).forEach(grade => {
+    if (!grade) return;
+    counts[grade] = (counts[grade] || 0) + 1;
+  });
+  return counts;
+}
+
+function subjectBucketsOf(rows) {
+  const buckets = new Map();
+  for (const row of rows || []) {
+    for (const subject of row.subjects || []) {
+      if (subject.average == null) continue;
+      const key = String(subject.subject_id);
+      if (!buckets.has(key)) {
+        buckets.set(key, {
+          subject_id: subject.subject_id,
+          subject_code: subject.subject_code || '',
+          subject_name: subject.subject_name || 'Subject',
+          teacher: '',
+          values: [],
+          grades: []
+        });
+      }
+      const bucket = buckets.get(key);
+      bucket.values.push(Number(subject.average));
+      bucket.grades.push(subject.grade || '');
+      if (!bucket.teacher && subject.teacher) bucket.teacher = subject.teacher;
+    }
+  }
+  return buckets;
+}
+
+function buildSubjectAnalysis(currentRows, previousRows, labels, scopeBands, passMark) {
+  const previous = subjectBucketsOf(previousRows);
+  const pass = finite(passMark) ?? 50;
+  return [...subjectBucketsOf(currentRows).values()].map(bucket => {
+    const mean = averageOf(bucket.values);
+    const band = bandFor(mean, scopeBands);
+    const prior = previous.get(String(bucket.subject_id));
+    const priorMean = prior ? averageOf(prior.values) : null;
+    return {
+      subject_id: bucket.subject_id,
+      subject_code: bucket.subject_code,
+      subject_name: bucket.subject_name,
+      teacher: bucket.teacher,
+      mean: round(mean, 2),
+      grade: band ? band.label : '',
+      high: round(Math.max(...bucket.values), 2),
+      low: round(Math.min(...bucket.values), 2),
+      pass: round((bucket.values.filter(v => v >= pass).length / bucket.values.length) * 100, 1),
+      dev: round(deviationOf(bucket.values), 1),
+      delta: priorMean == null ? null : round(mean - priorMean, 2),
+      counts: countBands(bucket.grades, labels),
+      scored: bucket.values.length
+    };
+  }).sort((a, b) => b.mean - a.mean || a.subject_name.localeCompare(b.subject_name));
+}
+
+function buildClassBands(currentRows, classList, labels) {
+  return (classList || []).map(entry => {
+    const rows = (currentRows || []).filter(r => (r.class_name || 'Unassigned') === entry.name);
+    const graded = rows.filter(r => r.average != null);
+    const mean = averageOf(graded.map(r => r.average));
+    const band = mean == null ? null : bandFor(mean, entry.bands);
+    const subjects = [...subjectBucketsOf(rows).values()].map(bucket => {
+      const subjectMean = averageOf(bucket.values);
+      const subjectBand = bandFor(subjectMean, entry.bands);
+      return {
+        subject_id: bucket.subject_id,
+        subject_code: bucket.subject_code,
+        subject_name: bucket.subject_name,
+        counts: countBands(bucket.grades, labels),
+        scored: bucket.values.length,
+        mean: round(subjectMean, 2),
+        grade: subjectBand ? subjectBand.label : ''
+      };
+    }).sort((a, b) => a.subject_name.localeCompare(b.subject_name));
+    return {
+      class_name: entry.name,
+      subjects,
+      average_counts: countBands(graded.map(r => r.grade), labels),
+      scored: graded.length,
+      mean: round(mean, 2),
+      grade: band ? band.label : ''
+    };
+  }).filter(entry => entry.scored > 0 || entry.subjects.length);
+}
+
+function buildSubjectToppers(rows) {
+  const tops = new Map();
+  for (const row of rows || []) {
+    for (const subject of row.subjects || []) {
+      if (subject.average == null) continue;
+      const key = String(subject.subject_id);
+      const current = tops.get(key);
+      if (!current || subject.average > current.average) {
+        tops.set(key, {
+          subject_id: subject.subject_id,
+          subject_code: subject.subject_code || '',
+          subject_name: subject.subject_name || 'Subject',
+          name: row.name,
+          class_name: row.class_name || '',
+          average: round(subject.average, 2),
+          grade: subject.grade || ''
+        });
+      }
+    }
+  }
+  return [...tops.values()].sort((a, b) => a.subject_name.localeCompare(b.subject_name));
+}
+
+function buildTeacherRows(subjectAnalysis) {
+  const byTeacher = new Map();
+  (subjectAnalysis || []).forEach(subject => {
+    if (!subject.teacher) return;
+    if (!byTeacher.has(subject.teacher)) byTeacher.set(subject.teacher, []);
+    byTeacher.get(subject.teacher).push(subject.mean);
+  });
+  return [...byTeacher.entries()]
+    .map(([teacher, means]) => ({ teacher, mean: round(averageOf(means), 2), subjects: means.length }))
+    .sort((a, b) => b.mean - a.mean || a.teacher.localeCompare(b.teacher));
+}
+
+function csvCell(value) {
+  const text = value == null ? '' : String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function buildAnalysisCsv(analytics) {
+  const a = analytics || {};
+  const k = a.kpis || {};
+  const ctx = a.context || {};
+  const labels = a.band_labels || [];
+  const subjects = a.subject_columns || a.subjects || [];
+  const line = values => values.map(csvCell).join(',');
+  const bandValues = counts => labels.map(label => (counts || {})[label] || 0);
+  const out = [
+    'OFFICIAL PERFORMANCE ANALYSIS',
+    line(['Context', ctx.year_label || '', ctx.term_name || '', ctx.class_name || 'All classes']),
+    line(['Mean', k.mean, 'Mean grade', k.mean_grade, 'Deviation', k.deviation,
+      'Value addition', k.value_addition, 'Pass rate %', k.pass_rate, 'Pass mark', k.pass_mark, 'Ranked', k.learners]),
+    '',
+    line(['SUBJECT', 'TEACHER', 'MEAN', 'GRADE', 'HIGH', 'LOW', 'PASS %', 'DEVIATION', 'DELTA PREV', ...labels, 'SCORED']),
+    ...(a.subject_analysis || []).map(s => line([
+      s.subject_name, s.teacher, s.mean, s.grade, s.high, s.low, s.pass, s.dev, s.delta, ...bandValues(s.counts), s.scored
+    ])),
+    '',
+    line(['CLASS', 'SUBJECT', ...labels, 'SCORED', 'MEAN', 'GRADE']),
+    ...(a.class_bands || []).flatMap(c => [
+      ...c.subjects.map(s => line([c.class_name, s.subject_name, ...bandValues(s.counts), s.scored, s.mean, s.grade])),
+      line([c.class_name, 'AVERAGE', ...bandValues(c.average_counts), c.scored, c.mean, c.grade])
+    ]),
+    '',
+    line(['RANK', 'LEARNER', 'ADM', 'CLASS',
+      ...subjects.flatMap(s => [(s.subject_code || s.subject_name) + ' MARK', (s.subject_code || s.subject_name) + ' GRADE']),
+      'AVERAGE', 'GRADE']),
+    ...(a.register || []).map((row, index) => {
+      const byId = new Map((row.subjects || []).map(s => [String(s.subject_id), s]));
+      return line([
+        row.stream_rank ?? (row.average == null ? '' : index + 1),
+        row.name, row.admission_no || '', row.class_name || '',
+        ...subjects.flatMap(s => {
+          const found = byId.get(String(s.subject_id));
+          return [found && found.average != null ? found.average : '', found && found.average != null ? found.grade || '' : ''];
+        }),
+        row.average ?? '', row.grade || ''
+      ]);
+    }),
+    '',
+    line(['LEARNER', 'CLASS', 'CURRENT', 'PREVIOUS', 'CHANGE', 'GRADE', 'STATUS']),
+    ...(a.movement_rows || []).map(m => line([m.name, m.class_name || '', m.average, m.previous, m.delta, m.grade || '', m.status]))
+  ];
+  return out.join('\r\n');
+}
+
 async function buildMerit(schoolId, query = {}, options = {}) {
   const ctx = options.ctx || await resolveContext(schoolId, query);
   const { year, term } = ctx;
@@ -673,6 +873,7 @@ async function buildMerit(schoolId, query = {}, options = {}) {
     rows: displayRows,
     subjects: subjectColumns,
     subject_rankings: subjectRankings,
+    subject_toppers: buildSubjectToppers(displayRows),
     stats: {
       learners: displayRows.length,
       ranked: scored.length,
@@ -1054,6 +1255,15 @@ async function buildAnalytics(schoolId, query = {}) {
 
   const currentStats = summarise(current);
   const previousStats = previous ? summarise(previous) : null;
+  const [grading, classRecords] = await Promise.all([loadGrading(schoolId), loadClasses(schoolId)]);
+  const scopeClasses = query.class_id
+    ? classRecords.filter(c => String(c.id) === String(query.class_id))
+    : classRecords;
+  const scopeSystem = query.class_id
+    ? systemForClass(grading, scopeClasses[0] || { id: query.class_id })
+    : grading.defaultSystem;
+  const scopeBands = scopeSystem ? scopeSystem.bands : [];
+  const bandLabels = bandLabelOrder(grading, scopeClasses);
   const classNames = [...new Set([
     ...currentStats.byClass.keys(),
     ...(previousStats ? previousStats.byClass.keys() : [])
@@ -1089,6 +1299,7 @@ async function buildAnalytics(schoolId, query = {}) {
       learner_id: row.learner_id,
       name: row.name,
       class_name: row.class_name,
+      grade: row.grade || '',
       average: row.average,
       previous: prior,
       delta: round(row.average - prior, 2)
@@ -1149,6 +1360,7 @@ async function buildAnalytics(schoolId, query = {}) {
         learner_id: row.learner_id,
         name: row.name,
         class_name: row.class_name,
+        grade: row.grade || '',
         average: row.average,
         previous: prior ?? null,
         delta: prior == null || row.average == null ? null : round(row.average - prior, 2)
@@ -1157,6 +1369,31 @@ async function buildAnalytics(schoolId, query = {}) {
     .filter(row => row.average < 40 || (row.delta !== null && row.delta <= -5))
     .sort((a, b) => a.average - b.average)
     .slice(0, 12);
+
+  const supportRows = atRisk.slice(0, 4).map(row => ({ ...row, status: 'SUPPORT' }));
+  const usedIds = new Set(supportRows.map(row => String(row.learner_id)));
+  const decliners = movers
+    .filter(m => !usedIds.has(String(m.learner_id)) && m.delta <= -0.5)
+    .reverse().slice(0, 3)
+    .map(m => { usedIds.add(String(m.learner_id)); return { ...m, status: 'DECLINING' }; });
+  const improvers = movers
+    .filter(m => !usedIds.has(String(m.learner_id)) && m.delta >= 0.5)
+    .slice(0, 2)
+    .map(m => ({ ...m, status: 'IMPROVED' }));
+  const movementRows = [...supportRows, ...decliners, ...improvers];
+
+  const subjectAnalysis = buildSubjectAnalysis(
+    currentStats.rows, previousStats ? previousStats.rows : [],
+    bandLabels, scopeBands, currentStats.passMark
+  );
+  const classList = [...new Set(currentStats.rows.map(r => r.class_name || 'Unassigned'))]
+    .sort((a, b) => a.localeCompare(b))
+    .map(name => {
+      const record = classRecords.find(c => c.label === name);
+      const system = record ? systemForClass(grading, record) : grading.defaultSystem;
+      return { name, bands: system ? system.bands : [] };
+    });
+  const classBands = buildClassBands(currentStats.rows, classList, bandLabels);
 
   const delta = (curr, prev) =>
     curr == null || prev == null ? null : round(curr - prev, 2);
@@ -1172,7 +1409,9 @@ async function buildAnalytics(schoolId, query = {}) {
       previous_mean: previousStats ? previousStats.mean : null,
       previous_pass_rate: previousStats ? previousStats.passRate : null,
       mean_delta: delta(currentStats.mean, previousStats ? previousStats.mean : null),
-      pass_delta: delta(currentStats.passRate, previousStats ? previousStats.passRate : null)
+      pass_delta: delta(currentStats.passRate, previousStats ? previousStats.passRate : null),
+      deviation: round(deviationOf(currentStats.rows.map(row => row.average)), 1),
+      value_addition: delta(currentStats.mean, previousStats ? previousStats.mean : null)
     },
     by_class: {
       categories: classNames,
@@ -1187,11 +1426,33 @@ async function buildAnalytics(schoolId, query = {}) {
         }] : [])
       ]
     },
-    grade_distribution: gradeLabels
-      .sort((a, b) => String(a).localeCompare(String(b)))
-      .map(label => ({ label, count: currentStats.grades[label] || 0 })),
+    grade_distribution: [
+      ...bandLabels.filter(label => gradeLabels.includes(label)),
+      ...gradeLabels.filter(label => !bandLabels.includes(label))
+    ].map(label => ({ label, count: currentStats.grades[label] || 0 })),
     trend,
     subjects: currentStats.bySubject,
+    subject_columns: current.subjects,
+    band_labels: bandLabels,
+    subject_analysis: subjectAnalysis,
+    class_bands: classBands,
+    subject_toppers: buildSubjectToppers(current.rows),
+    teachers: buildTeacherRows(subjectAnalysis),
+    top_performers: currentStats.rows.slice(0, 5).map(row => ({
+      name: row.name, class_name: row.class_name, average: row.average, grade: row.grade
+    })),
+    movement_rows: movementRows,
+    register: current.rows.map(row => ({
+      name: row.name,
+      admission_no: row.admission_no,
+      class_name: row.class_name,
+      average: row.average,
+      grade: row.grade,
+      stream_rank: row.stream_rank,
+      subjects: (row.subjects || []).map(s => ({
+        subject_id: s.subject_id, subject_code: s.subject_code, average: s.average, grade: s.grade
+      }))
+    })),
     heatmap: { rows: heatRows, cols: heatSubjects, values: heatValues },
     gender: [...currentStats.byGender.entries()].map(([name, mean]) => ({ name, mean })),
     movement: {
@@ -1281,5 +1542,14 @@ module.exports = {
   resolveContext,
   loadCalendar,
   invalidateResultsCaches,
-  yearState: dateState
+  yearState: dateState,
+  bandFor,
+  deviationOf,
+  bandLabelOrder,
+  countBands,
+  buildSubjectAnalysis,
+  buildClassBands,
+  buildSubjectToppers,
+  buildTeacherRows,
+  buildAnalysisCsv
 };

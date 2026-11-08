@@ -8,6 +8,7 @@ const {
   buildMerit,
   buildCompleteness,
   buildAnalytics,
+  buildAnalysisCsv,
   invalidateResultsCaches
 } = require('../services/results-engine');
 const { buildMeritPdf } = require('../services/merit-pdf');
@@ -145,6 +146,18 @@ router.get('/:schoolId/merit.csv', schoolBoundary, roles(...ALLOWED), async (req
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send('\ufeff' + lines.join('\r\n'));
+  } catch (error) { fail(res, error); }
+});
+
+router.get('/:schoolId/analysis.csv', schoolBoundary, roles(...ALLOWED), async (req, res) => {
+  try {
+    await enforceScope(req, req.query.class_id);
+    const analytics = await buildAnalytics(req.params.schoolId, req.query);
+    const ctx = analytics.context || {};
+    const filename = `analysis-${String(ctx.year_label || 'year').replace(/\W+/g, '-')}-${String(ctx.term_name || 'term').replace(/\W+/g, '-')}${ctx.class_name ? '-' + String(ctx.class_name).replace(/\W+/g, '-') : ''}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send('\ufeff' + buildAnalysisCsv(analytics));
   } catch (error) { fail(res, error); }
 });
 
