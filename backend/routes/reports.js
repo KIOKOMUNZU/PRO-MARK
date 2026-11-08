@@ -24,7 +24,7 @@ async function enforceReportClassAccess(req,classId,yearId){
 async function enforceReportLearnerAccess(req,learnerId,yearId){
  if(req.user.role==='CLASS_TEACHER')return enforceClassTeacherLearner(req,learnerId,yearId);
  if(req.user.role!=='TEACHER')return;
- const row=(await db.query(`SELECT COALESCE((SELECT le.class_id FROM learner_enrollments le WHERE le.school_id=$1 AND le.learner_id=$2 AND le.academic_year_id=$3 AND COALESCE(le.status,'ACTIVE') IN ('ACTIVE','COMPLETED') ORDER BY (le.status='ACTIVE') DESC,le.created_at DESC LIMIT 1),l.class_id) class_id FROM learners l WHERE l.id=$2 AND l.school_id=$1`,[req.params.schoolId,learnerId,yearId])).rows[0];
+ const row=(await db.query(`SELECT COALESCE((SELECT le.class_id FROM learner_enrollments le WHERE le.school_id=$1 AND le.learner_id=$2 AND le.academic_year_id=$3 AND COALESCE(le.status,'ACTIVE') IN ('ACTIVE','COMPLETED') ORDER BY (le.status='ACTIVE') DESC,le.enrolled_at DESC LIMIT 1),l.class_id) class_id FROM learners l WHERE l.id=$2 AND l.school_id=$1`,[req.params.schoolId,learnerId,yearId])).rows[0];
  if(!row||!row.class_id)throw Object.assign(new Error('Learner is not enrolled for the selected academic year.'),{status:404});
  await enforceReportClassAccess(req,row.class_id,yearId);
 }

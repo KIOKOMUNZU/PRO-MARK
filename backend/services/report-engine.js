@@ -19,7 +19,12 @@ function weighted(items) {
 function gradeFor(mark,bands) {
   const n = finite(mark);
   if (n === null) return null;
-  return (bands||[]).find(b => n >= Number(b.min_mark) && n <= Number(b.max_mark)) || null;
+  // Bands are stored as whole-number ranges. Looking a fractional average up
+  // directly (e.g. 59.5 against 50–59 and 60–69) matched no band and printed a
+  // blank grade, so grades are resolved from the rounded whole-number average
+  // exactly like the merit list does.
+  const rounded = Math.round(n + Number.EPSILON);
+  return (bands||[]).find(b => rounded >= Number(b.min_mark) && rounded <= Number(b.max_mark)) || null;
 }
 function autoDesignation(mark) {
   const n=finite(mark);
@@ -115,7 +120,7 @@ async function getContext(schoolId, learnerId, yearId, termId) {
       FROM learner_enrollments le
       WHERE le.school_id=l.school_id AND le.learner_id=l.id AND le.academic_year_id=ay.id
         AND COALESCE(le.status,'ACTIVE') IN ('ACTIVE','COMPLETED')
-      ORDER BY (COALESCE(le.status,'ACTIVE')='ACTIVE') DESC,le.created_at DESC
+      ORDER BY (COALESCE(le.status,'ACTIVE')='ACTIVE') DESC,le.enrolled_at DESC
       LIMIT 1
     ) le ON true
     LEFT JOIN classes c ON c.id=COALESCE(le.class_id,l.class_id)
@@ -169,7 +174,24 @@ async function resolveGrading(schoolId, meta, assessmentId=null, subjectId=null)
     ORDER BY (ac.subject_id IS NOT NULL) DESC,(ac.assessment_id IS NOT NULL) DESC,(ac.class_id IS NOT NULL) DESC,(ac.level_id IS NOT NULL) DESC,
              (ac.section_id IS NOT NULL) DESC,
              gs.id,gb.min_mark DESC`, [schoolId,meta.section_id,meta.level_id,assessmentId,subjectId,meta.class_id]);
-  if (!q.rows.length) return {system:null,bands:[]};
+  if (!q.rows.length) {
+    // Schools that have created a grading system but have not yet mapped it to
+    // an assessment/class configuration still expect grades to print. Fall back
+    // to their default active system instead of leaving every grade blank.
+    const fallbackSystem = (await db.query(
+      `SELECT id,name,code FROM grading_systems
+       WHERE school_id=$1 AND COALESCE(is_active,true)=true
+       ORDER BY (upper(code)='CBC') DESC,code,id LIMIT 1`,
+      [schoolId]
+    )).rows[0];
+    if (!fallbackSystem) return {system:null,bands:[]};
+    const fallbackBands = (await db.query(
+      `SELECT label,min_mark,max_mark,points,descriptor,remark
+       FROM grading_bands WHERE grading_system_id=$1 ORDER BY min_mark DESC`,
+      [fallbackSystem.id]
+    )).rows;
+    return {system:fallbackSystem,bands:fallbackBands};
+  }
   const system = q.rows[0];
   return {system:{id:system.id,name:system.name,code:system.code},bands:q.rows.filter(x=>x.id===system.id)};
   });

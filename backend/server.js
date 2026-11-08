@@ -18,6 +18,7 @@ app.use("/api/merit",require("./routes/merit"));
 app.use("/api/merit-weight-profiles",require("./routes/merit-v6-profiles"));
 app.use("/api/merit-v6-term",require("./routes/merit-v6-term"));
 app.use("/api/reports",require("./routes/reports"));
+app.use("/api/results-centre",require("./routes/results-centre"));
 app.use("/api/documents",require("./routes/documents"));
 app.use("/api/communications",require("./routes/communications"));
 app.use("/api/billing",require("./routes/billing"));

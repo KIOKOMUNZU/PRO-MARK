@@ -9,6 +9,7 @@ function putMarkSheetPdf(key,value){markSheetPdfCache.set(key,{value,expires:Dat
 router.use(authenticate);
 const {canonicalAssessmentName}=require('../services/assessment-utils');
 const {invalidateReportCaches}=require('../services/report-engine');
+const {invalidateResultsCaches}=require('../services/results-engine');
 const {invalidateReportPdfCache}=require('../services/report-pdf');
 const MARK_ROLES=['PLATFORM_OWNER','SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER'];
 async function requireMarkEntryAccess(req,sid){
@@ -228,7 +229,7 @@ router.post('/:schoolId/:yearId/:termId/class-bulk',schoolBoundary,roles('SCHOOL
       }
       await client.query('COMMIT');
     }catch(e){await client.query('ROLLBACK');throw e}finally{client.release()}
-    invalidateReportCaches(); invalidateReportPdfCache();
+    invalidateReportCaches(); invalidateReportPdfCache(); invalidateResultsCaches();
     res.status(201).json({created:created.length,skipped:skipped.length,assessments:created,subjects:subjects.length,message:`Created ${created.length} assessment(s) for ${subjects.length} subject(s).`});
   }catch(e){res.status(e.status||400).json({error:e.message});}
 });
@@ -292,7 +293,7 @@ router.post('/:schoolId/marks',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEAD
       RETURNING *`,
       [sid,b.learner_id,b.subject_id,b.class_id,b.academic_year_id,a.term_id,b.assessment_id,mark,req.user.user_id,String(b.remark||'').trim()||null]
     );
-    invalidateReportCaches(); invalidateReportPdfCache();
+    invalidateReportCaches(); invalidateReportPdfCache(); invalidateResultsCaches();
     res.json(q.rows);
   }catch(e){res.status(e.status||400).json({error:e.message});}
 });
@@ -404,7 +405,7 @@ router.post('/:schoolId/marks/save',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN',
     const totalSaved=Number(totalSavedResult.rows[0]?.total_saved||0);
     // A successful mark save must immediately invalidate report caches so the next
     // preview/PDF reflects the just-saved marks instead of a stale cached report.
-    invalidateReportCaches(); invalidateReportPdfCache();
+    invalidateReportCaches(); invalidateReportPdfCache(); invalidateResultsCaches();
     const savedNonBlank=rows.reduce((n,row)=>n+(row.mark!==null && row.mark!=='' && Number.isFinite(Number(row.mark)) ? 1 : 0),0);
     const learnerIds=rows.map(r=>r.learner_id).filter(Boolean);
     const learnerRows=learnerIds.length?(await client.query(`SELECT id,first_name,middle_name,last_name,admission_no FROM learners WHERE school_id=$1 AND id=ANY($2::uuid[]) ORDER BY last_name NULLS LAST,first_name NULLS LAST,middle_name NULLS LAST`,[sid,learnerIds])).rows:[];
@@ -485,7 +486,7 @@ router.post('/:schoolId/:yearId/:termId',schoolBoundary,roles('SCHOOL_ADMIN','AD
        b.deadline_at||null,b.class_id||null,b.subject_id||null,
        !!(b.cat_enabled===true||String(b.cat_enabled)==='true'),
        Number(b.final_conversion_weight||weight||0)]);
-    invalidateReportCaches(); invalidateReportPdfCache();
+    invalidateReportCaches(); invalidateReportPdfCache(); invalidateResultsCaches();
     res.status(201).json(q.rows[0]);
   }catch(e){res.status(e.status||400).json({error:e.message||'Unable to create assessment'});}
 });
@@ -610,7 +611,7 @@ router.patch('/:schoolId/:yearId/:termId/:assessmentId',schoolBoundary,roles('SC
         updatedCount=Math.max(1,peers.rowCount);
       }
       await client.query('COMMIT');
-      invalidateReportCaches(); invalidateReportPdfCache();
+      invalidateReportCaches(); invalidateReportPdfCache(); invalidateResultsCaches();
       res.json({...(q.rows[0]||current),updated_count:updatedCount,deadline_at:deadline,status});
     }catch(e){await client.query('ROLLBACK');throw e}finally{client.release();}
   }catch(e){
@@ -633,7 +634,7 @@ router.delete('/:schoolId/:yearId/:termId/:assessmentId',schoolBoundary,roles('S
     await c.query('DELETE FROM assessment_configurations WHERE school_id=$1 AND assessment_id=$2',[sid,assessmentId]);
     const q=await c.query('DELETE FROM assessments WHERE id=$1 AND school_id=$2 AND academic_year_id=$3 AND term_id=$4 RETURNING id,name',[assessmentId,sid,yearId,termId]);
     await c.query('COMMIT');
-    invalidateReportCaches(); invalidateReportPdfCache();
+    invalidateReportCaches(); invalidateReportPdfCache(); invalidateResultsCaches();
     res.json({ok:true,removed:q.rows[0]});
   }catch(e){try{await c.query('ROLLBACK')}catch{}res.status(e.status||400).json({error:e.message||'Unable to remove assessment.'});}finally{c.release();}
 });

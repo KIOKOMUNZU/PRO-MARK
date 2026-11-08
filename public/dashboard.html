@@ -370,6 +370,7 @@ body, main, .main-content, .dashboard-main {
 }
 </style>
 <link rel="stylesheet" href="/css/zelimu-gold-command-centre.css?v=3">
+<link rel="stylesheet" href="/css/results-centre.css?v=1">
 <script defer src="/js/zelimu-gold-theme.js?v=3"></script>
 </head>
 <body><main class="page">
@@ -448,6 +449,7 @@ body, main, .main-content, .dashboard-main {
    <div class="notice small" style="margin:0">School fees are maintained separately from ZELIMU platform subscription charges. M-Pesa automation and payroll are future integrations/modules.</div>
   </div></div>
   <div class="pm-module-group"><h3>04 · ACADEMIC</h3><div class="pm-admin-menu">
+   <button data-target="resultsCentre"><span class="pm-icon">🎯</span><span>Results Command Centre</span></button>
    <button data-target="pm24_6"><span class="pm-icon">📚</span><span>Academic Management</span></button>
    <button data-target="pm24_7"><span class="pm-icon">📝</span><span>Assessment &amp; Examination Management</span></button>
    <button data-target="pm24_8"><span class="pm-icon">✍️</span><span>Mark Entry</span></button>
@@ -678,7 +680,11 @@ body, main, .main-content, .dashboard-main {
 </form></div>
 <div id="myClassTeacherList" class="directory"></div>
 </section>
+<section id="resultsCentre" class="nav-managed-section card class-teacher-analytics" aria-label="Results Command Centre">
+<div class="zrc" id="zrcRoot"><div class="zrc-loading">Open the Results Command Centre from the Academic menu.</div></div>
+</section>
 </main>
+<script src="/js/results-centre.js?v=1"></script>
 <script>
 (function(){'use strict';
 const token=localStorage.getItem('token'),rawUser=localStorage.getItem('user');if(!token||!rawUser){location.href='/login.html';return;}let user;try{user=JSON.parse(rawUser)}catch{localStorage.clear();location.href='/login.html';return;}
@@ -825,7 +831,7 @@ window.zelimuOpenLearnerProfile=id=>{
 
 function safeOn(id,event,handler){const el=$(id);if(el)el.addEventListener(event,handler);return el;}
 function setBusy(btn,busy,text){if(!btn)return;btn.disabled=busy;if(busy){btn.dataset.oldText=btn.textContent;btn.textContent=text||'Working…';}else if(btn.dataset.oldText){btn.textContent=btn.dataset.oldText;delete btn.dataset.oldText;}}
-const MANAGED_SECTIONS=['feeStructurePrint','leavingCertificates','operations_workspace','biometrics','pm24_workspace','teacherMarking','identity','parents','documents','announcements','billing','resources','academic','classLists','people','zelimuAdmissionsWorkspaceV2','userControl','assign','assess','gradingSystems','markControl','publishResults','results','merit','analytics','leadership','reports'];
+const MANAGED_SECTIONS=['feeStructurePrint','leavingCertificates','operations_workspace','biometrics','pm24_workspace','teacherMarking','identity','parents','documents','announcements','billing','resources','academic','classLists','people','zelimuAdmissionsWorkspaceV2','userControl','assign','assess','gradingSystems','markControl','publishResults','results','merit','analytics','leadership','reports','resultsCentre'];
 function showSection(id){
   document.getElementById('zelimuAdmissionsWorkspaceV2')?.classList.remove('nav-active');
   // The 24-module navigation has its own controller (openPM24). Never let
@@ -835,6 +841,7 @@ function showSection(id){
   const selected=$(target);
   if(target==='biometrics'){fillBiometricPeople();loadBiometrics();}
   if(!selected || selected.classList.contains('role-hidden')) return;
+  if(target==='resultsCentre'&&window.ZRC)window.ZRC.activate();
   MANAGED_SECTIONS.forEach(sectionId=>{
     const el=$(sectionId);
     if(!el)return;
