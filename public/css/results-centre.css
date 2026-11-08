@@ -272,3 +272,70 @@
   .zrc-table-wrap,.zrc-matrix-wrap{max-height:none;overflow:visible}
   .zrc-table thead th,.zrc-matrix thead th{position:static}
 }
+
+/* ------------------------------------------------------------------
+   Dashboard shell compatibility.
+   zelimu-gold-command-centre.css loads after this file and forces a dark
+   .nav-managed-section gradient, cream ink and navy table headers with
+   !important, plus color:inherit on every div/span/td inside
+   #zelimuWorkspaceDisplay. Re-assert the light result surfaces at id
+   specificity so numerals and headings stay readable.
+   ------------------------------------------------------------------ */
+#resultsCentre.zrc{
+  background:#f7f8fa!important;
+  color:#1c2430!important;
+  border:0!important;
+  box-shadow:none!important;
+  padding:0!important;
+}
+#resultsCentre .zrc-panel{color:#1c2430!important}
+#resultsCentre h2,#resultsCentre h3,#resultsCentre h4{color:#0f2745!important}
+#resultsCentre p{color:#1c2430}
+#resultsCentre b,#resultsCentre strong{color:inherit}
+#resultsCentre label{color:#66707d!important}
+#resultsCentre .zrc-head h2{color:#fff!important}
+#resultsCentre .zrc-head p{color:#c9d5e6!important}
+#resultsCentre .zrc-head .zrc-eyebrow{color:#d7c08a!important}
+#resultsCentre .zrc-head-actions .zrc-btn{color:#fff!important}
+#resultsCentre .zrc-sub,#resultsCentre .zrc-muted,
+#resultsCentre .zrc-card-head .zrc-sub,
+#resultsCentre .zrc-kpi .zrc-kpi-label,
+#resultsCentre .zrc-kpi .zrc-kpi-foot,
+#resultsCentre .zrc-kpi .zrc-kpi-value small,
+#resultsCentre .zrc-field>span,
+#resultsCentre .zrc-legend{color:#66707d!important}
+#resultsCentre .zrc-kpi .zrc-kpi-value{color:#0f2745!important}
+#resultsCentre .zrc-context,
+#resultsCentre .zrc-kpi,
+#resultsCentre .zrc-card,
+#resultsCentre .zrc-chart-card,
+#resultsCentre .zrc-rail{background:#fff!important;border-color:#e3e7ee!important}
+#resultsCentre .zrc-field select,
+#resultsCentre .zrc-field input{background:#fff!important;color:#1c2430!important;border-color:#ccd4e0!important}
+#resultsCentre .zrc-tabs{background:#fff!important;border-bottom-color:#e3e7ee!important}
+#resultsCentre .zrc-tab{color:#66707d!important}
+#resultsCentre .zrc-tab:hover,#resultsCentre .zrc-tab.is-active{color:#17365d!important}
+#resultsCentre table{color:#1c2430!important}
+#resultsCentre table th{
+  background:#f4f6f9!important;color:#66707d!important;
+  border-color:#e3e7ee!important;font-size:10px!important;
+  letter-spacing:.06em!important;padding:8px 10px!important;
+}
+#resultsCentre table td{
+  color:#1c2430!important;background:transparent!important;
+  border-color:#eef1f5!important;padding:8px 10px!important;
+}
+#resultsCentre table tbody tr:hover td{background:#fafbfd!important}
+#resultsCentre .zrc-table .name{color:#0f2745!important}
+#resultsCentre .zrc-table .rank,#resultsCentre .zrc-table .avg{color:#17365d!important}
+#resultsCentre .zrc-table .adm{color:#66707d!important}
+#resultsCentre .zrc-table tr.top td{background:#fffdf5!important}
+#resultsCentre .zrc-chip strong,
+#resultsCentre .zrc-step b,
+#resultsCentre .zrc-pending b{color:#0f2745!important}
+#resultsCentre .zrc-chip span,
+#resultsCentre .zrc-chip em,
+#resultsCentre .zrc-step span{color:#66707d!important}
+#resultsCentre .zrc-badge.current{color:#0f7a52!important}
+#resultsCentre .zrc-badge.historical{color:#4a5568!important}
+#resultsCentre .zrc-badge.upcoming,#resultsCentre .zrc-badge.term-current{color:#8a6408!important}
