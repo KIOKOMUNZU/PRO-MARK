@@ -1,4 +1,5 @@
 
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
 /* ZELIMU CBC — APPROVED REFERENCE LAYOUT V7 */
 :root{
  --zgreen:#003f35;--zdeep:#00372f;--znavy:#10294d;
@@ -670,7 +671,6 @@ body .z7-panel {min-width:0!important;}
 
 /* ZELIMU PREMIUM TYPOGRAPHY V3 START */
 /* Scoped, CSS-only: no changes to dashboard HTML, JS, database or handlers. */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
 body .z7,body .z7-toolbar,body .z7-side,body .z7-workspace{
  font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif!important;
  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
