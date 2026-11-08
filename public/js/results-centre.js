@@ -891,12 +891,13 @@
     });
   }
 
+  var bootPromise = null;
   function boot() {
-    if (state.booted) return Promise.resolve();
+    if (bootPromise) return bootPromise;
     state.booted = true;
     shell();
     bind();
-    return loadOptions().then(function (options) {
+    bootPromise = loadOptions().then(function (options) {
       var yearId = String(options.current_year_id || (options.years[0] ? options.years[0].id : ''));
       var termId = String(options.current_term_id || '');
       if (!termId) {
@@ -913,10 +914,16 @@
     }).catch(function (error) {
       panel('command').innerHTML = '<div class="zrc-notice error">' + esc(error.message) + '</div>';
     });
+    return bootPromise;
   }
 
   window.ZRC = {
     activate: function () { boot(); },
+    open: function (tab) {
+      return boot().then(function () {
+        if (tab === 'command' || tab === 'merit' || tab === 'analytics') switchTab(tab);
+      });
+    },
     refresh: function () { return boot().then(function () { state.merit = null; state.analytics = null; return loadTab(state.tab); }); }
   };
 

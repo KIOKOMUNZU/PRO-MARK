@@ -684,7 +684,7 @@ body, main, .main-content, .dashboard-main {
 <div class="zrc" id="zrcRoot"><div class="zrc-loading">Open the Results Command Centre from the Academic menu.</div></div>
 </section>
 </main>
-<script src="/js/results-centre.js?v=1"></script>
+<script src="/js/results-centre.js?v=2"></script>
 <script>
 (function(){'use strict';
 const token=localStorage.getItem('token'),rawUser=localStorage.getItem('user');if(!token||!rawUser){location.href='/login.html';return;}let user;try{user=JSON.parse(rawUser)}catch{localStorage.clear();location.href='/login.html';return;}
@@ -853,6 +853,11 @@ function showSection(id){
   // the legacy section controller reinterpret pm24_1..pm24_24 as teacherMarking.
   if(/^pm24_\d+$/.test(String(id))) return;
   const target=MANAGED_SECTIONS.includes(id)?id:'teacherMarking';
+  if(target==='analytics'||target==='merit'){
+    showSection('resultsCentre');
+    if(window.ZRC)window.ZRC.open(target==='merit'?'merit':'analytics');
+    return;
+  }
   const selected=$(target);
   if(target==='biometrics'){fillBiometricPeople();loadBiometrics();}
   if(!selected || selected.classList.contains('role-hidden')) return;
@@ -2232,6 +2237,8 @@ async function openPM24(n){
    zelimuOpenPeopleMode(n===3?'teacher':'learner');
    return;
  }
+ if(n===10){showSection('resultsCentre');if(window.ZRC)window.ZRC.open('analytics');return;}
+ if(n===12){showSection('resultsCentre');if(window.ZRC)window.ZRC.open('merit');return;}
 
  const m=PM24[n];if(!m)return;
  const panel=$('pm24_workspace'),navCard=$('navTabs')?.closest('.pm-workflow-intro');
