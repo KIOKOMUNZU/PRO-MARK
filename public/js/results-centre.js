@@ -19,6 +19,7 @@
     cmd: null,
     merit: null,
     analytics: null,
+    identity: null,
     busy: false,
     cmdSel: { year: '', term: '', type: '', class: '' },
     meritSel: { year: '', term: '', assessment: '', class: '', pass: 50, strict: false },
@@ -172,7 +173,7 @@
     root.innerHTML = [
       '<div class="zrc-head">',
       '  <div>',
-      '    <div class="zrc-eyebrow">ACADEMIC OPERATIONS · ONE RESULTS PIPELINE</div>',
+      '    <div class="zrc-eyebrow"><span class="zrc-live-dot" aria-hidden="true"></span>ACADEMIC OPERATIONS · LIVE RESULTS PIPELINE</div>',
       '    <h2>Results Command Centre</h2>',
       '    <p>Capture marks, reproduce the exact merit list and read the same analytics — all from one date-aware context. Report cards, merit and publishing use one scoring path.</p>',
       '  </div>',
@@ -320,7 +321,7 @@
           if (!cell) {
             html.push('<td><span class="zrc-cell s0">—</span></td>');
           } else {
-            html.push('<td><span class="zrc-cell ' + cellClass(cell.percent) + '" title="' + cell.entered + ' of ' + cell.expected + ' learners scored">' + cell.percent + '%</span></td>');
+            html.push('<td><span class="zrc-cell ' + cellClass(cell.percent) + '" title="' + (cell.percent == null ? 'No subject configured' : cell.entered + ' of ' + cell.expected + ' learners scored') + '">' + (cell.percent == null ? '—' : cell.percent + '%') + '</span></td>');
           }
         });
         html.push('</tr>');
@@ -328,7 +329,7 @@
       html.push('</tbody></table>');
     }
     html.push('</div>');
-    html.push('<div class="zrc-legend"><span><i style="background:#fdecec"></i>Below 25%</span><span><i style="background:#fdf0e2"></i>25–49%</span><span><i style="background:#fbf6e3"></i>50–74%</span><span><i style="background:#eaf4e1"></i>75–94%</span><span><i style="background:#dff0e7"></i>95%+ ready</span><span><i style="background:#f4f6f9"></i>No subject</span></div>');
+    html.push('<div class="zrc-legend"><span><i style="background:#e05c5c"></i>Below 25%</span><span><i style="background:#f0923b"></i>25–49%</span><span><i style="background:#f6c445"></i>50–74%</span><span><i style="background:#8bc34a"></i>75–94%</span><span><i style="background:#43a047"></i>95%+ ready</span><span><i style="background:#f4f6f9"></i>No subject</span></div>');
     html.push('</div>');
 
     html.push('<div class="zrc-chart-grid">');
@@ -415,6 +416,18 @@
     return html.join('');
   }
 
+  function docStrip(context) {
+    var id = state.identity || {};
+    var ctx = context || {};
+    return [
+      '<div class="zrc-doc-strip">',
+      id.logo_url ? '<img src="' + esc(id.logo_url) + '" alt="School logo">' : '',
+      '<div class="zrc-doc-school"><b>' + esc(id.name || 'ZELIMU CBC SCHOOL') + '</b><span>' + esc(id.motto || 'Official merit reproduction') + '</span></div>',
+      '<div class="zrc-doc-ref"><span>Official merit document</span><em>' + esc(ctx.year_label || '') + ' · ' + esc(ctx.term_name || '') + ' · ' + esc(ctx.assessment_label || 'Term score') + '</em></div>',
+      '</div>'
+    ].join('');
+  }
+
   function renderMerit(data) {
     state.merit = data;
     var stats = data.stats || {};
@@ -425,7 +438,7 @@
       });
     }
     var view = Object.assign({}, data, { rows: rows });
-    var html = [contextBar(state.meritSel)];
+    var html = [docStrip(data.context), contextBar(state.meritSel)];
     if (!rows.length) {
       html.push('<div class="zrc-notice warn">' + esc(data.diagnostics || 'No marks are available for this reproduction.') + '</div>');
     }
@@ -473,18 +486,27 @@
 
   /* ---------- SVG chart primitives ---------- */
 
+  var chartUid = 0;
+  function uid(prefix) { chartUid += 1; return prefix + chartUid; }
+
+  function grad(id, from, to, horizontal) {
+    return '<defs><linearGradient id="' + id + '" x1="0" y1="0" x2="' + (horizontal ? '1' : '0') + '" y2="' + (horizontal ? '0' : '1') + '">' +
+      '<stop offset="0" stop-color="' + from + '"></stop><stop offset="1" stop-color="' + to + '"></stop></linearGradient></defs>';
+  }
+
   function svg(width, height, body, label) {
     return '<svg class="zrc-chart" viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="' + esc(label || 'chart') + '" preserveAspectRatio="xMidYMid meet">' + body + '</svg>';
   }
 
   function barChart(categories, series, label) {
-    var W = 560, H = 260, left = 38, right = 12, top = 14, bottom = 56;
+    var W = 1120, H = 300, left = 46, right = 16, top = 26, bottom = 64;
     var plotW = W - left - right, plotH = H - top - bottom;
     var max = 100;
     var groups = Math.max(categories.length, 1);
     var groupW = plotW / groups;
-    var barW = Math.min(26, (groupW * 0.62) / Math.max(series.length, 1));
-    var body = [];
+    var barW = Math.min(56, (groupW * 0.62) / Math.max(series.length, 1));
+    var gid = uid('zrcBarGrad');
+    var body = [grad(gid, '#2e5f96', '#12294a', false)];
     for (var g = 0; g <= 4; g++) {
       var y = top + (plotH * g) / 4;
       var value = Math.round(max - (max * g) / 4);
@@ -499,16 +521,20 @@
         if (value == null) return;
         var height = Math.max(0, (Number(value) / max) * plotH);
         var x = centre - totalBars / 2 + sIndex * barW;
-        body.push('<rect class="zrc-bar' + (sIndex > 0 ? ' prev' : '') + '" x="' + x.toFixed(1) + '" y="' + (top + plotH - height).toFixed(1) + '" width="' + (barW - 3).toFixed(1) + '" height="' + height.toFixed(1) + '" rx="2"><title>' + esc(category + ': ' + num(value, 1)) + '</title></rect>');
+        var yTop = top + plotH - height;
+        body.push('<rect class="zrc-bar v' + (sIndex > 0 ? ' prev' : '') + '" style="animation-delay:' + (index * 70 + sIndex * 40) + 'ms" fill="' + (sIndex > 0 ? '#c9d3e2' : 'url(#' + gid + ')') + '" x="' + x.toFixed(1) + '" y="' + yTop.toFixed(1) + '" width="' + (barW - 3).toFixed(1) + '" height="' + height.toFixed(1) + '" rx="2"><title>' + esc(category + ': ' + num(value, 1)) + '</title></rect>');
+        if (sIndex === 0 && height > 0) {
+          body.push('<text class="zrc-bar-value" x="' + (x + (barW - 3) / 2).toFixed(1) + '" y="' + (yTop - 4).toFixed(1) + '">' + num(value, 1) + '</text>');
+        }
       });
       body.push('<text class="zrc-axis-label" x="' + centre.toFixed(1) + '" y="' + (top + plotH + 16) + '" text-anchor="middle">' + esc(String(category).slice(0, 14)) + '</text>');
     });
     body.push('<line class="zrc-axis" x1="' + left + '" y1="' + (top + plotH) + '" x2="' + (W - right) + '" y2="' + (top + plotH) + '"></line>');
-    return svg(W, H, body.join(''), label);
+    return '<div class="zrc-chart-scroll">' + svg(W, H, body.join(''), label) + '</div>';
   }
 
   function lineChart(points, label, secondary) {
-    var W = 560, H = 240, left = 38, right = 14, top = 16, bottom = 44;
+    var W = 430, H = 230, left = 34, right = 12, top = 16, bottom = 44;
     var plotW = W - left - right, plotH = H - top - bottom;
     if (!points.length) return '<div class="zrc-empty">No trend data yet.</div>';
     var step = points.length > 1 ? plotW / (points.length - 1) : 0;
@@ -527,13 +553,18 @@
     }
     function draw(values, extraClass, dots) {
       var coords = xy(values);
-      body.push('<path class="zrc-line ' + (extraClass || '') + '" d="' + coords.map(function (p, i) { return (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' ') + '"></path>');
+      body.push('<path class="zrc-line ' + (extraClass || '') + '"' + (extraClass === 'main' ? ' pathLength="1"' : '') + ' d="' + coords.map(function (p, i) { return (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' ') + '"></path>');
       if (dots) coords.forEach(function (p, i) {
         body.push('<circle class="zrc-dot" cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="3.2"><title>' + esc(points[i].label + ': ' + num(values[i], 1)) + '</title></circle>');
       });
     }
+    var mainVals = points.map(function (p) { return Number(p.mean) || 0; });
+    var up = xy(mainVals.map(function (v) { return Math.min(100, v + 5); }));
+    var lo = xy(mainVals.map(function (v) { return Math.max(0, v - 5); }));
+    body.push('<path class="zrc-band" d="' + up.map(function (p, i) { return (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' ') + ' ' +
+      lo.slice().reverse().map(function (p) { return 'L' + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' ') + ' Z"></path>');
     if (secondary && secondary.length === points.length) draw(secondary, 'prev', false);
-    draw(points.map(function (p) { return p.mean; }), '', true);
+    draw(mainVals, 'main', true);
     points.forEach(function (p, index) {
       var x = left + (points.length > 1 ? step * index : plotW / 2);
       body.push('<text class="zrc-axis-label" x="' + x.toFixed(1) + '" y="' + (H - bottom + 18) + '" text-anchor="middle">' + esc(String(p.label).slice(0, 12)) + '</text>');
@@ -559,32 +590,39 @@
       var x2 = cx + r * Math.cos(end), y2 = cy + r * Math.sin(end);
       var x3 = cx + inner * Math.cos(end), y3 = cy + inner * Math.sin(end);
       var x4 = cx + inner * Math.cos(angle), y4 = cy + inner * Math.sin(angle);
-      body.push('<path class="zrc-donut-seg" fill="' + DONUT_COLORS[index % DONUT_COLORS.length] + '" d="M' + x1.toFixed(1) + ' ' + y1.toFixed(1) +
+      body.push('<path class="zrc-donut-seg" style="animation-delay:' + (index * 90) + 'ms" fill="' + DONUT_COLORS[index % DONUT_COLORS.length] + '" d="M' + x1.toFixed(1) + ' ' + y1.toFixed(1) +
         ' A' + r + ' ' + r + ' 0 ' + large + ' 1 ' + x2.toFixed(1) + ' ' + y2.toFixed(1) +
         ' L' + x3.toFixed(1) + ' ' + y3.toFixed(1) +
         ' A' + inner + ' ' + inner + ' 0 ' + large + ' 0 ' + x4.toFixed(1) + ' ' + y4.toFixed(1) + ' Z"><title>' + esc(item.label + ': ' + item.count) + '</title></path>');
+      var frac = Number(item.count) / total;
+      if (frac >= 0.05) {
+        var mid = angle + slice / 2, lr = (r + inner) / 2;
+        body.push('<text class="zrc-donut-pct" x="' + (cx + lr * Math.cos(mid)).toFixed(1) + '" y="' + (cy + lr * Math.sin(mid) + 3).toFixed(1) + '">' + Math.round(frac * 100) + '%</text>');
+      }
       angle = end;
     });
     body.push('<text x="' + cx + '" y="' + (cy - 2) + '" text-anchor="middle" style="font:700 24px Georgia,serif;fill:#0f2745">' + total + '</text>');
     body.push('<text x="' + cx + '" y="' + (cy + 16) + '" text-anchor="middle" style="font:600 10px Segoe UI,sans-serif;fill:#7b8695;letter-spacing:.08em">LEARNERS</text>');
     var legend = items.map(function (item, index) {
-      return '<span><i style="background:' + DONUT_COLORS[index % DONUT_COLORS.length] + '"></i>' + esc(item.label) + ' · <b>' + item.count + '</b></span>';
+      return '<span><i style="background:' + DONUT_COLORS[index % DONUT_COLORS.length] + '"></i>' + esc(item.label) + ' · <b>' + item.count + '</b> (' + Math.round((Number(item.count) / total) * 100) + '%)</span>';
     }).join('');
     return svg(W, H, body.join(''), label) + '<div class="zrc-legend-row">' + legend + '</div>';
   }
 
   function hbars(items, label) {
     if (!items.length) return '<div class="zrc-empty">No subject data yet.</div>';
-    var W = 560, rowH = 30, top = 6, left = 150, right = 44;
+    var W = 430, rowH = 26, top = 6, left = 118, right = 40;
     var H = top + items.length * rowH + 6;
     var plotW = W - left - right;
-    var body = [];
+    var gidN = uid('zrcHbN'), gidG = uid('zrcHbG');
+    var body = [grad(gidN, '#2e5f96', '#17365d', true), grad(gidG, '#e3b74e', '#b8860b', true)];
     items.forEach(function (item, index) {
       var y = top + index * rowH;
       var width = Math.max(2, (Math.max(0, Math.min(100, Number(item.mean) || 0)) / 100) * plotW);
-      body.push('<text class="zrc-axis-label" x="' + (left - 8) + '" y="' + (y + 17) + '" text-anchor="end" style="fill:#354051;font-weight:600">' + esc(String(item.name).slice(0, 22)) + '</text>');
+      var gold = index % 2 === 1;
+      body.push('<text class="zrc-axis-label" x="' + (left - 8) + '" y="' + (y + 17) + '" text-anchor="end" style="fill:#354051;font-weight:600">' + esc(String(item.name).slice(0, 18)) + '</text>');
       body.push('<rect x="' + left + '" y="' + (y + 6) + '" width="' + plotW + '" height="14" rx="4" fill="#eef1f6"></rect>');
-      body.push('<rect class="zrc-bar' + (index % 2 ? ' gold' : '') + '" x="' + left + '" y="' + (y + 6) + '" width="' + width.toFixed(1) + '" height="14" rx="4"><title>' + esc(item.name + ': ' + num(item.mean, 1)) + '</title></rect>');
+      body.push('<rect class="zrc-bar h' + (gold ? ' gold' : '') + '" style="animation-delay:' + (index * 70) + 'ms" fill="url(#' + (gold ? gidG : gidN) + ')" x="' + left + '" y="' + (y + 6) + '" width="' + width.toFixed(1) + '" height="14" rx="4"><title>' + esc(item.name + ': ' + num(item.mean, 1)) + '</title></rect>');
       body.push('<text class="zrc-axis-label" x="' + (W - right + 6) + '" y="' + (y + 17) + '" style="font-weight:700;fill:#0f2745">' + num(item.mean, 1) + '</text>');
     });
     return svg(W, H, body.join(''), label);
@@ -602,7 +640,7 @@
 
   function heatmap(rows, cols, values, label) {
     if (!rows.length || !cols.length) return '<div class="zrc-empty">No subject mastery data yet.</div>';
-    var W = 560, left = 118, top = 58, cellH = 26, cellW = Math.max(24, (W - left - 8) / cols.length);
+    var W = 1120, left = 150, top = 64, cellH = 34, cellW = Math.max(24, (W - left - 8) / cols.length);
     var H = top + rows.length * cellH + 8;
     var body = [];
     cols.forEach(function (col, index) {
@@ -618,7 +656,7 @@
         if (value != null) body.push('<text x="' + (left + colIndex * cellW + cellW / 2) + '" y="' + (y + cellH / 2) + '">' + num(value, 0) + '</text>');
       });
     });
-    return svg(W, H, body.join(''), label);
+    return '<div class="zrc-chart-scroll"><svg class="zrc-chart zrc-heat" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(label || 'chart') + '" preserveAspectRatio="xMidYMid meet">' + body.join('') + '</svg></div>';
   }
 
   function sparkline(values) {
@@ -687,7 +725,7 @@
 
     html.push('<div class="zrc-chart-card wide"><h3>Subject mastery by class</h3><div class="zrc-sub">Mean score per class and subject — darker red is support needed, green is secure.</div>' +
       heatmap(data.heatmap.rows, data.heatmap.cols, data.heatmap.values, 'Subject mastery by class') +
-      '<div class="zrc-legend-row"><span><i style="background:#a83a32"></i>Below 40</span><span><i style="background:#c98a1e"></i>40–59</span><span><i style="background:#b8860b"></i>60–69</span><span><i style="background:#3f8f63"></i>70–79</span><span><i style="background:#0f7a52"></i>80+</span></div></div>');
+      '<div class="zrc-heat-scale"><i></i><div class="zrc-heat-ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div></div></div>');
 
     if (data.progression && data.progression.length) {
       html.push('<div class="zrc-chart-card"><h3>Assessment-type progression</h3><div class="zrc-sub">How the cohort performed in each assessment form this term.</div>' +
@@ -897,7 +935,11 @@
     state.booted = true;
     shell();
     bind();
-    bootPromise = loadOptions().then(function (options) {
+    bootPromise = Promise.all([
+      loadOptions(),
+      api('/api/settings/' + sid + '/identity').then(function (id) { state.identity = id || null; }).catch(function () { state.identity = null; })
+    ]).then(function (results) {
+      var options = results[0];
       var yearId = String(options.current_year_id || (options.years[0] ? options.years[0].id : ''));
       var termId = String(options.current_term_id || '');
       if (!termId) {
