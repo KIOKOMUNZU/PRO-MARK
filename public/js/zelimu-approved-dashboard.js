@@ -476,5 +476,9 @@ function make(){
 
 }
 function init(){make()}
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
+// IMMEDIATE SYNCHRONOUS EXECUTION: Do NOT wait for DOMContentLoaded if host is ready
+const hostEl=document.querySelector('.zelimu-command-v1')||document.querySelector('.zc-dashboard');
+if(hostEl){init();}
+else if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',init,{once:true});}
+else{init();}
 })();

@@ -1,4 +1,33 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZELIMU CBC School Dashboard</title><link rel="stylesheet" href="/css/app.css"><link rel="stylesheet" href="/css/zelimu-interior.css"><style>
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style id="z7-clean-viewport">
+  /* ZERO-FLASH SHIELD: Permanently eliminate all legacy headers, heroes & unselected sections */
+  body main.page > header,
+  body main.page > .portal-hero,
+  body main.page > .zelimu-legacy-stats,
+  body main.page > #announcementBanner,
+  body main.page > #passwordPanel:not(.zelimu-password-open),
+  body main.page > .nav-managed-section:not(.nav-active),
+  body main.page > #teacherMarking:not(.nav-active) {
+    display: none !important;
+  }
+  body main.page {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    background: #0f1e17 !important;
+  }
+  .zelimu-command-v1 {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    min-height: 100vh !important;
+  }
+  /* The approved modern command centre (.z7) has its own sidebar & navigation */
+  body:has(.z7) .pm-workflow-intro,
+  .zc-sidebar-hidden .pm-workflow-intro {
+    display: none !important;
+  }
+</style><title>ZELIMU CBC School Dashboard</title><link rel="stylesheet" href="/css/app.css"><link rel="stylesheet" href="/css/zelimu-interior.css"><style>
 .mark-progress-panel{margin:10px 0 14px}.progress-track{height:8px;background:rgba(0,0,0,.08);border-radius:99px;overflow:hidden;margin-top:6px}.progress-bar{height:100%;width:0;transition:width .2s ease}.bulk-mark-input{font-size:1.2rem;font-weight:850;text-align:center;min-width:110px;height:46px;border:2px solid #17365D;background:#fff;color:#0f172a;cursor:text;box-shadow:inset 0 1px 2px rgba(0,0,0,.05)}.bulk-mark-input:focus{outline:3px solid rgba(217,164,65,.45);outline-offset:1px;border-color:#D9A441;background:#fffef7}.save-status{white-space:nowrap;font-size:.85rem}.deadline-open{font-weight:700}.deadline-locked{font-weight:700}.mark-toolbar{align-items:center}
 .sf-form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:14px;align-items:end}.sf-form-grid>label{display:flex;flex-direction:column;gap:6px;min-width:0}.sf-form-grid input,.sf-form-grid select,.sf-form-grid textarea{width:100%;min-width:0;box-sizing:border-box}.sf-payment-card{overflow:hidden}.sf-payment-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:14px;align-items:end}.sf-payment-form>label{display:flex;flex-direction:column;gap:6px;min-width:0}.sf-payment-form input,.sf-payment-form select{width:100%;min-width:0;box-sizing:border-box}.sf-payment-form button{min-height:44px}.sf-form-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.sf-row-actions{display:flex;gap:6px;flex-wrap:wrap}.sf-row-actions .btn{white-space:nowrap}.sf-archived{opacity:.68}
 @media(max-width:600px){.sf-form-grid,.sf-payment-form{grid-template-columns:minmax(0,1fr)}.sf-form-actions>*{width:100%}.sf-row-actions .btn{flex:1 1 100%}}
