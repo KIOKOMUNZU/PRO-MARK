@@ -48,12 +48,23 @@ function make(){
  const activity=panel('Recent School Activity',`<div id="z7Activity"><div class="z7-empty">Loading recent school activity…</div></div>`,'pm24_2');
  const finance=panel('Fee Collection Overview',`<div class="z7-finance"><div class="z7-ring" id="z7FeeRing"><div class="z7-ringinner" id="z7FeeRate">—<small>Collection rate</small></div></div><div class="z7-finlist" id="z7FeeSummary">Loading school finance…</div></div><div class="z7-chart-context">Recent confirmed payments (up to 100 records)</div>${chart('Loading fee collections…','z7FinanceChart')}`,'pm24_28','Open Finance');
  const calendar=panel('School Calendar & Notices',`<div class="z7-tabs"><button type="button" class="selected" data-z7-tab="Upcoming">Upcoming</button><button type="button" data-z7-tab="Notices">Notices</button><button type="button" data-z7-tab="Events">Events</button></div><div class="z7-empty" id="z7Calendar">No upcoming school activities loaded</div>`,'announcements');
- host.innerHTML=`<div class="z7">${sidebar}${toolbar}<div class="z7-workspace"><div class="z7-heading"><div><h1>School Command Centre</h1><p id="z7Subtitle">Live school operations • ${esc(getSchool())}</p><p class="z7-live-status"><span class="z7-live-dot"></span><span id="z7LiveStatus">Connecting to school data…</span></p></div><div class="z7-heading-right"><div class="z7-date" id="z7Date"></div><button type="button" id="z7Refresh" class="z7-refresh">Refresh data</button>${button('+ Quick Actions ⌄','pm24_4','z7-quick')}</div></div><div class="z7-kpis">${metric('Learners','♟','z7Learners','pm24_4','Enrolled learners')}${metric('Staff','♟','z7Staff','pm24_3','Registered personnel')}${metric('Attendance','▦','z7Attendance','pm24_13','Daily attendance')}${metric('Fee Collection','▤','z7Fees','pm24_28','School finance')}${metric('Assessments','▣','z7Assessments','pm24_7','Assessment records')}${metric('Pending Tasks','☑','z7Tasks','pm24_2','Review workflows')}</div><div class="z7-grid">${performance}${attendance}${approvals}</div><div class="z7-grid">${activity}${finance}${calendar}</div><div class="z7-sectiontitle">Module Shortcuts</div><div class="z7-shortcuts">${shortcuts.map(([ic,name,target])=>`<button type="button" class="z7-shortcut" data-z7-target="${target}"><span class="bubble">${ic}</span><span>${name}</span></button>`).join('')}</div></div></div>`;
+ host.innerHTML=`<div class="z7">${sidebar}${toolbar}<div class="z7-workspace"><div class="z7-heading"><div><h1>School Command Centre</h1><p id="z7Subtitle">Live school operations • ${esc(getSchool())}</p><p class="z7-live-status"><span class="z7-live-dot"></span><span id="z7LiveStatus">Live school operations</span></p></div><div class="z7-heading-right"><div class="z7-date" id="z7Date"></div><button type="button" id="z7Refresh" class="z7-refresh">Refresh data</button>${button('+ Quick Actions ⌄','pm24_4','z7-quick')}</div></div><div class="z7-kpis">${metric('Learners','♟','z7Learners','pm24_4','Enrolled learners')}${metric('Staff','♟','z7Staff','pm24_3','Registered personnel')}${metric('Attendance','▦','z7Attendance','pm24_13','Daily attendance')}${metric('Fee Collection','▤','z7Fees','pm24_28','School finance')}${metric('Assessments','▣','z7Assessments','pm24_7','Assessment records')}${metric('Pending Tasks','☑','z7Tasks','pm24_2','Review workflows')}</div><div class="z7-grid">${performance}${attendance}${approvals}</div><div class="z7-grid">${activity}${finance}${calendar}</div><div class="z7-sectiontitle">Module Shortcuts</div><div class="z7-shortcuts">${shortcuts.map(([ic,name,target])=>`<button type="button" class="z7-shortcut" data-z7-target="${target}"><span class="bubble">${ic}</span><span>${name}</span></button>`).join('')}</div></div></div>`;
  const today=$('z7Date');if(today)today.textContent=new Intl.DateTimeFormat('en-KE',{weekday:'long',day:'numeric',month:'long',year:'numeric'}).format(new Date());
  const user=(()=>{try{return JSON.parse(localStorage.getItem('user')||'{}')}catch{return {}}})();
  const name=[user.first_name,user.middle_name,user.last_name].filter(Boolean).join(' ').trim();
  if($('z7User'))$('z7User').textContent=name||user.name||user.email||'Signed-in user';
  if($('z7Role'))$('z7Role').textContent=user.role?String(user.role).replaceAll('_',' '):'Role unavailable';
+ // INSTANT CACHE HYDRATION: Show last verified counts immediately
+ try {
+   const sid = user.school_id || new URLSearchParams(location.search).get('school_id') || 'default';
+   const cached = JSON.parse(localStorage.getItem('z7_cache_' + sid) || '{}');
+   if (cached.learners && $('z7Learners')) $('z7Learners').textContent = cached.learners;
+   if (cached.staff && $('z7Staff')) $('z7Staff').textContent = cached.staff;
+   if (cached.assessments && $('z7Assessments')) $('z7Assessments').textContent = cached.assessments;
+   if (cached.attendance && $('z7Attendance')) $('z7Attendance').textContent = cached.attendance;
+   if (cached.fees && $('z7Fees')) $('z7Fees').textContent = cached.fees;
+   if (cached.tasks && $('z7Tasks')) $('z7Tasks').textContent = cached.tasks;
+ } catch(e) {}
  function sync(){
   for(const [from,to] of [['learnerCount','z7Learners'],['teacherCount','z7Staff']]){
    const value=$(from)?.textContent?.trim();
@@ -418,6 +429,17 @@ function make(){
    const pendingFees=financeResult?Number(financeResult.outstanding>0):null;
    const tasks=[pendingAdmissions,pendingFees,pendingLeave,openAssessments,pendingTransport,openDiscipline].filter(Number.isFinite).reduce((sum,value)=>sum+value,0);
    $('z7Tasks').textContent=tasks.toLocaleString('en-KE');
+   try {
+     const sid = schoolId || 'default';
+     localStorage.setItem('z7_cache_' + sid, JSON.stringify({
+       learners: $('z7Learners')?.textContent,
+       staff: $('z7Staff')?.textContent,
+       assessments: $('z7Assessments')?.textContent,
+       attendance: $('z7Attendance')?.textContent,
+       fees: $('z7Fees')?.textContent,
+       tasks: $('z7Tasks')?.textContent
+     }));
+   } catch(e) {}
    const setAction=(key,value)=>{const node=$(`z7Action-${key}`);if(node)node.textContent=value===null?'—':typeof value==='number'?value.toLocaleString('en-KE'):String(value);};
    setAction('admissions',pendingAdmissions);
    setAction('fees',financeResult?money(financeResult.outstanding):null);
@@ -439,13 +461,15 @@ function make(){
   $('z7Refresh')?.addEventListener('click',load);
   $('z7YearSelect')?.addEventListener('change',()=>setTimeout(load,900));
   $('z7TermSelect')?.addEventListener('change',load);
+  setTimeout(load, 30);
   let attempts=0;
   const waitForPeriod=setInterval(()=>{
    attempts++;
-   if(($('z7YearSelect')?.value&&$('z7TermSelect')?.value)||attempts>=30){
-    clearInterval(waitForPeriod);load();
+   if(($('z7YearSelect')?.value&&$('z7TermSelect')?.value)||attempts>=6){
+    clearInterval(waitForPeriod);
+    if($('z7YearSelect')?.value&&$('z7TermSelect')?.value)load();
    }
-  },500);
+  },300);
   setInterval(()=>{if(document.visibilityState==='visible')load();},60000);
  }
  installLiveDashboard();
