@@ -1,0 +1,1193 @@
+diff --git a/backend/routes/results-centre.js b/backend/routes/results-centre.js
+index 9714fc5..b8d33db 100644
+--- a/backend/routes/results-centre.js
++++ b/backend/routes/results-centre.js
+@@ -8,6 +8,7 @@ const {
+   buildMerit,
+   buildCompleteness,
+   buildAnalytics,
++  buildAnalysisCsv,
+   invalidateResultsCaches
+ } = require('../services/results-engine');
+ const { buildMeritPdf } = require('../services/merit-pdf');
+@@ -148,6 +149,18 @@ router.get('/:schoolId/merit.csv', schoolBoundary, roles(...ALLOWED), async (req
+   } catch (error) { fail(res, error); }
+ });
+ 
++router.get('/:schoolId/analysis.csv', schoolBoundary, roles(...ALLOWED), async (req, res) => {
++  try {
++    await enforceScope(req, req.query.class_id);
++    const analytics = await buildAnalytics(req.params.schoolId, req.query);
++    const ctx = analytics.context || {};
++    const filename = `analysis-${String(ctx.year_label || 'year').replace(/\W+/g, '-')}-${String(ctx.term_name || 'term').replace(/\W+/g, '-')}${ctx.class_name ? '-' + String(ctx.class_name).replace(/\W+/g, '-') : ''}.csv`;
++    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
++    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
++    res.send('\ufeff' + buildAnalysisCsv(analytics));
++  } catch (error) { fail(res, error); }
++});
++
+ router.get('/:schoolId/merit.pdf', schoolBoundary, roles(...ALLOWED), async (req, res) => {
+   try {
+     await enforceScope(req, req.query.class_id);
+diff --git a/backend/services/results-engine.js b/backend/services/results-engine.js
+index 704ab80..10bc079 100644
+--- a/backend/services/results-engine.js
++++ b/backend/services/results-engine.js
+@@ -427,6 +427,206 @@ function competitionRanks(items, valueOf) {
+   return { sorted, ranks, total: sorted.length };
+ }
+ 
++function deviationOf(values) {
++  const nums = (values || []).filter(v => v != null && isFinite(Number(v))).map(Number);
++  if (!nums.length) return null;
++  const mean = nums.reduce((a, b) => a + b, 0) / nums.length;
++  return Math.sqrt(nums.reduce((a, v) => a + (v - mean) ** 2, 0) / nums.length);
++}
++
++// Band columns follow the admin-saved order (highest band first), unioning every
++// system actually in scope so mixed-class counts never lose a label.
++function bandLabelOrder(grading, classRecords) {
++  const labels = [];
++  const push = system => (system ? system.bands : []).forEach(b => {
++    if (b.label && !labels.includes(b.label)) labels.push(b.label);
++  });
++  if (grading) {
++    push(grading.defaultSystem);
++    (classRecords || []).forEach(c => push(systemForClass(grading, c)));
++    grading.systems.forEach(system => push(system));
++  }
++  return labels;
++}
++
++function countBands(grades, labels) {
++  const counts = {};
++  (labels || []).forEach(label => { counts[label] = 0; });
++  (grades || []).forEach(grade => {
++    if (!grade) return;
++    counts[grade] = (counts[grade] || 0) + 1;
++  });
++  return counts;
++}
++
++function subjectBucketsOf(rows) {
++  const buckets = new Map();
++  for (const row of rows || []) {
++    for (const subject of row.subjects || []) {
++      if (subject.average == null) continue;
++      const key = String(subject.subject_id);
++      if (!buckets.has(key)) {
++        buckets.set(key, {
++          subject_id: subject.subject_id,
++          subject_code: subject.subject_code || '',
++          subject_name: subject.subject_name || 'Subject',
++          teacher: '',
++          values: [],
++          grades: []
++        });
++      }
++      const bucket = buckets.get(key);
++      bucket.values.push(Number(subject.average));
++      bucket.grades.push(subject.grade || '');
++      if (!bucket.teacher && subject.teacher) bucket.teacher = subject.teacher;
++    }
++  }
++  return buckets;
++}
++
++function buildSubjectAnalysis(currentRows, previousRows, labels, scopeBands, passMark) {
++  const previous = subjectBucketsOf(previousRows);
++  const pass = finite(passMark) ?? 50;
++  return [...subjectBucketsOf(currentRows).values()].map(bucket => {
++    const mean = averageOf(bucket.values);
++    const band = bandFor(mean, scopeBands);
++    const prior = previous.get(String(bucket.subject_id));
++    const priorMean = prior ? averageOf(prior.values) : null;
++    return {
++      subject_id: bucket.subject_id,
++      subject_code: bucket.subject_code,
++      subject_name: bucket.subject_name,
++      teacher: bucket.teacher,
++      mean: round(mean, 2),
++      grade: band ? band.label : '',
++      high: round(Math.max(...bucket.values), 2),
++      low: round(Math.min(...bucket.values), 2),
++      pass: round((bucket.values.filter(v => v >= pass).length / bucket.values.length) * 100, 1),
++      dev: round(deviationOf(bucket.values), 1),
++      delta: priorMean == null ? null : round(mean - priorMean, 2),
++      counts: countBands(bucket.grades, labels),
++      scored: bucket.values.length
++    };
++  }).sort((a, b) => b.mean - a.mean || a.subject_name.localeCompare(b.subject_name));
++}
++
++function buildClassBands(currentRows, classList, labels) {
++  return (classList || []).map(entry => {
++    const rows = (currentRows || []).filter(r => (r.class_name || 'Unassigned') === entry.name);
++    const graded = rows.filter(r => r.average != null);
++    const mean = averageOf(graded.map(r => r.average));
++    const band = mean == null ? null : bandFor(mean, entry.bands);
++    const subjects = [...subjectBucketsOf(rows).values()].map(bucket => {
++      const subjectMean = averageOf(bucket.values);
++      const subjectBand = bandFor(subjectMean, entry.bands);
++      return {
++        subject_id: bucket.subject_id,
++        subject_code: bucket.subject_code,
++        subject_name: bucket.subject_name,
++        counts: countBands(bucket.grades, labels),
++        scored: bucket.values.length,
++        mean: round(subjectMean, 2),
++        grade: subjectBand ? subjectBand.label : ''
++      };
++    }).sort((a, b) => a.subject_name.localeCompare(b.subject_name));
++    return {
++      class_name: entry.name,
++      subjects,
++      average_counts: countBands(graded.map(r => r.grade), labels),
++      scored: graded.length,
++      mean: round(mean, 2),
++      grade: band ? band.label : ''
++    };
++  }).filter(entry => entry.scored > 0 || entry.subjects.length);
++}
++
++function buildSubjectToppers(rows) {
++  const tops = new Map();
++  for (const row of rows || []) {
++    for (const subject of row.subjects || []) {
++      if (subject.average == null) continue;
++      const key = String(subject.subject_id);
++      const current = tops.get(key);
++      if (!current || subject.average > current.average) {
++        tops.set(key, {
++          subject_id: subject.subject_id,
++          subject_code: subject.subject_code || '',
++          subject_name: subject.subject_name || 'Subject',
++          name: row.name,
++          class_name: row.class_name || '',
++          average: round(subject.average, 2),
++          grade: subject.grade || ''
++        });
++      }
++    }
++  }
++  return [...tops.values()].sort((a, b) => a.subject_name.localeCompare(b.subject_name));
++}
++
++function buildTeacherRows(subjectAnalysis) {
++  const byTeacher = new Map();
++  (subjectAnalysis || []).forEach(subject => {
++    if (!subject.teacher) return;
++    if (!byTeacher.has(subject.teacher)) byTeacher.set(subject.teacher, []);
++    byTeacher.get(subject.teacher).push(subject.mean);
++  });
++  return [...byTeacher.entries()]
++    .map(([teacher, means]) => ({ teacher, mean: round(averageOf(means), 2), subjects: means.length }))
++    .sort((a, b) => b.mean - a.mean || a.teacher.localeCompare(b.teacher));
++}
++
++function csvCell(value) {
++  const text = value == null ? '' : String(value);
++  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
++}
++
++function buildAnalysisCsv(analytics) {
++  const a = analytics || {};
++  const k = a.kpis || {};
++  const ctx = a.context || {};
++  const labels = a.band_labels || [];
++  const subjects = a.subject_columns || a.subjects || [];
++  const line = values => values.map(csvCell).join(',');
++  const bandValues = counts => labels.map(label => (counts || {})[label] || 0);
++  const out = [
++    'OFFICIAL PERFORMANCE ANALYSIS',
++    line(['Context', ctx.year_label || '', ctx.term_name || '', ctx.class_name || 'All classes']),
++    line(['Mean', k.mean, 'Mean grade', k.mean_grade, 'Deviation', k.deviation,
++      'Value addition', k.value_addition, 'Pass rate %', k.pass_rate, 'Pass mark', k.pass_mark, 'Ranked', k.learners]),
++    '',
++    line(['SUBJECT', 'TEACHER', 'MEAN', 'GRADE', 'HIGH', 'LOW', 'PASS %', 'DEVIATION', 'DELTA PREV', ...labels, 'SCORED']),
++    ...(a.subject_analysis || []).map(s => line([
++      s.subject_name, s.teacher, s.mean, s.grade, s.high, s.low, s.pass, s.dev, s.delta, ...bandValues(s.counts), s.scored
++    ])),
++    '',
++    line(['CLASS', 'SUBJECT', ...labels, 'SCORED', 'MEAN', 'GRADE']),
++    ...(a.class_bands || []).flatMap(c => [
++      ...c.subjects.map(s => line([c.class_name, s.subject_name, ...bandValues(s.counts), s.scored, s.mean, s.grade])),
++      line([c.class_name, 'AVERAGE', ...bandValues(c.average_counts), c.scored, c.mean, c.grade])
++    ]),
++    '',
++    line(['RANK', 'LEARNER', 'ADM', 'CLASS',
++      ...subjects.flatMap(s => [(s.subject_code || s.subject_name) + ' MARK', (s.subject_code || s.subject_name) + ' GRADE']),
++      'AVERAGE', 'GRADE']),
++    ...(a.register || []).map((row, index) => {
++      const byId = new Map((row.subjects || []).map(s => [String(s.subject_id), s]));
++      return line([
++        row.stream_rank ?? (row.average == null ? '' : index + 1),
++        row.name, row.admission_no || '', row.class_name || '',
++        ...subjects.flatMap(s => {
++          const found = byId.get(String(s.subject_id));
++          return [found && found.average != null ? found.average : '', found && found.average != null ? found.grade || '' : ''];
++        }),
++        row.average ?? '', row.grade || ''
++      ]);
++    }),
++    '',
++    line(['LEARNER', 'CLASS', 'CURRENT', 'PREVIOUS', 'CHANGE', 'GRADE', 'STATUS']),
++    ...(a.movement_rows || []).map(m => line([m.name, m.class_name || '', m.average, m.previous, m.delta, m.grade || '', m.status]))
++  ];
++  return out.join('\r\n');
++}
++
+ async function buildMerit(schoolId, query = {}, options = {}) {
+   const ctx = options.ctx || await resolveContext(schoolId, query);
+   const { year, term } = ctx;
+@@ -673,6 +873,7 @@ async function buildMerit(schoolId, query = {}, options = {}) {
+     rows: displayRows,
+     subjects: subjectColumns,
+     subject_rankings: subjectRankings,
++    subject_toppers: buildSubjectToppers(displayRows),
+     stats: {
+       learners: displayRows.length,
+       ranked: scored.length,
+@@ -1054,6 +1255,15 @@ async function buildAnalytics(schoolId, query = {}) {
+ 
+   const currentStats = summarise(current);
+   const previousStats = previous ? summarise(previous) : null;
++  const [grading, classRecords] = await Promise.all([loadGrading(schoolId), loadClasses(schoolId)]);
++  const scopeClasses = query.class_id
++    ? classRecords.filter(c => String(c.id) === String(query.class_id))
++    : classRecords;
++  const scopeSystem = query.class_id
++    ? systemForClass(grading, scopeClasses[0] || { id: query.class_id })
++    : grading.defaultSystem;
++  const scopeBands = scopeSystem ? scopeSystem.bands : [];
++  const bandLabels = bandLabelOrder(grading, scopeClasses);
+   const classNames = [...new Set([
+     ...currentStats.byClass.keys(),
+     ...(previousStats ? previousStats.byClass.keys() : [])
+@@ -1089,6 +1299,7 @@ async function buildAnalytics(schoolId, query = {}) {
+       learner_id: row.learner_id,
+       name: row.name,
+       class_name: row.class_name,
++      grade: row.grade || '',
+       average: row.average,
+       previous: prior,
+       delta: round(row.average - prior, 2)
+@@ -1149,6 +1360,7 @@ async function buildAnalytics(schoolId, query = {}) {
+         learner_id: row.learner_id,
+         name: row.name,
+         class_name: row.class_name,
++        grade: row.grade || '',
+         average: row.average,
+         previous: prior ?? null,
+         delta: prior == null || row.average == null ? null : round(row.average - prior, 2)
+@@ -1158,6 +1370,31 @@ async function buildAnalytics(schoolId, query = {}) {
+     .sort((a, b) => a.average - b.average)
+     .slice(0, 12);
+ 
++  const supportRows = atRisk.slice(0, 4).map(row => ({ ...row, status: 'SUPPORT' }));
++  const usedIds = new Set(supportRows.map(row => String(row.learner_id)));
++  const decliners = movers
++    .filter(m => !usedIds.has(String(m.learner_id)) && m.delta <= -0.5)
++    .reverse().slice(0, 3)
++    .map(m => { usedIds.add(String(m.learner_id)); return { ...m, status: 'DECLINING' }; });
++  const improvers = movers
++    .filter(m => !usedIds.has(String(m.learner_id)) && m.delta >= 0.5)
++    .slice(0, 2)
++    .map(m => ({ ...m, status: 'IMPROVED' }));
++  const movementRows = [...supportRows, ...decliners, ...improvers];
++
++  const subjectAnalysis = buildSubjectAnalysis(
++    currentStats.rows, previousStats ? previousStats.rows : [],
++    bandLabels, scopeBands, currentStats.passMark
++  );
++  const classList = [...new Set(currentStats.rows.map(r => r.class_name || 'Unassigned'))]
++    .sort((a, b) => a.localeCompare(b))
++    .map(name => {
++      const record = classRecords.find(c => c.label === name);
++      const system = record ? systemForClass(grading, record) : grading.defaultSystem;
++      return { name, bands: system ? system.bands : [] };
++    });
++  const classBands = buildClassBands(currentStats.rows, classList, bandLabels);
++
+   const delta = (curr, prev) =>
+     curr == null || prev == null ? null : round(curr - prev, 2);
+ 
+@@ -1172,7 +1409,9 @@ async function buildAnalytics(schoolId, query = {}) {
+       previous_mean: previousStats ? previousStats.mean : null,
+       previous_pass_rate: previousStats ? previousStats.passRate : null,
+       mean_delta: delta(currentStats.mean, previousStats ? previousStats.mean : null),
+-      pass_delta: delta(currentStats.passRate, previousStats ? previousStats.passRate : null)
++      pass_delta: delta(currentStats.passRate, previousStats ? previousStats.passRate : null),
++      deviation: round(deviationOf(currentStats.rows.map(row => row.average)), 1),
++      value_addition: delta(currentStats.mean, previousStats ? previousStats.mean : null)
+     },
+     by_class: {
+       categories: classNames,
+@@ -1187,11 +1426,33 @@ async function buildAnalytics(schoolId, query = {}) {
+         }] : [])
+       ]
+     },
+-    grade_distribution: gradeLabels
+-      .sort((a, b) => String(a).localeCompare(String(b)))
+-      .map(label => ({ label, count: currentStats.grades[label] || 0 })),
++    grade_distribution: [
++      ...bandLabels.filter(label => gradeLabels.includes(label)),
++      ...gradeLabels.filter(label => !bandLabels.includes(label))
++    ].map(label => ({ label, count: currentStats.grades[label] || 0 })),
+     trend,
+     subjects: currentStats.bySubject,
++    subject_columns: current.subjects,
++    band_labels: bandLabels,
++    subject_analysis: subjectAnalysis,
++    class_bands: classBands,
++    subject_toppers: buildSubjectToppers(current.rows),
++    teachers: buildTeacherRows(subjectAnalysis),
++    top_performers: currentStats.rows.slice(0, 5).map(row => ({
++      name: row.name, class_name: row.class_name, average: row.average, grade: row.grade
++    })),
++    movement_rows: movementRows,
++    register: current.rows.map(row => ({
++      name: row.name,
++      admission_no: row.admission_no,
++      class_name: row.class_name,
++      average: row.average,
++      grade: row.grade,
++      stream_rank: row.stream_rank,
++      subjects: (row.subjects || []).map(s => ({
++        subject_id: s.subject_id, subject_code: s.subject_code, average: s.average, grade: s.grade
++      }))
++    })),
+     heatmap: { rows: heatRows, cols: heatSubjects, values: heatValues },
+     gender: [...currentStats.byGender.entries()].map(([name, mean]) => ({ name, mean })),
+     movement: {
+@@ -1281,5 +1542,14 @@ module.exports = {
+   resolveContext,
+   loadCalendar,
+   invalidateResultsCaches,
+-  yearState: dateState
++  yearState: dateState,
++  bandFor,
++  deviationOf,
++  bandLabelOrder,
++  countBands,
++  buildSubjectAnalysis,
++  buildClassBands,
++  buildSubjectToppers,
++  buildTeacherRows,
++  buildAnalysisCsv
+ };
+diff --git a/public/css/results-centre.css b/public/css/results-centre.css
+index dc20447..d07ad8e 100644
+--- a/public/css/results-centre.css
++++ b/public/css/results-centre.css
+@@ -130,7 +130,7 @@
+ 
+ /* Heat matrix */
+ .zrc-matrix-wrap{overflow:auto;max-height:520px}
+-.zrc-matrix{border-collapse:separate;border-spacing:0;width:100%;font-size:12px}
++.zrc-matrix{border-collapse:separate;border-spacing:0;width:100%;font-size:12px;overflow:visible}
+ .zrc-matrix th,.zrc-matrix td{padding:8px 9px;border-bottom:1px solid #eef1f5;text-align:center;white-space:nowrap}
+ .zrc-matrix thead th{
+   position:sticky;top:0;z-index:3;background:#f4f6f9;color:var(--zrc-muted);font-size:10px;font-weight:800;
+@@ -225,7 +225,7 @@
+ 
+ /* Data table */
+ .zrc-table-wrap{overflow:auto;max-height:600px;border-top:1px solid var(--zrc-line)}
+-.zrc-table{border-collapse:separate;border-spacing:0;width:100%;font-size:12px}
++.zrc-table{border-collapse:separate;border-spacing:0;width:100%;font-size:12px;overflow:visible}
+ .zrc-table th,.zrc-table td{padding:8px 10px;border-bottom:1px solid #eef1f5;white-space:nowrap;text-align:left}
+ .zrc-table thead th{position:sticky;top:0;z-index:3;background:#f4f6f9;color:var(--zrc-muted);font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid #dde3ec}
+ .zrc-table tbody tr:hover td{background:#fafbfd}
+@@ -297,6 +297,64 @@
+ .zrc-delta.down{background:#fdecec;color:#a51f1f}
+ .zrc-delta.flat{background:#eef1f6;color:#5a6577}
+ 
++/* Analysis downloads strip */
++.zrc-downloads{
++  display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;
++  background:linear-gradient(120deg,#fff,#fbf3dd 160%);border:1px solid #e9dcb8;border-radius:12px;
++  padding:12px 16px;margin-bottom:16px;box-shadow:0 1px 2px rgba(16,35,60,.04);
++}
++.zrc-downloads-txt b{display:block;font-family:var(--zrc-serif);font-size:15px;color:var(--zrc-navy-deep)}
++.zrc-downloads-txt span{display:block;font-size:11.5px;color:var(--zrc-muted);margin-top:2px;max-width:64ch}
++.zrc-downloads-actions{display:flex;gap:8px;flex-wrap:wrap}
++
++/* Grade chips, band tables, class groups */
++.zrc-grade.mini{font-size:9.5px;padding:1px 5px;min-width:22px;border-radius:4px;margin-top:2px}
++.zrc-grade.none{background:#f4f6f9;color:#8a94a3}
++.zrc-table td.markcell{line-height:1.3;padding-top:6px;padding-bottom:6px}
++.zrc-table tfoot td{background:#f4f6f9;font-weight:800;border-top:2px solid #dde3ec;color:var(--zrc-navy-deep)}
++.zrc-bands th.band-col{white-space:nowrap}
++.zrc-bands .band-dot{display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--bc,#8a94a3);margin-right:5px;box-shadow:0 0 6px var(--bc,transparent)}
++.zrc-bands td.band-count b{display:inline-flex;min-width:26px;justify-content:center;padding:2px 6px;border-radius:6px;font-size:11.5px;font-variant-numeric:tabular-nums}
++.zrc-bands td.band-count .zero{color:#b6bec9}
++.zrc-table .zrc-classrow td{background:var(--zrc-navy);color:var(--zrc-gold-bright);font-weight:800;letter-spacing:.08em;text-transform:uppercase;font-size:11px;padding:7px 10px}
++.zrc-table .zrc-avgrow td{background:var(--zrc-gold-soft);font-weight:700}
++.zrc-table td.subj{padding-left:24px}
++.zrc-vscroll{overflow:auto;max-height:440px;border:1px solid var(--zrc-line);border-radius:8px;scrollbar-width:thin;scrollbar-color:#b8860b #f0f2f6}
++.zrc-vscroll::-webkit-scrollbar{width:10px;height:10px}
++.zrc-vscroll::-webkit-scrollbar-track{background:#f0f2f6;border-radius:99px}
++.zrc-vscroll::-webkit-scrollbar-thumb{background:linear-gradient(180deg,#d9b45b,#b8860b);border-radius:99px;border:2px solid #f0f2f6}
++.zrc-vscroll::-webkit-scrollbar-thumb:hover{background:#f0c465}
++
++/* Subject toppers */
++.zrc-toppers{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;padding:14px 16px}
++.zrc-topper{
++  border:1px solid var(--zrc-line);border-top:3px solid var(--tc,#b8860b);border-radius:10px;padding:10px 12px;
++  background:linear-gradient(180deg,#fff,#fafbfd);animation:zrc-rise .5s ease both;
++  transition:transform .18s ease,box-shadow .18s ease;min-width:0;
++}
++.zrc-topper:hover{transform:translateY(-3px);box-shadow:0 8px 18px rgba(16,35,60,.14),0 0 12px rgba(184,134,11,.18)}
++.zrc-topper .t-sub{font-size:9.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--tc,#b8860b)}
++.zrc-topper .t-name{font-weight:800;font-size:12.5px;color:var(--zrc-navy-deep);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
++.zrc-topper .t-meta{font-size:10.5px;color:var(--zrc-muted);margin-top:1px}
++.zrc-topper .t-score{display:flex;align-items:center;gap:6px;margin-top:6px;font-family:var(--zrc-serif);font-size:19px;font-weight:700;color:var(--zrc-navy-deep);font-variant-numeric:tabular-nums}
++
++/* Top performers list */
++.zrc-toplist{display:flex;flex-direction:column;gap:6px}
++.zrc-toprow{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--zrc-line);border-radius:9px;background:#fcfdff;transition:border-color .15s ease,box-shadow .15s ease}
++.zrc-toprow:hover{border-color:#d9c08a;box-shadow:0 0 10px rgba(184,134,11,.15)}
++.zrc-toprow .pos{flex:0 0 24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;background:var(--zrc-navy);color:#f0c465}
++.zrc-toprow:first-child .pos{background:linear-gradient(180deg,#f0c465,#b8860b);color:#fff;box-shadow:0 0 10px rgba(184,134,11,.5)}
++.zrc-toprow .who{flex:1;min-width:0}
++.zrc-toprow .who b{display:block;font-size:12.5px;color:var(--zrc-navy-deep);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
++.zrc-toprow .who em{font-style:normal;font-size:10.5px;color:var(--zrc-muted)}
++.zrc-toprow .score{font-weight:800;font-size:14px;color:var(--zrc-navy)}
++
++/* Movement status chips */
++.zrc-status{display:inline-flex;padding:3px 8px;border-radius:999px;font-size:9.5px;font-weight:800;letter-spacing:.07em}
++.zrc-status.support{background:#fdecec;color:#a51f1f}
++.zrc-status.declining{background:#fdf0e2;color:#a45a0b}
++.zrc-status.improved{background:#e6f4ee;color:#0f7a52}
++
+ /* Motion */
+ @keyframes zrc-sheen{0%,55%{transform:translateX(-100%)}85%,100%{transform:translateX(100%)}}
+ @keyframes zrc-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.55;transform:scale(.82)}}
+@@ -307,8 +365,9 @@
+ @keyframes zrc-rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+ .zrc-panel.is-active>.zrc-context,.zrc-panel.is-active>.zrc-kpis,.zrc-panel.is-active>.zrc-chips,
+ .zrc-panel.is-active>.zrc-card,.zrc-panel.is-active>.zrc-chart-grid,.zrc-panel.is-active>.zrc-merit-layout,
+-.zrc-panel.is-active>.zrc-doc-strip,.zrc-panel.is-active>.zrc-analytics-kpis,.zrc-panel.is-active>.zrc-notice{animation:zrc-rise .45s ease both}
+-.zrc-panel.is-active>.zrc-kpis,.zrc-panel.is-active>.zrc-chips,.zrc-panel.is-active>.zrc-analytics-kpis{animation-delay:.06s}
++.zrc-panel.is-active>.zrc-doc-strip,.zrc-panel.is-active>.zrc-analytics-kpis,.zrc-panel.is-active>.zrc-notice,
++.zrc-panel.is-active>.zrc-downloads{animation:zrc-rise .45s ease both}
++.zrc-panel.is-active>.zrc-kpis,.zrc-panel.is-active>.zrc-chips,.zrc-panel.is-active>.zrc-analytics-kpis,.zrc-panel.is-active>.zrc-downloads{animation-delay:.06s}
+ .zrc-panel.is-active>.zrc-card,.zrc-panel.is-active>.zrc-merit-layout,.zrc-panel.is-active>.zrc-chart-grid{animation-delay:.12s}
+ .zrc-chart-grid>.zrc-chart-card{animation:zrc-rise .5s ease both}
+ .zrc-chart-grid>.zrc-chart-card:nth-child(2){animation-delay:.08s}
+@@ -334,16 +393,18 @@
+   .zrc-chips{grid-template-columns:repeat(2,1fr)}
+   .zrc-doc-strip{flex-wrap:wrap}
+   .zrc-doc-strip .zrc-doc-ref{text-align:left}
++  .zrc-toppers{grid-template-columns:repeat(2,1fr)}
++  .zrc-downloads{flex-direction:column;align-items:flex-start}
+ }
+ 
+ /* Print */
+ @media print{
+-  .zrc-head,.zrc-tabs,.zrc-context,.zrc-head-actions,.zrc-pack,.zrc-head-actions *{display:none!important}
++  .zrc-head,.zrc-tabs,.zrc-context,.zrc-head-actions,.zrc-pack,.zrc-downloads,.zrc-head-actions *{display:none!important}
+   .zrc{background:#fff}
+   .zrc-panel{display:block!important;padding:0}
+   .zrc-panel:not(.is-active){display:none!important}
+   .zrc-card{box-shadow:none;break-inside:avoid}
+-  .zrc-table-wrap,.zrc-matrix-wrap{max-height:none;overflow:visible}
++  .zrc-table-wrap,.zrc-matrix-wrap,.zrc-vscroll{max-height:none;overflow:visible}
+   .zrc-table thead th,.zrc-matrix thead th{position:static}
+   .zrc *,.zrc *::before,.zrc *::after{animation:none!important}
+   .zrc-line.main{stroke-dasharray:none;stroke-dashoffset:0}
+@@ -484,4 +545,26 @@
+ #zelimuWorkspaceDisplay #resultsCentre .zrc-table-wrap::-webkit-scrollbar-thumb:hover,
+ #zelimuWorkspaceDisplay #resultsCentre .zrc-matrix-wrap::-webkit-scrollbar-thumb:hover{background:#b8860b}
+ #zelimuWorkspaceDisplay #resultsCentre .zrc-table-wrap,
+-#zelimuWorkspaceDisplay #resultsCentre .zrc-matrix-wrap{scrollbar-color:#17365d #f0f2f6}
+\ No newline at end of file
++#zelimuWorkspaceDisplay #resultsCentre .zrc-matrix-wrap{scrollbar-color:#17365d #f0f2f6}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-downloads{background:linear-gradient(120deg,#fff,#fbf3dd 160%)!important;border-color:#e9dcb8!important;color:#1c2430!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-downloads-txt b{color:#0f2745!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-downloads-txt span{color:#66707d!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-table tfoot td{background:#f4f6f9!important;color:#0f2745!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-table .zrc-classrow td{background:#17365d!important;color:#f0c465!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-table .zrc-avgrow td{background:#fbf3dd!important;color:#1c2430!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-topper{background:linear-gradient(180deg,#fff,#fafbfd)!important;border-color:#e3e7ee!important;border-top-color:var(--tc,#b8860b)!important;color:#1c2430!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-topper .t-name,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-topper .t-score{color:#0f2745!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-topper .t-meta{color:#66707d!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-toprow{background:#fcfdff!important;border-color:#e3e7ee!important;color:#1c2430!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-toprow .who b{color:#0f2745!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-toprow .who em{color:#66707d!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-toprow .score{color:#17365d!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-status.support{background:#fdecec!important;color:#a51f1f!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-status.declining{background:#fdf0e2!important;color:#a45a0b!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-status.improved{background:#e6f4ee!important;color:#0f7a52!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-vscroll{scrollbar-color:#b8860b #f0f2f6}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-vscroll::-webkit-scrollbar{width:10px;height:10px}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-vscroll::-webkit-scrollbar-track{background:#f0f2f6}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-vscroll::-webkit-scrollbar-thumb{background:linear-gradient(180deg,#d9b45b,#b8860b);border-radius:99px;border:2px solid #f0f2f6}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-vscroll::-webkit-scrollbar-thumb:hover{background:#f0c465}
+\ No newline at end of file
+diff --git a/public/js/results-centre.js b/public/js/results-centre.js
+index 06eb5fb..a31f952 100644
+--- a/public/js/results-centre.js
++++ b/public/js/results-centre.js
+@@ -95,14 +95,52 @@
+ 
+   function gradeClass(label) {
+     var key = String(label || '').toUpperCase();
+-    if (key === 'A' || key === 'EE') return 'gA';
+-    if (key === 'B' || key === 'ME') return 'gB';
+-    if (key === 'C' || key === 'AE') return 'gC';
+-    if (key === 'D' || key === 'BE') return 'gD';
+-    if (key === 'E') return 'gE';
++    if (key === 'A' || key.indexOf('EE') === 0) return 'gA';
++    if (key === 'B' || key.indexOf('ME') === 0) return 'gB';
++    if (key === 'C' || key.indexOf('AE') === 0) return 'gC';
++    if (key === 'D' || key.indexOf('BE') === 0) return 'gD';
++    if (key.indexOf('E') === 0) return 'gE';
+     return '';
+   }
+ 
++  var BAND_COLORS = {
++    EE1: '#1b5e20', EE2: '#43a047', EE: '#43a047',
++    ME1: '#1565c0', ME2: '#38bdf8', ME: '#38bdf8',
++    AE1: '#b4690e', AE2: '#c98a1e', AE: '#c98a1e',
++    BE1: '#f0923b', BE2: '#e05c5c', BE: '#e05c5c',
++    E: '#a51f1f', A: '#1b5e20', B: '#1565c0', C: '#c98a1e', D: '#e05c5c'
++  };
++
++  function bandColor(label) {
++    return BAND_COLORS[String(label || '').toUpperCase()] || '#8a94a3';
++  }
++
++  function tint(hex, alpha) {
++    var n = parseInt(String(hex).slice(1), 16);
++    return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + alpha + ')';
++  }
++
++  function gradeChip(label, mini) {
++    if (!label) return mini ? '' : '<span class="zrc-grade none">—</span>';
++    return '<span class="zrc-grade ' + gradeClass(label) + (mini ? ' mini' : '') + '">' + esc(label) + '</span>';
++  }
++
++  function bandHeadCells(labels) {
++    return (labels || []).map(function (label) {
++      return '<th class="num band-col" style="--bc:' + bandColor(label) + '"><span class="band-dot"></span>' + esc(label) + '</th>';
++    }).join('');
++  }
++
++  function bandCountCells(counts, labels) {
++    return (labels || []).map(function (label) {
++      var count = counts && counts[label] ? Number(counts[label]) : 0;
++      var color = bandColor(label);
++      return '<td class="num band-count">' + (count
++        ? '<b style="background:' + tint(color, 0.16) + ';color:' + color + '">' + count + '</b>'
++        : '<span class="zero">0</span>') + '</td>';
++    }).join('');
++  }
++
+   function cellClass(percent) {
+     if (percent == null) return 's0';
+     if (percent >= 95) return 'g4';
+@@ -391,7 +429,7 @@
+         if (!found || found.average == null) {
+           html.push('<td class="num">—</td>');
+         } else {
+-          html.push('<td class="num" title="' + esc(found.grade || '') + '">' + num(found.average, 1) + '</td>');
++          html.push('<td class="num markcell" title="' + esc((found.subject_name || '') + (found.grade ? ' · ' + found.grade : '')) + '">' + num(found.average, 1) + '<br>' + gradeChip(found.grade, true) + '</td>');
+         }
+       });
+       html.push('<td class="num total">' + num(row.total, 1) + '</td>');
+@@ -408,7 +446,7 @@
+       (data.subject_rankings || []).forEach(function (s) { ranking[String(s.subject_id)] = s; });
+       subjects.forEach(function (s) {
+         var r = ranking[String(s.subject_id)];
+-        html.push('<td class="num total">' + (r ? num(r.average, 1) : '—') + '</td>');
++        html.push('<td class="num total markcell">' + (r ? num(r.average, 1) + '<br>' + gradeChip(r.grade, true) : '—') + '</td>');
+       });
+       html.push('<td></td><td></td><td></td><td></td></tr></tfoot>');
+     }
+@@ -461,7 +499,19 @@
+     html.push('<button class="zrc-btn" type="button" data-zrc-action="merit-copy">Copy table</button>');
+     html.push('<button class="zrc-btn" type="button" data-zrc-action="merit-print">Print</button>');
+     html.push('</aside><div class="zrc-merit-main">');
+-    html.push('<div class="zrc-card"><div class="zrc-card-head"><div><h3>Ranked merit register</h3><div class="zrc-sub">' + esc(data.context.assessment_label || 'Term score') + ' · ' + rows.length + ' learner(s) shown</div></div><div class="zrc-sub">' + esc(data.context.year_label || '') + ' · ' + esc(data.context.term_name || '') + '</div></div>' + meritTable(view) + '</div>');
++    var toppers = data.subject_toppers || [];
++    if (toppers.length) {
++      html.push('<div class="zrc-card"><div class="zrc-card-head"><div><h3>Subject toppers</h3><div class="zrc-sub">Best learner per subject in this reproduction — graded with the bands the admin saved.</div></div></div><div class="zrc-toppers">');
++      toppers.forEach(function (t, index) {
++        html.push('<div class="zrc-topper" style="--tc:' + bandColor(t.grade) + ';animation-delay:' + (index * 60) + 'ms">' +
++          '<div class="t-sub">' + esc(t.subject_code || t.subject_name) + '</div>' +
++          '<div class="t-name">' + esc(t.name) + '</div>' +
++          '<div class="t-meta">' + esc(t.class_name || '—') + '</div>' +
++          '<div class="t-score">' + num(t.average, 1) + gradeChip(t.grade, true) + '</div></div>');
++      });
++      html.push('</div></div>');
++    }
++    html.push('<div class="zrc-card"><div class="zrc-card-head"><div><h3>Ranked merit register</h3><div class="zrc-sub">' + esc(data.context.assessment_label || 'Term score') + ' · ' + rows.length + ' learner(s) shown · every subject carries its grade</div></div><div class="zrc-sub">' + esc(data.context.year_label || '') + ' · ' + esc(data.context.term_name || '') + '</div></div>' + meritTable(view) + '</div>');
+     html.push('</div></div>');
+     panel('merit').innerHTML = html.join('');
+     var status = root.querySelector('[data-zrc-status]');
+@@ -576,7 +626,10 @@
+ 
+   var DONUT_COLORS = ['#17365d', '#2e5f96', '#b8860b', '#0f7a52', '#a45a0b', '#a51f1f', '#8a94a3', '#6b4f9e'];
+ 
+-  function donut(items, label) {
++  function donut(items, label, colorFor) {
++    function sliceColor(item, index) {
++      return colorFor ? colorFor(item.label) : DONUT_COLORS[index % DONUT_COLORS.length];
++    }
+     var total = items.reduce(function (sum, item) { return sum + Number(item.count || 0); }, 0);
+     if (!total) return '<div class="zrc-empty">No graded learners yet.</div>';
+     var W = 300, H = 220, cx = 110, cy = 110, r = 78, inner = 48;
+@@ -590,7 +643,7 @@
+       var x2 = cx + r * Math.cos(end), y2 = cy + r * Math.sin(end);
+       var x3 = cx + inner * Math.cos(end), y3 = cy + inner * Math.sin(end);
+       var x4 = cx + inner * Math.cos(angle), y4 = cy + inner * Math.sin(angle);
+-      body.push('<path class="zrc-donut-seg" style="animation-delay:' + (index * 90) + 'ms" fill="' + DONUT_COLORS[index % DONUT_COLORS.length] + '" d="M' + x1.toFixed(1) + ' ' + y1.toFixed(1) +
++      body.push('<path class="zrc-donut-seg" style="animation-delay:' + (index * 90) + 'ms" fill="' + sliceColor(item, index) + '" d="M' + x1.toFixed(1) + ' ' + y1.toFixed(1) +
+         ' A' + r + ' ' + r + ' 0 ' + large + ' 1 ' + x2.toFixed(1) + ' ' + y2.toFixed(1) +
+         ' L' + x3.toFixed(1) + ' ' + y3.toFixed(1) +
+         ' A' + inner + ' ' + inner + ' 0 ' + large + ' 0 ' + x4.toFixed(1) + ' ' + y4.toFixed(1) + ' Z"><title>' + esc(item.label + ': ' + item.count) + '</title></path>');
+@@ -604,7 +657,7 @@
+     body.push('<text x="' + cx + '" y="' + (cy - 2) + '" text-anchor="middle" style="font:700 24px Georgia,serif;fill:#0f2745">' + total + '</text>');
+     body.push('<text x="' + cx + '" y="' + (cy + 16) + '" text-anchor="middle" style="font:600 10px Segoe UI,sans-serif;fill:#7b8695;letter-spacing:.08em">LEARNERS</text>');
+     var legend = items.map(function (item, index) {
+-      return '<span><i style="background:' + DONUT_COLORS[index % DONUT_COLORS.length] + '"></i>' + esc(item.label) + ' · <b>' + item.count + '</b> (' + Math.round((Number(item.count) / total) * 100) + '%)</span>';
++      return '<span><i style="background:' + sliceColor(item, index) + '"></i>' + esc(item.label) + ' · <b>' + item.count + '</b> (' + Math.round((Number(item.count) / total) * 100) + '%)</span>';
+     }).join('');
+     return svg(W, H, body.join(''), label) + '<div class="zrc-legend-row">' + legend + '</div>';
+   }
+@@ -696,15 +749,23 @@
+     var k = data.kpis || {};
+     var trend = data.trend || [];
+     var spark = trend.map(function (t) { return Number(t.mean) || 0; });
++    var labels = data.band_labels || [];
+     var html = [contextBar(state.analyticsSel)];
+     if (data.context && data.context.year_state === 'HISTORICAL') {
+       html.push('<div class="zrc-notice warn"><b>Historical year selected.</b> Charts compare terms inside ' + esc(data.context.year_label) + '. The current year is not substituted.</div>');
+     }
++    html.push('<div class="zrc-downloads"><div class="zrc-downloads-txt"><b>Official performance analysis</b><span>The same numbers as this screen — subject grades, band counts, the full register and movement — ready for the staffroom file.</span></div><div class="zrc-downloads-actions">' +
++      '<button class="zrc-btn primary" type="button" data-zrc-action="analysis-pdf">Analysis PDF</button>' +
++      '<button class="zrc-btn gold" type="button" data-zrc-action="analysis-csv">Excel / CSV</button>' +
++      '<button class="zrc-btn" type="button" data-zrc-action="analysis-copy">Copy analysis</button>' +
++      '</div></div>');
+     html.push('<div class="zrc-analytics-kpis">');
+     html.push(analyticsKpi('Mean score', num(k.mean, 2), '', deltaChip(k.mean_delta) + ' <span class="zrc-sub">vs ' + esc(data.by_class.series.length > 1 ? data.by_class.series[1].name : 'previous term') + '</span>', spark));
+-    html.push(analyticsKpi('Mean grade', esc(k.mean_grade || '—'), '', 'Same grading bands as report cards', null));
++    html.push(analyticsKpi('Mean grade', esc(k.mean_grade || '—'), '', 'Admin-saved grading bands', null));
+     html.push(analyticsKpi('Pass rate', pct(k.pass_rate), '', deltaChip(k.pass_delta) + ' <span class="zrc-sub">at ' + num(k.pass_mark, 0) + '%+</span>', null));
+     html.push(analyticsKpi('Ranked learners', String(k.learners || 0), '', 'Learners with usable marks', null));
++    html.push(analyticsKpi('Deviation (σ)', num(k.deviation, 1), '', 'Spread of averages — lower is tighter', null));
++    html.push(analyticsKpi('Value addition', k.value_addition == null ? '—' : (Number(k.value_addition) > 0 ? '+' : '') + num(k.value_addition, 2), '', 'Mean movement vs previous term', null));
+     html.push('</div>');
+ 
+     html.push('<div class="zrc-chart-grid">');
+@@ -714,8 +775,8 @@
+         return '<span><i style="background:' + (index ? '#c9d3e2' : '#17365d') + '"></i>' + esc(s.name) + '</span>';
+       }).join('') + '</div></div>');
+ 
+-    html.push('<div class="zrc-chart-card"><h3>Grade distribution</h3><div class="zrc-sub">Every graded learner in this context.</div>' +
+-      donut(data.grade_distribution || [], 'Grade distribution') + '</div>');
++    html.push('<div class="zrc-chart-card"><h3>Grade distribution</h3><div class="zrc-sub">Every graded learner in this context, on the admin-saved bands.</div>' +
++      donut(data.grade_distribution || [], 'Grade distribution', bandColor) + '</div>');
+ 
+     html.push('<div class="zrc-chart-card"><h3>Term mean trend</h3><div class="zrc-sub">Every term in ' + esc(data.context.year_label) + ', computed on the same path.</div>' +
+       lineChart(trend, 'Term mean trend') + '</div>');
+@@ -727,6 +788,49 @@
+       heatmap(data.heatmap.rows, data.heatmap.cols, data.heatmap.values, 'Subject mastery by class') +
+       '<div class="zrc-heat-scale"><i></i><div class="zrc-heat-ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div></div></div>');
+ 
++    if ((data.subject_analysis || []).length) {
++      html.push('<div class="zrc-chart-card wide"><h3>Subject performance &amp; teacher analysis</h3><div class="zrc-sub">Mean, grade, spread and movement per subject — grades come from the grading system the admin saved for this scope.</div><div class="zrc-table-wrap"><table class="zrc-table"><thead><tr><th>Subject</th><th>Teacher</th><th class="num">Mean</th><th class="center">Grade</th><th class="num">High</th><th class="num">Low</th><th class="num">Pass %</th><th class="num">σ</th><th class="num">Δ prev</th><th class="num">Scored</th></tr></thead><tbody>');
++      data.subject_analysis.forEach(function (s) {
++        html.push('<tr><td class="name">' + esc(s.subject_name) + '</td><td>' + esc(s.teacher || '—') + '</td><td class="num total">' + num(s.mean, 2) + '</td><td class="center">' + gradeChip(s.grade) + '</td><td class="num">' + num(s.high, 1) + '</td><td class="num">' + num(s.low, 1) + '</td><td class="num">' + num(s.pass, 1) + '%</td><td class="num">' + num(s.dev, 1) + '</td><td class="num">' + deltaChip(s.delta) + '</td><td class="num">' + s.scored + '</td></tr>');
++      });
++      html.push('</tbody></table></div></div>');
++    }
++
++    if ((data.subject_analysis || []).length && labels.length) {
++      html.push('<div class="zrc-chart-card wide"><h3>Grade bands per subject</h3><div class="zrc-sub">How many learners landed in each admin-saved band, per subject — the footer repeats the counts on learner averages.</div><div class="zrc-table-wrap"><table class="zrc-table zrc-bands"><thead><tr><th>Subject</th>' + bandHeadCells(labels) + '<th class="num">Scored</th><th class="num">Mean</th><th class="center">Grade</th></tr></thead><tbody>');
++      data.subject_analysis.forEach(function (s) {
++        html.push('<tr><td class="name">' + esc(s.subject_name) + '</td>' + bandCountCells(s.counts, labels) + '<td class="num">' + s.scored + '</td><td class="num total">' + num(s.mean, 1) + '</td><td class="center">' + gradeChip(s.grade) + '</td></tr>');
++      });
++      var dist = {};
++      (data.grade_distribution || []).forEach(function (d) { dist[d.label] = d.count; });
++      html.push('</tbody><tfoot><tr><td class="name">LEARNER AVERAGE</td>' + bandCountCells(dist, labels) + '<td class="num">' + (k.learners || 0) + '</td><td class="num total">' + num(k.mean, 1) + '</td><td class="center">' + gradeChip(k.mean_grade) + '</td></tr></tfoot></table></div></div>');
++    }
++
++    if ((data.class_bands || []).length && labels.length) {
++      html.push('<div class="zrc-chart-card wide"><h3>Grade bands per class &amp; subject</h3><div class="zrc-sub">Every class broken down by subject, with the class-average row in gold. Scroll inside the sheet — the headers stay put.</div><div class="zrc-vscroll"><table class="zrc-table zrc-bands"><thead><tr><th>Class / Subject</th>' + bandHeadCells(labels) + '<th class="num">Scored</th><th class="num">Mean</th><th class="center">Grade</th></tr></thead><tbody>');
++      data.class_bands.forEach(function (c) {
++        html.push('<tr class="zrc-classrow"><td colspan="' + (labels.length + 4) + '">' + esc(c.class_name) + '</td></tr>');
++        (c.subjects || []).forEach(function (s) {
++          html.push('<tr><td class="subj">' + esc(s.subject_name) + '</td>' + bandCountCells(s.counts, labels) + '<td class="num">' + s.scored + '</td><td class="num">' + num(s.mean, 1) + '</td><td class="center">' + gradeChip(s.grade) + '</td></tr>');
++        });
++        html.push('<tr class="zrc-avgrow"><td class="name">Class average</td>' + bandCountCells(c.average_counts, labels) + '<td class="num">' + c.scored + '</td><td class="num total">' + num(c.mean, 1) + '</td><td class="center">' + gradeChip(c.grade) + '</td></tr>');
++      });
++      html.push('</tbody></table></div></div>');
++    }
++
++    if ((data.teachers || []).length) {
++      html.push('<div class="zrc-chart-card"><h3>Teacher performance</h3><div class="zrc-sub">Mean across each teacher’s assigned subjects in this scope.</div>' +
++        hbars(data.teachers.slice(0, 8).map(function (t) { return { name: t.teacher, mean: t.mean }; }), 'Teacher performance') + '</div>');
++    }
++
++    if ((data.top_performers || []).length) {
++      html.push('<div class="zrc-chart-card"><h3>Top performers</h3><div class="zrc-sub">Highest averages in this scope, graded on the same bands.</div><div class="zrc-toplist">');
++      data.top_performers.forEach(function (p, index) {
++        html.push('<div class="zrc-toprow"><span class="pos">' + (index + 1) + '</span><span class="who"><b>' + esc(p.name) + '</b><em>' + esc(p.class_name || '') + '</em></span><span class="score zrc-num">' + num(p.average, 1) + '</span>' + gradeChip(p.grade) + '</div>');
++      });
++      html.push('</div></div>');
++    }
++
+     if (data.progression && data.progression.length) {
+       html.push('<div class="zrc-chart-card"><h3>Assessment-type progression</h3><div class="zrc-sub">How the cohort performed in each assessment form this term.</div>' +
+         hbars(data.progression.map(function (p) { return { name: String(p.type || 'Other').replace(/_/g, ' '), mean: p.mean }; }), 'Assessment progression') + '</div>');
+@@ -738,32 +842,179 @@
+     }
+ 
+     var movement = data.movement || {};
+-    html.push('<div class="zrc-chart-card"><h3>Learner movement</h3><div class="zrc-sub">Change against the previous term.</div><div class="zrc-chips" style="margin:0">');
++    html.push('<div class="zrc-chart-card wide"><h3>Movement &amp; support register</h3><div class="zrc-sub">Change against the previous term — support first, then the sharpest declines and the strongest gains.</div><div class="zrc-chips" style="margin:0 0 12px">');
+     html.push('<div class="zrc-chip"><span>Improved</span><strong>' + (movement.improved || 0) + '</strong><em>+0.5 or more</em></div>');
+     html.push('<div class="zrc-chip"><span>Stable</span><strong>' + (movement.stable || 0) + '</strong><em>within ±0.5</em></div>');
+     html.push('<div class="zrc-chip"><span>Declined</span><strong>' + (movement.declined || 0) + '</strong><em>−0.5 or worse</em></div>');
+     html.push('</div>');
+-    if (movement.top && movement.top.length) {
+-      html.push('<div class="zrc-sub" style="margin-top:12px;font-weight:700;color:#0f2745">Top improvers</div><ul class="zrc-pending">');
+-      movement.top.slice(0, 4).forEach(function (m) {
+-        html.push('<li><span><b>' + esc(m.name) + '</b> · ' + esc(m.class_name || '') + '</span><span class="pct">' + deltaChip(m.delta) + '</span></li>');
++    if ((data.movement_rows || []).length) {
++      html.push('<div class="zrc-table-wrap" style="max-height:360px"><table class="zrc-table"><thead><tr><th>Learner</th><th>Class</th><th class="num">Current</th><th class="num">Previous</th><th class="num">Change</th><th class="center">Grade</th><th class="center">Status</th></tr></thead><tbody>');
++      data.movement_rows.forEach(function (row) {
++        var status = String(row.status || '').toLowerCase();
++        html.push('<tr><td class="name">' + esc(row.name) + '</td><td>' + esc(row.class_name || '—') + '</td><td class="num">' + num(row.average, 1) + '</td><td class="num">' + num(row.previous, 1) + '</td><td class="num">' + deltaChip(row.delta) + '</td><td class="center">' + gradeChip(row.grade) + '</td><td class="center"><span class="zrc-status ' + status + '">' + esc(row.status || '') + '</span></td></tr>');
+       });
+-      html.push('</ul>');
++      html.push('</tbody></table></div>');
++    } else {
++      html.push('<div class="zrc-notice ok">No movement to report yet — it appears once a previous term has marks to compare against.</div>');
+     }
+     html.push('</div>');
+ 
+-    if (data.at_risk && data.at_risk.length) {
+-      html.push('<div class="zrc-chart-card wide"><h3>Learners needing support</h3><div class="zrc-sub">Below 40%, or down 5 points or more since the previous term.</div><div class="zrc-table-wrap" style="max-height:320px"><table class="zrc-table"><thead><tr><th>Learner</th><th>Class</th><th class="num">Current</th><th class="num">Previous</th><th class="num">Change</th></tr></thead><tbody>');
+-      data.at_risk.forEach(function (row) {
+-        html.push('<tr><td class="name">' + esc(row.name) + '</td><td>' + esc(row.class_name || '—') + '</td><td class="num">' + num(row.average, 1) + '</td><td class="num">' + num(row.previous, 1) + '</td><td class="num">' + deltaChip(row.delta) + '</td></tr>');
+-      });
+-      html.push('</tbody></table></div></div>');
+-    }
+-
+     html.push('</div>');
+     panel('analytics').innerHTML = html.join('');
+   }
+ 
++  function analysisPdfHtml() {
++    var a = state.analytics || {};
++    var k = a.kpis || {};
++    var ctx = a.context || {};
++    var id = state.identity || {};
++    var labels = a.band_labels || [];
++    var subjects = a.subject_columns || [];
++    function nCell(value, digits) { return '<td class="n">' + (value == null ? '—' : num(value, digits)) + '</td>'; }
++    function bandHead() {
++      return labels.map(function (l) { return '<th class="n" style="color:' + bandColor(l) + '">' + esc(l) + '</th>'; }).join('');
++    }
++    function bandCells(counts) {
++      return labels.map(function (l) {
++        var count = (counts || {})[l] || 0;
++        return '<td class="n" style="color:' + (count ? bandColor(l) : '#9aa4b2') + ';font-weight:' + (count ? 800 : 400) + '">' + count + '</td>';
++      }).join('');
++    }
++    var html = [];
++    html.push('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Official performance analysis — ' + esc(ctx.year_label || '') + ' · ' + esc(ctx.term_name || '') + '</title><style>');
++    html.push('*{box-sizing:border-box}body{margin:0;background:#e9edf3;font-family:"Segoe UI",system-ui,Arial,sans-serif;color:#1c2430}');
++    html.push('.toolbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;background:#0f2745;color:#fff;padding:12px 20px;border-bottom:3px solid #b8860b}');
++    html.push('.toolbar b{font-family:Georgia,serif;font-size:15px}.toolbar span{font-size:12px;color:#c9d5e6;flex:1}');
++    html.push('.toolbar button{appearance:none;border:0;border-radius:8px;padding:9px 18px;font-weight:800;font-size:13px;cursor:pointer;background:linear-gradient(180deg,#f0c465,#b8860b);color:#fff;box-shadow:0 2px 10px rgba(184,134,11,.5)}');
++    html.push('.sheet{max-width:1080px;margin:18px auto;background:#fff;padding:26px 30px;box-shadow:0 8px 30px rgba(16,35,60,.18);border-top:4px double #b8860b}');
++    html.push('header{display:flex;align-items:center;gap:14px;border-bottom:2px solid #17365d;padding-bottom:12px;margin-bottom:14px}');
++    html.push('header img{width:52px;height:52px;object-fit:contain}header h1{font-family:Georgia,serif;font-size:21px;margin:0;color:#0f2745}header p{margin:2px 0 0;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#b8860b;font-weight:700}');
++    html.push('header .ref{margin-left:auto;text-align:right}header .ref b{display:block;font-size:11px;letter-spacing:.14em;color:#17365d}header .ref span{display:block;font-size:11px;color:#66707d;margin-top:3px}');
++    html.push('.summary{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:16px}');
++    html.push('.summary div{border:1px solid #e3e7ee;border-left:3px solid #b8860b;border-radius:8px;padding:8px 10px;background:#fbfcfd}');
++    html.push('.summary span{display:block;font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#66707d}.summary b{display:block;font-family:Georgia,serif;font-size:18px;color:#0f2745;margin-top:2px}');
++    html.push('h2{font-family:Georgia,serif;font-size:15px;color:#0f2745;margin:20px 0 8px;padding-bottom:5px;border-bottom:1px solid #e3e7ee}');
++    html.push('table{border-collapse:collapse;width:100%;font-size:9.5px;margin-bottom:6px}');
++    html.push('th{background:#17365d;color:#ecd6a4;font-size:8.5px;letter-spacing:.05em;text-transform:uppercase;padding:5px 6px;text-align:left;border:1px solid #24466f}');
++    html.push('td{padding:4px 6px;border:1px solid #e3e7ee}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}');
++    html.push('tbody tr:nth-child(even) td{background:#f7f9fc}.grp td{background:#17365d!important;color:#f0c465;font-weight:800;letter-spacing:.06em}');
++    html.push('.avg td{background:#fbf3dd!important;font-weight:800}.grade{font-weight:800}');
++    html.push('.status{font-weight:800;font-size:8.5px;letter-spacing:.05em}.status.support{color:#b42318}.status.declining{color:#b4690e}.status.improved{color:#0f7a52}');
++    html.push('footer{margin-top:18px;padding-top:10px;border-top:2px solid #17365d;font-size:10px;color:#66707d;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}');
++    html.push('@media print{body{background:#fff}.toolbar{display:none}.sheet{margin:0;max-width:none;box-shadow:none;padding:6mm}h2{break-after:avoid}table{break-inside:auto}tr{break-inside:avoid}}');
++    html.push('@page{size:A4;margin:10mm}</style></head><body>');
++    html.push('<div class="toolbar"><b>Official performance analysis</b><span>Review the document, then print or save it as PDF.</span><button type="button" onclick="window.print()">Print / Save PDF</button></div>');
++    html.push('<div class="sheet">');
++    html.push('<header>' + (id.logo_url ? '<img src="' + esc(id.logo_url) + '" alt="School logo">' : '') +
++      '<div><h1>' + esc(id.name || 'ZELIMU CBC SCHOOL') + '</h1><p>' + esc(id.motto || 'Official academic analysis') + '</p></div>' +
++      '<div class="ref"><b>OFFICIAL PERFORMANCE ANALYSIS</b><span>' + esc(ctx.year_label || '') + ' · ' + esc(ctx.term_name || '') + ' · ' + esc(ctx.class_name || 'All classes') + '</span></div></header>');
++    html.push('<div class="summary">' +
++      '<div><span>Mean score</span><b>' + num(k.mean, 2) + '</b></div>' +
++      '<div><span>Mean grade</span><b>' + esc(k.mean_grade || '—') + '</b></div>' +
++      '<div><span>Deviation σ</span><b>' + num(k.deviation, 1) + '</b></div>' +
++      '<div><span>Value addition</span><b>' + (k.value_addition == null ? '—' : (Number(k.value_addition) > 0 ? '+' : '') + num(k.value_addition, 2)) + '</b></div>' +
++      '<div><span>Pass rate</span><b>' + pct(k.pass_rate) + '</b></div>' +
++      '<div><span>Ranked</span><b>' + (k.learners || 0) + '</b></div></div>');
++
++    html.push('<h2>Subject analysis — grades from the admin-saved grading system</h2>');
++    html.push('<table><thead><tr><th>Subject</th><th>Teacher</th><th class="n">Mean</th><th>Grade</th><th class="n">High</th><th class="n">Low</th><th class="n">Pass %</th><th class="n">σ</th><th class="n">Δ prev</th>' + bandHead() + '<th class="n">Scored</th></tr></thead><tbody>');
++    (a.subject_analysis || []).forEach(function (s) {
++      html.push('<tr><td><b>' + esc(s.subject_name) + '</b></td><td>' + esc(s.teacher || '—') + '</td>' + nCell(s.mean, 2) +
++        '<td class="grade" style="color:' + bandColor(s.grade) + '">' + esc(s.grade || '—') + '</td>' + nCell(s.high, 1) + nCell(s.low, 1) +
++        '<td class="n">' + num(s.pass, 1) + '%</td>' + nCell(s.dev, 1) +
++        '<td class="n">' + (s.delta == null ? '—' : (Number(s.delta) > 0 ? '+' : '') + num(s.delta, 2)) + '</td>' + bandCells(s.counts) + nCell(s.scored, 0) + '</tr>');
++    });
++    html.push('</tbody></table>');
++
++    html.push('<h2>Grade bands per class &amp; subject</h2>');
++    html.push('<table><thead><tr><th>Class / Subject</th>' + bandHead() + '<th class="n">Scored</th><th class="n">Mean</th><th>Grade</th></tr></thead><tbody>');
++    (a.class_bands || []).forEach(function (c) {
++      html.push('<tr class="grp"><td colspan="' + (labels.length + 4) + '">' + esc(c.class_name) + '</td></tr>');
++      (c.subjects || []).forEach(function (s) {
++        html.push('<tr><td>' + esc(s.subject_name) + '</td>' + bandCells(s.counts) + nCell(s.scored, 0) + nCell(s.mean, 1) +
++          '<td class="grade" style="color:' + bandColor(s.grade) + '">' + esc(s.grade || '—') + '</td></tr>');
++      });
++      html.push('<tr class="avg"><td>Class average</td>' + bandCells(c.average_counts) + nCell(c.scored, 0) + nCell(c.mean, 1) +
++        '<td class="grade" style="color:' + bandColor(c.grade) + '">' + esc(c.grade || '—') + '</td></tr>');
++    });
++    html.push('</tbody></table>');
++
++    html.push('<h2>Learner register — mark and grade for every subject</h2>');
++    html.push('<table><thead><tr><th class="n">#</th><th>Learner</th><th>ADM</th><th>Class</th>' +
++      subjects.map(function (s) { return '<th class="n">' + esc(s.subject_code || s.subject_name) + '</th><th>Gr</th>'; }).join('') +
++      '<th class="n">Average</th><th>Grade</th></tr></thead><tbody>');
++    (a.register || []).forEach(function (row, index) {
++      var byId = {};
++      (row.subjects || []).forEach(function (s) { byId[String(s.subject_id)] = s; });
++      html.push('<tr><td class="n">' + (row.stream_rank != null ? row.stream_rank : (row.average == null ? '—' : index + 1)) + '</td><td><b>' + esc(row.name) + '</b></td><td>' + esc(row.admission_no || '—') + '</td><td>' + esc(row.class_name || '—') + '</td>');
++      subjects.forEach(function (s) {
++        var found = byId[String(s.subject_id)];
++        if (found && found.average != null) {
++          html.push(nCell(found.average, 1) + '<td class="grade" style="color:' + bandColor(found.grade) + '">' + esc(found.grade || '—') + '</td>');
++        } else {
++          html.push('<td class="n">—</td><td>—</td>');
++        }
++      });
++      html.push(nCell(row.average, 1) + '<td class="grade" style="color:' + bandColor(row.grade) + '">' + esc(row.grade || '—') + '</td></tr>');
++    });
++    html.push('</tbody></table>');
++
++    html.push('<h2>Movement &amp; support</h2>');
++    html.push('<table><thead><tr><th>Learner</th><th>Class</th><th class="n">Current</th><th class="n">Previous</th><th class="n">Change</th><th>Grade</th><th>Status</th></tr></thead><tbody>');
++    (a.movement_rows || []).forEach(function (row) {
++      html.push('<tr><td><b>' + esc(row.name) + '</b></td><td>' + esc(row.class_name || '—') + '</td>' + nCell(row.average, 1) + nCell(row.previous, 1) +
++        '<td class="n">' + (row.delta == null ? '—' : (Number(row.delta) > 0 ? '+' : '') + num(row.delta, 2)) + '</td>' +
++        '<td class="grade" style="color:' + bandColor(row.grade) + '">' + esc(row.grade || '—') + '</td>' +
++        '<td class="status ' + String(row.status || '').toLowerCase() + '">' + esc(row.status || '') + '</td></tr>');
++    });
++    html.push('</tbody></table>');
++    html.push('<footer><span>Generated by ZELIMU Results Command Centre · ' + esc(new Date().toLocaleDateString()) + '</span><span>Grading follows the system saved by the school administrator.</span></footer>');
++    html.push('</div></body></html>');
++    return html.join('');
++  }
++
++  function openAnalysisPdf() {
++    if (!state.analytics) { toast('Analytics are still loading.', 'warn'); return; }
++    var win = window.open('', '_blank');
++    if (!win) { toast('Allow pop-ups for this site to open the analysis PDF.', 'error'); return; }
++    win.document.open();
++    win.document.write(analysisPdfHtml());
++    win.document.close();
++    toast('Analysis opened in a new tab — print it or save it as PDF.');
++  }
++
++  function copyAnalysis() {
++    var a = state.analytics;
++    if (!a || !(a.subject_analysis || []).length) { toast('Nothing to copy yet.', 'warn'); return; }
++    var labels = a.band_labels || [];
++    function bandValues(counts) {
++      return labels.map(function (l) { return (counts || {})[l] || 0; });
++    }
++    var lines = [];
++    lines.push(['SUBJECT', 'TEACHER', 'MEAN', 'GRADE', 'HIGH', 'LOW', 'PASS %', 'DEVIATION', 'DELTA PREV'].concat(labels, ['SCORED']).join('\t'));
++    (a.subject_analysis || []).forEach(function (s) {
++      lines.push([s.subject_name, s.teacher || '', s.mean, s.grade || '', s.high, s.low, s.pass, s.dev, s.delta == null ? '' : s.delta].concat(bandValues(s.counts), [s.scored]).join('\t'));
++    });
++    lines.push('');
++    lines.push(['CLASS', 'SUBJECT'].concat(labels, ['SCORED', 'MEAN', 'GRADE']).join('\t'));
++    (a.class_bands || []).forEach(function (c) {
++      (c.subjects || []).forEach(function (s) {
++        lines.push([c.class_name, s.subject_name].concat(bandValues(s.counts), [s.scored, s.mean, s.grade || '']).join('\t'));
++      });
++      lines.push([c.class_name, 'AVERAGE'].concat(bandValues(c.average_counts), [c.scored, c.mean, c.grade || '']).join('\t'));
++    });
++    lines.push('');
++    lines.push(['LEARNER', 'CLASS', 'CURRENT', 'PREVIOUS', 'CHANGE', 'GRADE', 'STATUS'].join('\t'));
++    (a.movement_rows || []).forEach(function (m) {
++      lines.push([m.name, m.class_name || '', m.average, m.previous == null ? '' : m.previous, m.delta == null ? '' : m.delta, m.grade || '', m.status || ''].join('\t'));
++    });
++    if (navigator.clipboard && navigator.clipboard.writeText) {
++      navigator.clipboard.writeText(lines.join('\n')).then(function () { toast('Analysis copied — paste it straight into Excel.'); }, function () { toast('Copy failed. Use Excel / CSV instead.', 'error'); });
++    } else {
++      toast('Copy is not available in this browser. Use Excel / CSV.', 'warn');
++    }
++  }
++
+   function loadAnalytics() {
+     var scope = state.analyticsSel;
+     panel('analytics').innerHTML = '<div class="zrc-loading">Building analytics…</div>';
+@@ -909,6 +1160,16 @@
+         } else {
+           toast('Copy is not available in this browser. Use Excel / CSV.', 'warn');
+         }
++        return;
++      }
++      if (action === 'analysis-pdf') { openAnalysisPdf(); return; }
++      if (action === 'analysis-copy') { copyAnalysis(); return; }
++      if (action === 'analysis-csv') {
++        var analyticsScope = state.analyticsSel;
++        download('/api/results-centre/' + sid + '/analysis.csv?' + qs({
++          academic_year_id: analyticsScope.year, term_id: analyticsScope.term, class_id: analyticsScope.class
++        })).catch(function (error) { toast(error.message, 'error'); });
++        return;
+       }
+     });
+ 
+diff --git a/tests/results-band-analysis.test.js b/tests/results-band-analysis.test.js
+new file mode 100644
+index 0000000..77cacc3
+--- /dev/null
++++ b/tests/results-band-analysis.test.js
+@@ -0,0 +1,230 @@
++'use strict';
++
++const { test } = require('node:test');
++const assert = require('node:assert/strict');
++const {
++  bandFor,
++  deviationOf,
++  bandLabelOrder,
++  countBands,
++  buildSubjectAnalysis,
++  buildClassBands,
++  buildSubjectToppers,
++  buildTeacherRows,
++  buildAnalysisCsv
++} = require('../backend/services/results-engine');
++
++const BANDS = [
++  { label: 'EE1', min_mark: 90, max_mark: 100 },
++  { label: 'EE2', min_mark: 70, max_mark: 89 },
++  { label: 'ME1', min_mark: 60, max_mark: 69 },
++  { label: 'ME2', min_mark: 50, max_mark: 59 },
++  { label: 'BE1', min_mark: 20, max_mark: 49 },
++  { label: 'BE2', min_mark: 0, max_mark: 19 }
++];
++const LABELS = BANDS.map(b => b.label);
++
++function subject(id, code, name, average, grade, teacher) {
++  return { subject_id: id, subject_code: code, subject_name: name, average, grade, teacher: teacher || '' };
++}
++
++function learner(id, name, className, subjects) {
++  const scored = subjects.filter(s => s.average != null);
++  const average = scored.length ? scored.reduce((a, s) => a + s.average, 0) / scored.length : null;
++  const band = average == null ? null : bandFor(average, BANDS);
++  return {
++    learner_id: id,
++    name,
++    admission_no: 'ADM-' + id,
++    class_id: 'class-' + className,
++    class_name: className,
++    average: average == null ? null : Math.round(average * 100) / 100,
++    grade: band ? band.label : '',
++    subjects
++  };
++}
++
++const currentRows = [
++  learner('l1', 'Achieng One', 'Grade 6 East', [
++    subject('math', 'MATH', 'Mathematics', 95, 'EE1', 'Mr. Otieno'),
++    subject('eng', 'ENG', 'English', 74, 'EE2', 'Ms. Wanjiru')
++  ]),
++  learner('l2', 'Baraka Two', 'Grade 6 East', [
++    subject('math', 'MATH', 'Mathematics', 66, 'ME1', 'Mr. Otieno'),
++    subject('eng', 'ENG', 'English', 52, 'ME2', 'Ms. Wanjiru')
++  ]),
++  learner('l3', 'Chao Three', 'Grade 6 West', [
++    subject('math', 'MATH', 'Mathematics', 30, 'BE1', 'Mr. Kip'),
++    subject('eng', 'ENG', 'English', null, '', 'Ms. Wanjiru')
++  ]),
++  learner('l4', 'Dina Four', 'Grade 6 West', [
++    subject('math', 'MATH', 'Mathematics', 12, 'BE2', 'Mr. Kip'),
++    subject('eng', 'ENG', 'English', 88, 'EE2', 'Ms. Wanjiru')
++  ])
++];
++
++const previousRows = [
++  learner('l1', 'Achieng One', 'Grade 6 East', [
++    subject('math', 'MATH', 'Mathematics', 85, 'EE2', 'Mr. Otieno'),
++    subject('eng', 'ENG', 'English', 70, 'EE2', 'Ms. Wanjiru')
++  ]),
++  learner('l2', 'Baraka Two', 'Grade 6 East', [
++    subject('math', 'MATH', 'Mathematics', 72, 'EE2', 'Mr. Otieno'),
++    subject('eng', 'ENG', 'English', 58, 'ME2', 'Ms. Wanjiru')
++  ])
++];
++
++test('deviationOf computes population sigma and tolerates gaps', () => {
++  assert.equal(deviationOf([2, 4, 4, 4, 5, 5, 7, 9]), 2);
++  assert.equal(deviationOf([]), null);
++  assert.equal(deviationOf(null), null);
++  assert.equal(deviationOf([null, 10, undefined, 10]), 0);
++});
++
++test('bandFor rounds before matching the admin band ranges', () => {
++  assert.equal(bandFor(89.6, BANDS).label, 'EE1');
++  assert.equal(bandFor(89.4, BANDS).label, 'EE2');
++  assert.equal(bandFor(0, BANDS).label, 'BE2');
++  assert.equal(bandFor(undefined, BANDS), null);
++});
++
++test('bandLabelOrder keeps admin order and unions class systems without duplicates', () => {
++  const alt = { bands: [{ label: 'A', min_mark: 80, max_mark: 100 }, { label: 'EE1', min_mark: 90, max_mark: 100 }] };
++  const grading = {
++    defaultSystem: { bands: BANDS },
++    systems: new Map([['cbc', { bands: BANDS }], ['alt', alt]]),
++    configs: [{ class_id: 'c9', grading_system_id: 'alt' }]
++  };
++  const labels = bandLabelOrder(grading, [{ id: 'c9' }]);
++  assert.deepEqual(labels, ['EE1', 'EE2', 'ME1', 'ME2', 'BE1', 'BE2', 'A']);
++  assert.deepEqual(bandLabelOrder(null, []), []);
++});
++
++test('countBands zero-fills every label and ignores blank grades', () => {
++  const counts = countBands(['EE1', 'EE1', 'ME2', '', null], LABELS);
++  assert.deepEqual(counts, { EE1: 2, EE2: 0, ME1: 0, ME2: 1, BE1: 0, BE2: 0 });
++});
++
++test('buildSubjectAnalysis grades every subject and compares with the previous term', () => {
++  const analysis = buildSubjectAnalysis(currentRows, previousRows, LABELS, BANDS, 50);
++  assert.equal(analysis.length, 2);
++  const eng = analysis[0];
++  const math = analysis[1];
++  assert.equal(eng.subject_name, 'English');
++  assert.equal(eng.mean, 71.33);
++  assert.equal(eng.grade, 'EE2');
++  assert.equal(eng.high, 88);
++  assert.equal(eng.low, 52);
++  assert.equal(eng.scored, 3);
++  assert.equal(eng.pass, 100);
++  assert.equal(eng.counts.EE2, 2);
++  assert.equal(eng.counts.ME2, 1);
++  assert.equal(eng.delta, 7.33);
++  assert.equal(math.mean, 50.75);
++  assert.equal(math.grade, 'ME2');
++  assert.equal(math.counts.EE1, 1);
++  assert.equal(math.counts.ME1, 1);
++  assert.equal(math.counts.BE1, 1);
++  assert.equal(math.counts.BE2, 1);
++  assert.equal(math.delta, -27.75);
++  const noPrior = buildSubjectAnalysis(currentRows, [], LABELS, BANDS, 50);
++  assert.equal(noPrior[0].delta, null);
++});
++
++test('buildClassBands counts bands per class and subject plus the class average', () => {
++  const classList = [
++    { name: 'Grade 6 East', bands: BANDS },
++    { name: 'Grade 6 West', bands: BANDS },
++    { name: 'Grade 7 Empty', bands: BANDS }
++  ];
++  const classBands = buildClassBands(currentRows, classList, LABELS);
++  assert.equal(classBands.length, 2);
++  const east = classBands[0];
++  assert.equal(east.class_name, 'Grade 6 East');
++  assert.equal(east.scored, 2);
++  assert.equal(east.average_counts.EE2, 1);
++  assert.equal(east.average_counts.ME2, 1);
++  const eastMath = east.subjects.find(s => s.subject_code === 'MATH');
++  assert.equal(eastMath.counts.EE1, 1);
++  assert.equal(eastMath.counts.ME1, 1);
++  assert.equal(eastMath.scored, 2);
++  assert.equal(eastMath.grade, 'EE2');
++  const west = classBands[1];
++  assert.equal(west.average_counts.BE1, 1);
++  assert.equal(west.average_counts.ME2, 1);
++});
++
++test('buildSubjectToppers picks the highest mark per subject with its grade', () => {
++  const toppers = buildSubjectToppers(currentRows);
++  assert.equal(toppers.length, 2);
++  assert.equal(toppers[0].subject_name, 'English');
++  assert.equal(toppers[0].name, 'Dina Four');
++  assert.equal(toppers[0].average, 88);
++  assert.equal(toppers[0].grade, 'EE2');
++  assert.equal(toppers[1].name, 'Achieng One');
++  assert.equal(toppers[1].grade, 'EE1');
++});
++
++test('buildTeacherRows averages each teacher across their subjects', () => {
++  const analysis = buildSubjectAnalysis(currentRows, [], LABELS, BANDS, 50);
++  const teachers = buildTeacherRows(analysis);
++  assert.equal(teachers.length, 2);
++  assert.equal(teachers[0].teacher, 'Ms. Wanjiru');
++  assert.equal(teachers[0].subjects, 1);
++  assert.equal(teachers[0].mean, 71.33);
++  assert.equal(teachers[1].teacher, 'Mr. Otieno');
++  assert.equal(teachers[1].mean, 50.75);
++  assert.deepEqual(buildTeacherRows([]), []);
++});
++
++test('buildAnalysisCsv carries subject grades, band counts and the full register', () => {
++  const analytics = {
++    context: { year_label: '2026', term_name: 'Term 1', class_name: '' },
++    kpis: { mean: 60.5, mean_grade: 'ME1', deviation: 25.1, value_addition: -3.2, pass_rate: 50, pass_mark: 50, learners: 4 },
++    band_labels: LABELS,
++    subject_columns: [
++      { subject_id: 'eng', subject_code: 'ENG', subject_name: 'English' },
++      { subject_id: 'math', subject_code: 'MATH', subject_name: 'Mathematics' }
++    ],
++    subject_analysis: buildSubjectAnalysis(currentRows, previousRows, LABELS, BANDS, 50),
++    class_bands: buildClassBands(currentRows, [
++      { name: 'Grade 6 East', bands: BANDS },
++      { name: 'Grade 6 West', bands: BANDS }
++    ], LABELS),
++    register: currentRows.map(row => ({
++      name: row.name,
++      admission_no: row.admission_no,
++      class_name: row.class_name,
++      average: row.average,
++      grade: row.grade,
++      stream_rank: null,
++      subjects: row.subjects.map(s => ({ subject_id: s.subject_id, subject_code: s.subject_code, average: s.average, grade: s.grade }))
++    })),
++    movement_rows: [{ name: 'Chao Three', class_name: 'Grade 6 West', average: 30, previous: 44, delta: -14, grade: 'BE1', status: 'SUPPORT' }]
++  };
++  const csv = buildAnalysisCsv(analytics);
++  assert.ok(csv.startsWith('OFFICIAL PERFORMANCE ANALYSIS'));
++  assert.ok(csv.includes('\r\n'));
++  assert.ok(csv.includes('SUBJECT,TEACHER,MEAN,GRADE,HIGH,LOW,PASS %,DEVIATION,DELTA PREV,EE1,EE2,ME1,ME2,BE1,BE2,SCORED'));
++  assert.ok(csv.includes('CLASS,SUBJECT,EE1,EE2,ME1,ME2,BE1,BE2,SCORED,MEAN,GRADE'));
++  assert.ok(csv.includes('Grade 6 East,AVERAGE,'));
++  assert.ok(csv.includes('ENG MARK,ENG GRADE,MATH MARK,MATH GRADE'));
++  assert.ok(csv.includes('LEARNER,CLASS,CURRENT,PREVIOUS,CHANGE,GRADE,STATUS'));
++  assert.ok(csv.includes('Chao Three,Grade 6 West,30,44,-14,BE1,SUPPORT'));
++  const registerLine = csv.split('\r\n').find(line => line.startsWith('1,Achieng One') || line.includes('Achieng One,ADM-l1'));
++  assert.ok(registerLine.includes('74,EE2,95,EE1'));
++  assert.equal(buildAnalysisCsv(null).includes('OFFICIAL PERFORMANCE ANALYSIS'), true);
++});
++
++test('buildAnalysisCsv quotes cells containing commas', () => {
++  const csv = buildAnalysisCsv({
++    context: { year_label: '2026', term_name: 'Term 1, Mid' },
++    kpis: {},
++    band_labels: [],
++    subject_analysis: [],
++    class_bands: [],
++    register: [],
++    movement_rows: []
++  });
++  assert.ok(csv.includes('"Term 1, Mid"'));
++});
+\ No newline at end of file

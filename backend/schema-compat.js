@@ -104,6 +104,7 @@ async function ensureAssessmentWorkflowSchema(){
   await db.query(`ALTER TABLE learners ADD COLUMN IF NOT EXISTS assessment_no text`);
   await db.query(`ALTER TABLE learners ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'ACTIVE'`);
   await db.query(`ALTER TABLE learners ADD COLUMN IF NOT EXISTS passport_photo_url text`);
+  await db.query(`ALTER TABLE learners ADD COLUMN IF NOT EXISTS cbc_pathway text`);
   // Legacy placeholder identifiers are preserved by default. Clearing them changes
   // learner records, so it is available only for a deliberately approved cleanup.
   if (process.env.ZELIMU_ENABLE_LEGACY_ADMISSION_CLEANUP === 'true') {

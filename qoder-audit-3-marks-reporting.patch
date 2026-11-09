@@ -1,0 +1,324 @@
+diff --git a/backend/routes/assessments.js b/backend/routes/assessments.js
+index 159d260..2d9d28e 100644
+--- a/backend/routes/assessments.js
++++ b/backend/routes/assessments.js
+@@ -18,6 +18,27 @@ async function requireMarkEntryAccess(req,sid){
+   if(!q.rows[0])throw Object.assign(new Error('Mark Entry is not activated for your account. Ask the administrator to activate it.'),{status:403});
+ }
+ 
++// A user with mark-entry rights may still not be the teacher for the selected
++// class/subject. Admins and heads retain school-wide entry; classroom staff must
++// hold either the subject assignment or the class-teacher assignment.
++async function enforceMarkEntryScope(req,sid,{classId,subjectId,academicYearId,termId}){
++  if(['PLATFORM_OWNER','SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER'].includes(req.user.role))return;
++  const teacher=(await db.query(`SELECT id FROM teachers WHERE school_id=$1 AND user_id=$2 AND COALESCE(is_active,true)=true LIMIT 1`,[sid,req.user.user_id])).rows[0];
++  if(!teacher)throw Object.assign(new Error('No active teacher profile is linked to this account.'),{status:403});
++  const subjectScope=(await db.query(`
++    SELECT 1 FROM teacher_subject_assignments
++    WHERE school_id=$1 AND teacher_id=$2 AND class_id=$3 AND subject_id=$4
++      AND academic_year_id=$5 AND (term_id=$6 OR term_id IS NULL OR $6::uuid IS NULL)
++      AND COALESCE(is_active,true)=true LIMIT 1`,
++    [sid,teacher.id,classId,subjectId,academicYearId,termId||null])).rows[0];
++  if(subjectScope)return;
++  const classScope=(await db.query(`
++    SELECT 1 FROM class_teacher_assignments
++    WHERE school_id=$1 AND teacher_id=$2 AND class_id=$3 AND academic_year_id=$4 LIMIT 1`,
++    [sid,teacher.id,classId,academicYearId])).rows[0];
++  if(!classScope)throw Object.assign(new Error('You can only enter marks for classes and subjects assigned to you.'),{status:403});
++}
++
+ const validTypes=new Set(['OPENER','CAT','TEST','MID_TERM','END_TERM','MOCK','FINAL','CUSTOM']);
+ 
+ // Resolve the assessment selected by the UI to the one assessment belonging to
+@@ -256,6 +277,7 @@ router.post('/:schoolId/marks',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEAD
+     if(a.subject_id && String(a.subject_id)!==String(b.subject_id))return res.status(400).json({error:'Assessment does not belong to the selected subject'});
+     if(String(a.status||'OPEN').toUpperCase()!=='OPEN')return res.status(403).json({error:'Assessment is closed'});
+     if(a.deadline_at && new Date(a.deadline_at)<=new Date())return res.status(403).json({error:'The assessment deadline has passed'});
++    await enforceMarkEntryScope(req,sid,{classId:b.class_id,subjectId:b.subject_id,academicYearId:b.academic_year_id,termId:a.term_id});
+ 
+     const mark=parseZelimuMark(b.mark,a.max_mark);
+     if(mark!==null&&(!Number.isFinite(mark)||mark<0||mark>Number(a.max_mark))){
+diff --git a/backend/routes/communications.js b/backend/routes/communications.js
+index a25b133..3d24a33 100644
+--- a/backend/routes/communications.js
++++ b/backend/routes/communications.js
+@@ -1009,7 +1009,7 @@ router.get('/:schoolId/analytics',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','H
+   const subjects=(await db.query(`SELECT s.id,s.code,s.name,COUNT(m.id)::int entries,ROUND(AVG((m.mark/NULLIF(a.max_mark,0))*100.0),2) average,ROUND(MIN((m.mark/NULLIF(a.max_mark,0))*100.0),2) min_mark,ROUND(MAX((m.mark/NULLIF(a.max_mark,0))*100.0),2) max_mark,
+     COALESCE((SELECT CONCAT_WS(' ',th.first_name,th.last_name) FROM teacher_subject_assignments tsa JOIN teachers th ON th.id=tsa.teacher_id WHERE tsa.school_id=$1 AND tsa.subject_id=s.id AND tsa.academic_year_id=$2 AND (tsa.term_id=$3 OR tsa.term_id IS NULL) AND COALESCE(tsa.is_active,true)=true ${cls?`AND tsa.class_id=$${level?5:4}`:''} AND COALESCE(th.is_active,true)=true AND NOT (upper(trim(coalesce(th.first_name,''))) IN ('TEACHER','ADMIN') OR upper(trim(coalesce(th.last_name,''))) IN ('TEACHER','ADMIN') OR upper(trim(coalesce(th.staff_no,''))) IN ('TEACHER','ADMIN','MR.TEACHER','MR. TEACHER')) ORDER BY (tsa.term_id IS NOT NULL) DESC,tsa.created_at DESC,tsa.id DESC LIMIT 1),'Not assigned') teacher_name
+     FROM marks m JOIN assessments a ON a.id=m.assessment_id JOIN subjects s ON s.id=m.subject_id JOIN classes c ON c.id=m.class_id WHERE m.school_id=$1 AND m.academic_year_id=$2 AND m.term_id=$3 AND m.mark IS NOT NULL${where} GROUP BY s.id,s.code,s.name ORDER BY average DESC NULLS LAST`,params)).rows;
+-  const classes=(await db.query(`SELECT c.id,c.name,c.stream,COUNT(DISTINCT m.learner_id)::int learners,ROUND(AVG((m.mark/NULLIF(a.max_mark,0))*100.0),2) average FROM classes c LEFT JOIN marks m ON m.class_id=c.id AND m.school_id=$1 AND m.academic_year_id=$2 AND m.term_id=$3 AND m.mark IS NOT NULL JOIN assessments a ON a.id=m.assessment_id WHERE c.school_id=$1 ${level?'AND c.school_level_id=$4':''}${cls?` AND c.id=$${level?5:4}`:''} GROUP BY c.id,c.name,c.stream ORDER BY average DESC NULLS LAST`,params)).rows;
++  const classes=(await db.query(`SELECT c.id,c.name,c.stream,COUNT(DISTINCT m.learner_id)::int learners,ROUND(AVG((m.mark/NULLIF(a.max_mark,0))*100.0),2) average FROM classes c LEFT JOIN marks m ON m.class_id=c.id AND m.school_id=$1 AND m.academic_year_id=$2 AND m.term_id=$3 AND m.mark IS NOT NULL LEFT JOIN assessments a ON a.id=m.assessment_id WHERE c.school_id=$1 ${level?'AND c.school_level_id=$4':''}${cls?` AND c.id=$${level?5:4}`:''} GROUP BY c.id,c.name,c.stream ORDER BY average DESC NULLS LAST`,params)).rows;
+   const streams=(await db.query(`SELECT COALESCE(NULLIF(c.stream,''),'Main') stream,c.name class_name,COUNT(DISTINCT m.learner_id)::int learners,ROUND(AVG((m.mark/NULLIF(a.max_mark,0))*100.0),2) average FROM classes c JOIN marks m ON m.class_id=c.id AND m.school_id=$1 AND m.academic_year_id=$2 AND m.term_id=$3 AND m.mark IS NOT NULL JOIN assessments a ON a.id=m.assessment_id WHERE c.school_id=$1${level?' AND c.school_level_id=$4':''}${cls?` AND c.id=$${level?5:4}`:''} GROUP BY c.id,c.name,c.stream ORDER BY average DESC NULLS LAST`,params)).rows;
+   const gender=(await db.query(`SELECT COALESCE(NULLIF(l.gender,''),'Not specified') gender,COUNT(DISTINCT l.id)::int learners,ROUND(AVG((m.mark/NULLIF(a.max_mark,0))*100.0),2) average FROM learners l JOIN marks m ON m.learner_id=l.id JOIN assessments a ON a.id=m.assessment_id JOIN classes c ON c.id=m.class_id WHERE l.school_id=$1 AND m.academic_year_id=$2 AND m.term_id=$3 AND m.mark IS NOT NULL${where} GROUP BY COALESCE(NULLIF(l.gender,''),'Not specified') ORDER BY average DESC`,params)).rows;
+   const learnerSubjects=(await db.query(`SELECT l.id learner_id,CONCAT_WS(' ',l.first_name,l.middle_name,l.last_name) learner_name,l.gender,c.name class_name,c.stream,s.id subject_id,s.name subject_name,AVG((m.mark/NULLIF(a.max_mark,0))*100.0) average FROM marks m JOIN learners l ON l.id=m.learner_id JOIN assessments a ON a.id=m.assessment_id JOIN subjects s ON s.id=m.subject_id JOIN classes c ON c.id=m.class_id WHERE m.school_id=$1 AND m.academic_year_id=$2 AND m.term_id=$3 AND m.mark IS NOT NULL${where} GROUP BY l.id,l.first_name,l.middle_name,l.last_name,l.gender,c.name,c.stream,s.id,s.name`,params)).rows;
+diff --git a/backend/routes/grading.js b/backend/routes/grading.js
+index ee805a9..8b11e9b 100644
+--- a/backend/routes/grading.js
++++ b/backend/routes/grading.js
+@@ -7,6 +7,7 @@ function validateBands(bands){
+  const sorted=bands.map(b=>({label:String(b.label||'').trim(),min:Number(b.min_mark),max:Number(b.max_mark),points:Number(b.points||0),descriptor:String(b.descriptor||''),remark:String(b.remark||'')}));
+  if(sorted.some(b=>!b.label||!Number.isFinite(b.min)||!Number.isFinite(b.max)||b.min<0||b.max>100||b.min>b.max))throw Error('Every grading band needs a label and valid min/max marks between 0 and 100');
+  sorted.sort((a,b)=>a.min-b.min);
++ if(sorted[0].min!==0||sorted[sorted.length-1].max!==100)throw Error('Grading bands must cover the full 0 to 100 mark range');
+  const integerBands=sorted.every(b=>Number.isInteger(b.min)&&Number.isInteger(b.max));
+  for(let i=1;i<sorted.length;i++){
+   const prev=sorted[i-1],cur=sorted[i];
+diff --git a/backend/routes/merit.js b/backend/routes/merit.js
+index dc6a986..8d92f5a 100644
+--- a/backend/routes/merit.js
++++ b/backend/routes/merit.js
+@@ -31,6 +31,17 @@ function setMeritCache(key,value){
+ function clearMeritCache(){
+  meritCache.clear();
+ }
++// Merit lists expose whole-class results, so classroom staff must be linked to
++// the selected class: class teachers through their class assignment, subject
++// teachers through an active subject assignment for that class and year.
++async function enforceMeritClassAccess(req,sid,classId,yearId){
++ if(!['CLASS_TEACHER','TEACHER'].includes(req.user.role))return;
++ if(!classId)throw Object.assign(new Error('Select your assigned class.'),{status:400});
++ const classTeacher=(await db.query(`SELECT 1 FROM class_teacher_assignments a JOIN teachers th ON th.id=a.teacher_id AND th.school_id=a.school_id WHERE a.school_id=$1 AND a.class_id=$2 AND a.academic_year_id=$3 AND th.user_id=$4 AND COALESCE(th.is_active,true)=true LIMIT 1`,[sid,classId,yearId,req.user.user_id])).rows[0];
++ if(classTeacher)return;
++ const subjectTeacher=(await db.query(`SELECT 1 FROM teacher_subject_assignments tsa JOIN teachers th ON th.id=tsa.teacher_id AND th.school_id=tsa.school_id WHERE tsa.school_id=$1 AND tsa.class_id=$2 AND tsa.academic_year_id=$3 AND th.user_id=$4 AND COALESCE(tsa.is_active,true)=true AND COALESCE(th.is_active,true)=true LIMIT 1`,[sid,classId,yearId,req.user.user_id])).rows[0];
++ if(!subjectTeacher)throw Object.assign(new Error('You can only view merit for a class you are assigned to.'),{status:403});
++}
+ function drawTextWatermark(doc,name,motto,cx,cy,width,opacity=.035){const title=String(name||'').trim();if(!title)return false;try{doc.save().opacity(opacity).fillColor('#334155').font('Helvetica-Bold').fontSize(34).text(title,cx-width/2,cy-20,{width,align:'center',lineBreak:false,ellipsis:true});if(motto)doc.font('Helvetica').fontSize(13).text(String(motto),cx-width/2,cy+22,{width,align:'center',lineBreak:false,ellipsis:true});doc.restore();return true;}catch{try{doc.restore();}catch{}return false;}}
+ function fmt(v){const n=Number(v);return Number.isFinite(n)?(Math.abs(n-Math.round(n))<0.00001?String(Math.round(n)):n.toFixed(2).replace(/0+$/,'').replace(/\.$/,'')):'—';}
+ function calc(values){const usable=values.filter(x=>Number.isFinite(x.percent));return usable.length?usable.reduce((s,x)=>s+x.percent,0)/usable.length:null;}
+@@ -40,8 +51,8 @@ async function compute(sid,yearId,termId,classId=null,assessmentId=null){
+  if(cached)return cached;
+ 
+  await assertBelongs('academic_years',yearId,sid);await assertBelongs('terms',termId,sid);
+- const termInfo=(await db.query(`SELECT term_no FROM terms WHERE id=$1 AND school_id=$2`,[termId,sid])).rows[0];
+- if(!termInfo)throw Object.assign(new Error('Term not found'),{status:404});
++ const termInfo=(await db.query(`SELECT term_no FROM terms WHERE id=$1 AND school_id=$2 AND academic_year_id=$3`,[termId,sid,yearId])).rows[0];
++ if(!termInfo)throw Object.assign(new Error('Term not found for the selected academic year'),{status:404});
+  const classMeta=classId?(await db.query(`SELECT id,name,stream,school_level_id FROM classes WHERE id=$1 AND school_id=$2`,[classId,sid])).rows[0]:null;
+  if(classId&&!classMeta)throw Object.assign(new Error('Selected class was not found.'),{status:404});
+  const meritLevelId=classMeta?.school_level_id||null;
+@@ -206,12 +217,12 @@ if(rows.length){
+  setMeritCache(cacheKey,result);
+  return result;
+ }
+-router.get('/:schoolId',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER'),async(req,res)=>{try{const sid=req.params.schoolId,cls=req.query.class_id||null,y=req.query.academic_year_id||null,t=req.query.term_id||null,a=req.query.assessment_id||null;if(req.user.role==='CLASS_TEACHER'){if(!cls)return res.status(400).json({error:'Select your assigned class.'});const ok=(await db.query(`SELECT 1 FROM class_teacher_assignments a JOIN teachers th ON th.id=a.teacher_id WHERE a.school_id=$1 AND a.class_id=$2 AND a.academic_year_id=$3 AND th.user_id=$4 AND COALESCE(th.is_active,true)=true LIMIT 1`,[sid,cls,y,req.user.user_id])).rows[0];if(!ok)return res.status(403).json({error:'You can only view merit for your assigned class.'});}res.json(await compute(sid,y,t,cls,a));}catch(e){res.status(e.status||400).json({error:e.message});}});
++router.get('/:schoolId',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER'),async(req,res)=>{try{const sid=req.params.schoolId,cls=req.query.class_id||null,y=req.query.academic_year_id||null,t=req.query.term_id||null,a=req.query.assessment_id||null;await enforceMeritClassAccess(req,sid,cls,y);res.json(await compute(sid,y,t,cls,a));}catch(e){res.status(e.status||400).json({error:e.message});}});
+ router.post('/:schoolId/runs',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER'),async(req,res)=>{try{const b=req.body,r=await compute(req.params.schoolId,b.academic_year_id,b.term_id,b.class_id||null,b.assessment_id||null);const q=await db.query(`INSERT INTO merit_runs(school_id,academic_year_id,term_id,basis,filters,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,[req.params.schoolId,b.academic_year_id,b.term_id,b.basis||'AVERAGE',JSON.stringify(b.filters||{}),req.user.user_id]);res.status(201).json({run:q.rows[0],...r});}catch(e){res.status(e.status||400).json({error:e.message});}});
+ router.get('/:schoolId/pdf',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER'),async(req,res)=>{try{
+  const sid=req.params.schoolId,yearId=req.query.academic_year_id,termId=req.query.term_id,classId=req.query.class_id||null,assessmentId=req.query.assessment_id||null;
+  if(!classId)return res.status(400).json({error:'Select a class before generating the merit PDF.'});
+- if(req.user.role==='CLASS_TEACHER'){const ok=(await db.query(`SELECT 1 FROM class_teacher_assignments a JOIN teachers th ON th.id=a.teacher_id WHERE a.school_id=$1 AND a.class_id=$2 AND a.academic_year_id=$3 AND th.user_id=$4 AND COALESCE(th.is_active,true)=true LIMIT 1`,[sid,classId,yearId,req.user.user_id])).rows[0];if(!ok)return res.status(403).json({error:'You can only download merit for your assigned class.'});}
++ await enforceMeritClassAccess(req,sid,classId,yearId);
+  const r=await compute(sid,yearId,termId,classId,assessmentId);
+  const meta=(await db.query(`SELECT s.name school_name,s.code school_code,si.logo_url,si.motto,si.address,si.contact_phone,si.contact_email,si.primary_color,si.secondary_color,si.watermark_enabled,
+    (SELECT file_url FROM school_document_assets da WHERE da.school_id=s.id AND da.asset_type='STAMP' AND da.is_active=true ORDER BY da.effective_from DESC,da.created_at DESC LIMIT 1) stamp_url,
+diff --git a/backend/routes/reports.js b/backend/routes/reports.js
+index 6a567e2..c26befa 100644
+--- a/backend/routes/reports.js
++++ b/backend/routes/reports.js
+@@ -2,6 +2,7 @@ const express=require("express"),db=require("../db");
+ const {authenticate,schoolBoundary,roles}=require("../middleware/auth");
+ const {buildTermReport,buildYearReport,invalidateReportCaches}=require("../services/report-engine");
+ const {reportPdf,reportPdfs,buildReportPdfsBuffer,streamReportPdfs,invalidateReportPdfCache}=require("../services/report-pdf");
++const {assertBelongs}=require("../services/tenant");
+ const router=express.Router();router.use(authenticate);
+ const classReportPdfCache=new Map();
+ function getClassReportPdf(key){const hit=classReportPdfCache.get(key);if(hit&&hit.expires>Date.now())return hit.value;if(hit)classReportPdfCache.delete(key);return null;}
+@@ -12,20 +13,34 @@ async function enforceClassTeacherLearner(req,learnerId,yearId){
+  const ok=(await db.query(`SELECT 1 FROM learners l JOIN class_teacher_assignments a ON a.class_id=l.class_id AND a.school_id=l.school_id JOIN teachers t ON t.id=a.teacher_id WHERE l.id=$1 AND l.school_id=$2 AND a.academic_year_id=$3 AND t.user_id=$4 AND COALESCE(t.is_active,true)=true LIMIT 1`,[learnerId,req.params.schoolId,yearId,req.user.user_id])).rows[0];
+  if(!ok)throw Object.assign(new Error('You can only access report cards for learners in your assigned class.'),{status:403});
+ }
+-async function enforceClassTeacherClass(req,classId,yearId,termId){
+- if(req.user.role!=='CLASS_TEACHER')return;
+- const ok=(await db.query(`SELECT 1 FROM class_teacher_assignments a JOIN teachers t ON t.id=a.teacher_id WHERE a.school_id=$1 AND a.class_id=$2 AND a.academic_year_id=$3 AND t.user_id=$4 AND COALESCE(t.is_active,true)=true LIMIT 1`,[req.params.schoolId,classId,yearId,req.user.user_id])).rows[0];
+- if(!ok)throw Object.assign(new Error('You can only access report cards for your assigned class.'),{status:403});
++// Teachers may view report cards for classes they are attached to, either as
++// class teacher or through a subject assignment. Learners are scoped through
++// their enrolment for the selected year so past classes are handled correctly.
++async function enforceReportClassAccess(req,classId,yearId){
++ if(!['CLASS_TEACHER','TEACHER'].includes(req.user.role))return;
++ const ok=(await db.query(`SELECT 1 FROM teachers th WHERE th.school_id=$1 AND th.user_id=$2 AND COALESCE(th.is_active,true)=true AND (EXISTS(SELECT 1 FROM class_teacher_assignments cta WHERE cta.school_id=th.school_id AND cta.teacher_id=th.id AND cta.class_id=$3 AND cta.academic_year_id=$4) OR EXISTS(SELECT 1 FROM teacher_subject_assignments tsa WHERE tsa.school_id=th.school_id AND tsa.teacher_id=th.id AND tsa.class_id=$3 AND tsa.academic_year_id=$4 AND COALESCE(tsa.is_active,true)=true)) LIMIT 1`,[req.params.schoolId,req.user.user_id,classId,yearId])).rows[0];
++ if(!ok)throw Object.assign(new Error('You can only access report cards for classes you are assigned to.'),{status:403});
++}
++async function enforceReportLearnerAccess(req,learnerId,yearId){
++ if(req.user.role==='CLASS_TEACHER')return enforceClassTeacherLearner(req,learnerId,yearId);
++ if(req.user.role!=='TEACHER')return;
++ const row=(await db.query(`SELECT COALESCE((SELECT le.class_id FROM learner_enrollments le WHERE le.school_id=$1 AND le.learner_id=$2 AND le.academic_year_id=$3 AND COALESCE(le.status,'ACTIVE') IN ('ACTIVE','COMPLETED') ORDER BY (le.status='ACTIVE') DESC,le.created_at DESC LIMIT 1),l.class_id) class_id FROM learners l WHERE l.id=$2 AND l.school_id=$1`,[req.params.schoolId,learnerId,yearId])).rows[0];
++ if(!row||!row.class_id)throw Object.assign(new Error('Learner is not enrolled for the selected academic year.'),{status:404});
++ await enforceReportClassAccess(req,row.class_id,yearId);
++}
++async function assertTermInYear(sid,yearId,termId){
++ const ok=(await db.query('SELECT 1 FROM terms WHERE id=$1 AND school_id=$2 AND academic_year_id=$3',[termId,sid,yearId])).rows[0];
++ if(!ok)throw Object.assign(new Error('Selected term does not belong to the selected academic year.'),{status:400});
+ }
+ 
+-router.get("/:schoolId/term/:learnerId/:yearId/:termId",schoolBoundary,roles("SCHOOL_ADMIN","ADMIN","HEADTEACHER","DEPUTY_HEADTEACHER","SENIOR_TEACHER","CLASS_TEACHER","TEACHER"),async(req,res)=>{try{await enforceClassTeacherLearner(req,req.params.learnerId,req.params.yearId);const r=await buildTermReport(req.params.schoolId,req.params.learnerId,req.params.yearId,req.params.termId);if(!r)return res.status(404).json({error:"Report not found"});res.json(r); }catch(e){console.error('[ZELIMU CBC term report]',e);res.status(e.status||500).json({error:e.message||'Report generation failed'});}});
+-router.get("/:schoolId/term/:learnerId/:yearId/:termId/pdf",schoolBoundary,roles("SCHOOL_ADMIN","ADMIN","HEADTEACHER","DEPUTY_HEADTEACHER","SENIOR_TEACHER","CLASS_TEACHER","TEACHER"),async(req,res)=>{try{await enforceClassTeacherLearner(req,req.params.learnerId,req.params.yearId);const r=await buildTermReport(req.params.schoolId,req.params.learnerId,req.params.yearId,req.params.termId);if(!r)return res.status(404).json({error:"Report not found"});await reportPdf(r,res); }catch(e){console.error('[ZELIMU CBC term report PDF]',e);if(!res.headersSent)res.status(e.status||500).json({error:e.message||'PDF generation failed'});}});
+-router.get("/:schoolId/year/:learnerId/:yearId",schoolBoundary,roles("SCHOOL_ADMIN","ADMIN","HEADTEACHER","DEPUTY_HEADTEACHER","SENIOR_TEACHER","CLASS_TEACHER","TEACHER"),async(req,res)=>{try{await enforceClassTeacherLearner(req,req.params.learnerId,req.params.yearId);const r=await buildYearReport(req.params.schoolId,req.params.learnerId,req.params.yearId);if(!r)return res.status(404).json({error:"Annual report not found"});res.json(r); }catch(e){console.error('[ZELIMU CBC annual report]',e);res.status(e.status||500).json({error:e.message||'Annual report generation failed'});}});
+-router.get("/:schoolId/year/:learnerId/:yearId/pdf",schoolBoundary,roles("SCHOOL_ADMIN","ADMIN","HEADTEACHER","DEPUTY_HEADTEACHER","SENIOR_TEACHER","CLASS_TEACHER","TEACHER"),async(req,res)=>{try{await enforceClassTeacherLearner(req,req.params.learnerId,req.params.yearId);const r=await buildYearReport(req.params.schoolId,req.params.learnerId,req.params.yearId);if(!r)return res.status(404).json({error:"Annual report not found"});await reportPdf(r,res); }catch(e){console.error('[ZELIMU CBC annual report PDF]',e);if(!res.headersSent)res.status(e.status||500).json({error:e.message||'PDF generation failed'});}});
++router.get("/:schoolId/term/:learnerId/:yearId/:termId",schoolBoundary,roles("SCHOOL_ADMIN","ADMIN","HEADTEACHER","DEPUTY_HEADTEACHER","SENIOR_TEACHER","CLASS_TEACHER","TEACHER"),async(req,res)=>{try{await enforceReportLearnerAccess(req,req.params.learnerId,req.params.yearId);const r=await buildTermReport(req.params.schoolId,req.params.learnerId,req.params.yearId,req.params.termId);if(!r)return res.status(404).json({error:"Report not found"});res.json(r); }catch(e){console.error('[ZELIMU CBC term report]',e);res.status(e.status||500).json({error:e.message||'Report generation failed'});}});
++router.get("/:schoolId/term/:learnerId/:yearId/:termId/pdf",schoolBoundary,roles("SCHOOL_ADMIN","ADMIN","HEADTEACHER","DEPUTY_HEADTEACHER","SENIOR_TEACHER","CLASS_TEACHER","TEACHER"),async(req,res)=>{try{await enforceReportLearnerAccess(req,req.params.learnerId,req.params.yearId);const r=await buildTermReport(req.params.schoolId,req.params.learnerId,req.params.yearId,req.params.termId);if(!r)return res.status(404).json({error:"Report not found"});await reportPdf(r,res); }catch(e){console.error('[ZELIMU CBC term report PDF]',e);if(!res.headersSent)res.status(e.status||500).json({error:e.message||'PDF generation failed'});}});
++router.get("/:schoolId/year/:learnerId/:yearId",schoolBoundary,roles("SCHOOL_ADMIN","ADMIN","HEADTEACHER","DEPUTY_HEADTEACHER","SENIOR_TEACHER","CLASS_TEACHER","TEACHER"),async(req,res)=>{try{await enforceReportLearnerAccess(req,req.params.learnerId,req.params.yearId);const r=await buildYearReport(req.params.schoolId,req.params.learnerId,req.params.yearId);if(!r)return res.status(404).json({error:"Annual report not found"});res.json(r); }catch(e){console.error('[ZELIMU CBC annual report]',e);res.status(e.status||500).json({error:e.message||'Annual report generation failed'});}});
++router.get("/:schoolId/year/:learnerId/:yearId/pdf",schoolBoundary,roles("SCHOOL_ADMIN","ADMIN","HEADTEACHER","DEPUTY_HEADTEACHER","SENIOR_TEACHER","CLASS_TEACHER","TEACHER"),async(req,res)=>{try{await enforceReportLearnerAccess(req,req.params.learnerId,req.params.yearId);const r=await buildYearReport(req.params.schoolId,req.params.learnerId,req.params.yearId);if(!r)return res.status(404).json({error:"Annual report not found"});await reportPdf(r,res); }catch(e){console.error('[ZELIMU CBC annual report PDF]',e);if(!res.headersSent)res.status(e.status||500).json({error:e.message||'PDF generation failed'});}});
+ router.get("/:schoolId/class/:classId/:yearId/:termId/pdf",schoolBoundary,roles("SCHOOL_ADMIN","ADMIN","HEADTEACHER","DEPUTY_HEADTEACHER","CLASS_TEACHER","SENIOR_TEACHER","TEACHER"),async(req,res)=>{try{
+  const cls=(await db.query('SELECT c.id,c.name,c.stream,s.name school_name,si.motto,si.primary_color,si.secondary_color FROM classes c JOIN schools s ON s.id=c.school_id LEFT JOIN school_identity si ON si.school_id=c.school_id WHERE c.id=$1 AND c.school_id=$2',[req.params.classId,req.params.schoolId])).rows[0];
+  if(!cls)return res.status(404).json({error:'Class not found'});
+- await enforceClassTeacherClass(req,req.params.classId,req.params.yearId,req.params.termId);
++ await enforceReportClassAccess(req,req.params.classId,req.params.yearId,req.params.termId);
+  const learners=(await db.query(`SELECT DISTINCT l.id,l.first_name,l.middle_name,l.last_name FROM learners l WHERE l.school_id=$1 AND (l.class_id=$2 OR EXISTS (SELECT 1 FROM learner_enrollments le WHERE le.learner_id=l.id AND le.school_id=$1 AND le.academic_year_id=$3 AND le.class_id=$2 AND COALESCE(le.status,'ACTIVE') IN ('ACTIVE','COMPLETED')) OR (EXISTS (SELECT 1 FROM marks mx WHERE mx.school_id=l.school_id AND mx.learner_id=l.id AND mx.academic_year_id=$3 AND mx.term_id=$4 AND mx.class_id=$2) AND NOT EXISTS (SELECT 1 FROM learner_enrollments lex WHERE lex.learner_id=l.id AND lex.school_id=$1 AND lex.academic_year_id=$3))) ORDER BY l.last_name NULLS LAST,l.first_name NULLS LAST,l.middle_name NULLS LAST,l.id`,[req.params.schoolId,req.params.classId,req.params.yearId,req.params.termId])).rows;
+  if(!learners.length)return res.status(404).json({error:'No learners are enrolled in this class for the selected academic year and term.'});
+  // Stream the PDF while reports are being built. The old route waited for the entire
+@@ -56,9 +71,9 @@ router.get("/:schoolId/class/:classId/:yearId/:termId/pdf",schoolBoundary,roles(
+  res.setHeader('X-Pro-Mark-Skipped-Count','0');
+  await streamReportPdfs(factory,res,{expectedCount:learners.length,download:String(req.query.download||'')==='1'});
+  }catch(e){console.error('[ZELIMU CBC class report PDF]',e);if(!res.headersSent)res.status(e.status||500).json({error:e.message||'Class report PDF generation failed'});}});
+-router.get('/:schoolId/class/:classId/:yearId/:termId/learners',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','CLASS_TEACHER','SENIOR_TEACHER','TEACHER'),async(req,res)=>{try{await enforceClassTeacherClass(req,req.params.classId,req.params.yearId,req.params.termId);const q=await db.query(`SELECT l.id,l.admission_no,l.assessment_no,l.first_name,l.middle_name,l.last_name FROM learners l JOIN learner_enrollments le ON le.learner_id=l.id AND le.school_id=l.school_id WHERE l.school_id=$1 AND le.academic_year_id=$2 AND le.class_id=$3 AND COALESCE(le.status,'ACTIVE') IN ('ACTIVE','COMPLETED') ORDER BY l.last_name NULLS LAST,l.first_name NULLS LAST,l.middle_name NULLS LAST,l.id`,[req.params.schoolId,req.params.yearId,req.params.classId]);res.json(q.rows);}catch(e){res.status(e.status||400).json({error:e.message})}});
+-router.get("/:schoolId/comments/:learnerId/:yearId/:termId",schoolBoundary,async(req,res)=>{const q=await db.query(`SELECT * FROM report_comments WHERE school_id=$1 AND learner_id=$2 AND academic_year_id=$3 AND term_id=$4 ORDER BY comment_type`,[req.params.schoolId,req.params.learnerId,req.params.yearId,req.params.termId]);res.json(q.rows);});
+-router.post("/:schoolId/comments",schoolBoundary,roles("SCHOOL_ADMIN","ADMIN","HEADTEACHER","DEPUTY_HEADTEACHER","CLASS_TEACHER","SENIOR_TEACHER","TEACHER"),async(req,res)=>{const b=req.body||{};try{const {assertBelongs}=require('../services/tenant');if(!b.learner_id||!b.academic_year_id||!b.term_id||!b.comment_type)return res.status(400).json({error:"Learner, year, term and comment type are required"});
++router.get('/:schoolId/class/:classId/:yearId/:termId/learners',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','CLASS_TEACHER','SENIOR_TEACHER','TEACHER'),async(req,res)=>{try{await enforceReportClassAccess(req,req.params.classId,req.params.yearId,req.params.termId);const q=await db.query(`SELECT l.id,l.admission_no,l.assessment_no,l.first_name,l.middle_name,l.last_name FROM learners l JOIN learner_enrollments le ON le.learner_id=l.id AND le.school_id=l.school_id WHERE l.school_id=$1 AND le.academic_year_id=$2 AND le.class_id=$3 AND COALESCE(le.status,'ACTIVE') IN ('ACTIVE','COMPLETED') ORDER BY l.last_name NULLS LAST,l.first_name NULLS LAST,l.middle_name NULLS LAST,l.id`,[req.params.schoolId,req.params.yearId,req.params.classId]);res.json(q.rows);}catch(e){res.status(e.status||400).json({error:e.message})}});
++router.get("/:schoolId/comments/:learnerId/:yearId/:termId",schoolBoundary,roles("SCHOOL_ADMIN","ADMIN","HEADTEACHER","DEPUTY_HEADTEACHER","SENIOR_TEACHER","CLASS_TEACHER","TEACHER"),async(req,res)=>{try{await enforceReportLearnerAccess(req,req.params.learnerId,req.params.yearId);const q=await db.query(`SELECT * FROM report_comments WHERE school_id=$1 AND learner_id=$2 AND academic_year_id=$3 AND term_id=$4 ORDER BY comment_type`,[req.params.schoolId,req.params.learnerId,req.params.yearId,req.params.termId]);res.json(q.rows);}catch(e){res.status(e.status||400).json({error:e.message})}});
++router.post("/:schoolId/comments",schoolBoundary,roles("SCHOOL_ADMIN","ADMIN","HEADTEACHER","DEPUTY_HEADTEACHER","CLASS_TEACHER","SENIOR_TEACHER","TEACHER"),async(req,res)=>{const b=req.body||{};try{if(!b.learner_id||!b.academic_year_id||!b.term_id||!b.comment_type)return res.status(400).json({error:"Learner, year, term and comment type are required"});
+ if(typeof b.comment_type!=='string'||!b.comment_type.trim()||b.comment_type.trim().length>80)
+   return res.status(400).json({error:"Invalid report comment type."});
+ if(b.comment_text!=null&&typeof b.comment_text!=='string')
+@@ -67,9 +82,11 @@ if((b.comment_text||'').trim().length>2000)
+   return res.status(400).json({error:"Report comment exceeds 2000 characters."});
+ b.comment_type=b.comment_type.trim();
+ b.comment_text=(b.comment_text||'').trim();
+-await assertBelongs('learners',b.learner_id,req.params.schoolId);await assertBelongs('academic_years',b.academic_year_id,req.params.schoolId);await assertBelongs('terms',b.term_id,req.params.schoolId);const q=await db.query(`INSERT INTO report_comments(school_id,learner_id,academic_year_id,term_id,comment_type,comment_text,created_by) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(learner_id,academic_year_id,term_id,comment_type) DO UPDATE SET comment_text=EXCLUDED.comment_text,created_by=EXCLUDED.created_by,updated_at=now() RETURNING *`,[req.params.schoolId,b.learner_id,b.academic_year_id,b.term_id,b.comment_type,b.comment_text||"",req.user.user_id]);res.json(q.rows[0]);}catch(e){res.status(e.status||400).json({error:e.message});}});
++await enforceReportLearnerAccess(req,b.learner_id,b.academic_year_id);
++await assertBelongs('learners',b.learner_id,req.params.schoolId);await assertBelongs('academic_years',b.academic_year_id,req.params.schoolId);await assertBelongs('terms',b.term_id,req.params.schoolId);
++await assertTermInYear(req.params.schoolId,b.academic_year_id,b.term_id);const q=await db.query(`INSERT INTO report_comments(school_id,learner_id,academic_year_id,term_id,comment_type,comment_text,created_by) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(learner_id,academic_year_id,term_id,comment_type) DO UPDATE SET comment_text=EXCLUDED.comment_text,created_by=EXCLUDED.created_by,updated_at=now() RETURNING *`,[req.params.schoolId,b.learner_id,b.academic_year_id,b.term_id,b.comment_type,b.comment_text||"",req.user.user_id]);invalidateReportCaches();invalidateReportPdfCache();res.json(q.rows[0]);}catch(e){res.status(e.status||400).json({error:e.message});}});
+ router.get('/:schoolId/pathway-guidance/:learnerId/:yearId/:termId',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER'),async(req,res)=>{try{
+- await enforceClassTeacherLearner(req,req.params.learnerId,req.params.yearId);
++ await enforceReportLearnerAccess(req,req.params.learnerId,req.params.yearId);
+  const q=await db.query(`SELECT selected_pathway,track_specialisation,pathway_evidence,strengths,competency_development,development_area,career_exploration,teacher_guidance
+   FROM report_pathway_guidance WHERE school_id=$1 AND learner_id=$2 AND academic_year_id=$3 AND term_id=$4`,[req.params.schoolId,req.params.learnerId,req.params.yearId,req.params.termId]);
+  res.json(q.rows[0]||{});
+@@ -78,7 +95,6 @@ router.put('/:schoolId/pathway-guidance',schoolBoundary,roles('SCHOOL_ADMIN','AD
+  const b=req.body||{};
+  if(!b.learner_id||!b.academic_year_id||!b.term_id)return res.status(400).json({error:'Learner, academic year and term are required'});
+  await enforceClassTeacherLearner(req,b.learner_id,b.academic_year_id);
+- const {assertBelongs}=require('../services/tenant');
+  await assertBelongs('learners',b.learner_id,req.params.schoolId);await assertBelongs('academic_years',b.academic_year_id,req.params.schoolId);await assertBelongs('terms',b.term_id,req.params.schoolId);
+  const termContext=(await db.query('SELECT 1 FROM terms WHERE id=$1 AND school_id=$2 AND academic_year_id=$3',[b.term_id,req.params.schoolId,b.academic_year_id])).rows[0];
+  if(!termContext)return res.status(400).json({error:'Selected term does not belong to the selected academic year.'});
+@@ -103,23 +119,38 @@ router.put('/:schoolId/pathway-guidance',schoolBoundary,roles('SCHOOL_ADMIN','AD
+  res.json(q.rows[0]);
+ }catch(e){pathwayGuidanceError(res,e);}});
+ router.get('/:schoolId/designation/:learnerId/:yearId/:termId',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','CLASS_TEACHER','SENIOR_TEACHER','TEACHER'),async(req,res)=>{try{
++ await enforceReportLearnerAccess(req,req.params.learnerId,req.params.yearId);
+  const q=await db.query(`SELECT designation,decision,attendance_days,school_open_days,conduct,effort,next_term_target,intervention_plan,teacher_comment,headteacher_comment
+   FROM report_card_designations WHERE school_id=$1 AND learner_id=$2 AND academic_year_id=$3 AND term_id=$4`,[req.params.schoolId,req.params.learnerId,req.params.yearId,req.params.termId]);
+  res.json(q.rows[0]||{});
+-}catch(e){res.status(400).json({error:e.message})}});
++}catch(e){res.status(e.status||400).json({error:e.message})}});
+ router.put('/:schoolId/designation',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','CLASS_TEACHER','SENIOR_TEACHER'),async(req,res)=>{try{
+  const b=req.body||{};
+  if(!b.learner_id||!b.academic_year_id||!b.term_id)return res.status(400).json({error:'Learner, academic year and term are required'});
++ await enforceClassTeacherLearner(req,b.learner_id,b.academic_year_id);
++ await assertBelongs('learners',b.learner_id,req.params.schoolId);await assertBelongs('academic_years',b.academic_year_id,req.params.schoolId);await assertBelongs('terms',b.term_id,req.params.schoolId);
++ await assertTermInYear(req.params.schoolId,b.academic_year_id,b.term_id);
+  const allowedDesignation=['AUTO','DISTINCTION','MERIT','CREDIT','PASS','DEVELOPING','AT_RISK','INCOMPLETE'];
+  const allowedDecision=['AUTO','PROMOTED','PROCEED','REPEAT','REVIEW','GRADUATED'];
+  if(!allowedDesignation.includes(String(b.designation||'AUTO').toUpperCase()))return res.status(400).json({error:'Invalid designation'});
+  if(!allowedDecision.includes(String(b.decision||'AUTO').toUpperCase()))return res.status(400).json({error:'Invalid progression decision'});
++ const wholeNumber=(value,label,max)=>{if(value===''||value==null)return null;const n=Number(value);if(!Number.isInteger(n)||n<0||n>max)throw Object.assign(new Error(`${label} must be a whole number between 0 and ${max}.`),{status:400});return n;};
++ const shortText=(value,label,max=200)=>{if(value==null)return null;if(typeof value!=='string')throw Object.assign(new Error(`${label} must be text.`),{status:400});const text=value.trim();if(text.length>max)throw Object.assign(new Error(`${label} exceeds ${max} characters.`),{status:400});return text||null;};
++ const attendanceDays=wholeNumber(b.attendance_days,'Attendance days',366);
++ const schoolOpenDays=wholeNumber(b.school_open_days,'School open days',366);
++ if(attendanceDays!==null&&schoolOpenDays!==null&&attendanceDays>schoolOpenDays)return res.status(400).json({error:'Attendance days cannot exceed school open days.'});
++ const nextTermTarget=wholeNumber(b.next_term_target,'Next term target',100);
++ const conduct=shortText(b.conduct,'Conduct');
++ const effort=shortText(b.effort,'Effort');
++ const interventionPlan=shortText(b.intervention_plan,'Intervention plan',2000);
++ const teacherComment=shortText(b.teacher_comment,'Teacher comment',2000);
++ const headteacherComment=shortText(b.headteacher_comment,'Head teacher comment',2000);
+  const q=await db.query(`INSERT INTO report_card_designations(school_id,learner_id,academic_year_id,term_id,designation,decision,attendance_days,school_open_days,conduct,effort,next_term_target,intervention_plan,teacher_comment,headteacher_comment,updated_by)
+  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+  ON CONFLICT(learner_id,academic_year_id,term_id) DO UPDATE SET designation=EXCLUDED.designation,decision=EXCLUDED.decision,attendance_days=EXCLUDED.attendance_days,school_open_days=EXCLUDED.school_open_days,conduct=EXCLUDED.conduct,effort=EXCLUDED.effort,next_term_target=EXCLUDED.next_term_target,intervention_plan=EXCLUDED.intervention_plan,teacher_comment=EXCLUDED.teacher_comment,headteacher_comment=EXCLUDED.headteacher_comment,updated_by=EXCLUDED.updated_by,updated_at=now()
+- RETURNING *`,[req.params.schoolId,b.learner_id,b.academic_year_id,b.term_id,String(b.designation||'AUTO').toUpperCase(),String(b.decision||'AUTO').toUpperCase(),b.attendance_days===''||b.attendance_days==null?null:Number(b.attendance_days),b.school_open_days===''||b.school_open_days==null?null:Number(b.school_open_days),b.conduct||null,b.effort||null,b.next_term_target===''||b.next_term_target==null?null:Number(b.next_term_target),b.intervention_plan||null,b.teacher_comment||null,b.headteacher_comment||null,req.user.user_id]);
++ RETURNING *`,[req.params.schoolId,b.learner_id,b.academic_year_id,b.term_id,String(b.designation||'AUTO').toUpperCase(),String(b.decision||'AUTO').toUpperCase(),attendanceDays,schoolOpenDays,conduct,effort,nextTermTarget,interventionPlan,teacherComment,headteacherComment,req.user.user_id]);
+  invalidateReportCaches();
+  invalidateReportPdfCache();
+  res.json(q.rows[0]);
+-}catch(e){res.status(400).json({error:e.message})}});
++}catch(e){res.status(e.status||400).json({error:e.message})}});
+ module.exports=router;
+diff --git a/backend/services/report-engine.js b/backend/services/report-engine.js
+index 76130cf..f67fc23 100644
+--- a/backend/services/report-engine.js
++++ b/backend/services/report-engine.js
+@@ -110,7 +110,14 @@ async function getContext(schoolId, learnerId, yearId, termId) {
+     JOIN academic_years ay ON ay.id=$3 AND ay.school_id=l.school_id
+     JOIN terms t ON t.id=$4 AND t.school_id=l.school_id AND t.academic_year_id=ay.id
+     LEFT JOIN terms nt ON nt.school_id=l.school_id AND nt.academic_year_id=ay.id AND nt.term_no=t.term_no+1
+-    LEFT JOIN learner_enrollments le ON le.school_id=l.school_id AND le.learner_id=l.id AND le.academic_year_id=ay.id
++    LEFT JOIN LATERAL (
++      SELECT le.class_id
++      FROM learner_enrollments le
++      WHERE le.school_id=l.school_id AND le.learner_id=l.id AND le.academic_year_id=ay.id
++        AND COALESCE(le.status,'ACTIVE') IN ('ACTIVE','COMPLETED')
++      ORDER BY (COALESCE(le.status,'ACTIVE')='ACTIVE') DESC,le.created_at DESC
++      LIMIT 1
++    ) le ON true
+     LEFT JOIN classes c ON c.id=COALESCE(le.class_id,l.class_id)
+     LEFT JOIN school_levels sl ON sl.id=c.school_level_id
+     LEFT JOIN school_sections ss ON ss.id=sl.school_section_id
+@@ -343,7 +350,7 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
+   const reportAssessmentSql = "'OPENER','MID_TERM','END_TERM'";
+   const priorRows=(await db.query(`
+     WITH latest_terms AS (
+-      SELECT DISTINCT ON (ay.id) ay.id ay_id,t.id term_id,ay.year_label,t.term_no
++      SELECT DISTINCT ON (ay.id) ay.id ay_id,t.id term_id,ay.year_label,t.term_no,ay.start_date
+       FROM academic_years ay JOIN terms t ON t.academic_year_id=ay.id AND t.school_id=ay.school_id
+       WHERE ay.school_id=$1 AND ay.id<>$2 AND t.term_no=$3
+       ORDER BY ay.id DESC,t.term_no DESC
+@@ -353,7 +360,8 @@ async function buildTermReportCore(schoolId, learnerId, yearId, termId) {
+       JOIN assessments a ON a.id=m.assessment_id
+     WHERE m.school_id=$1 AND m.learner_id=$4 AND m.mark IS NOT NULL
+       AND a.assessment_type IN (${reportAssessmentSql})
+-    GROUP BY ay.year_label,m.subject_id`,[schoolId,yearId,meta.term_no,learnerId])).rows;
++    GROUP BY ay.year_label,ay.start_date,m.subject_id
++    ORDER BY ay.start_date DESC NULLS LAST,ay.year_label DESC,m.subject_id`,[schoolId,yearId,meta.term_no,learnerId])).rows;
+   const priorBySubject=new Map();for(const r of priorRows){if(!priorBySubject.has(r.subject_id))priorBySubject.set(r.subject_id,[]);priorBySubject.get(r.subject_id).push(r);}
+   subjects.forEach(s=>{const rr=currentRanks.get(s.subject_id);const priors=priorBySubject.get(s.subject_id)||[];s.subject_rank=rr?Number(rr.subject_rank):null;s.subject_rank_total=rr?Number(rr.subject_learner_count):null;s.previous_years=priors.map(r=>({year_label:r.year_label,average:Number(r.average)}));const immediate=priors[0];s.previous_year_average=immediate?Number(immediate.average):null;s.previous_year_deviation=(immediate&&s.average!=null)?Number(s.average)-Number(immediate.average):null;});
+   const overall=avg(subjects.map(s=>s.average));
+diff --git a/backend/services/term-score.js b/backend/services/term-score.js
+index 682d403..091d83c 100644
+--- a/backend/services/term-score.js
++++ b/backend/services/term-score.js
+@@ -344,13 +344,13 @@ function computeRanks({
+     );
+     let rank = 0;
+     let previous = null;
+-    for (const item of items) {
++    items.forEach((item, index) => {
+       if (previous === null || Math.abs(item.subject.average - previous) > 1e-8) {
+-        rank += 1;
++        rank = index + 1;
+         previous = item.subject.average;
+       }
+       item.rank = rank;
+-    }
++    });
+     for (const item of items) {
+       item.row.subject_ranks = item.row.subject_ranks || {};
+       item.row.subject_ranks[String(item.subject.subject_id)] = {
+@@ -370,8 +370,16 @@ function computeRanks({
+     }
+     for (const partition of partitions.values()) {
+       partition.sort((a, b) => compareDescending(a, b, row => row.overall_average));
++      // Tied averages share a position so printed ranks never contradict the
++      // identical averages shown beside them.
++      let rank = 0;
++      let previous = null;
+       partition.forEach((row, index) => {
+-        row[rankField] = index + 1;
++        if (previous === null || Math.abs(row.overall_average - previous) > 1e-8) {
++          rank = index + 1;
++          previous = row.overall_average;
++        }
++        row[rankField] = rank;
+         row[totalField] = partition.length;
+       });
+     }

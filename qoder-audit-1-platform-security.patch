@@ -1,0 +1,339 @@
+diff --git a/backend/middleware/auth.js b/backend/middleware/auth.js
+index 92a0e25..f2aab1e 100644
+--- a/backend/middleware/auth.js
++++ b/backend/middleware/auth.js
+@@ -1,11 +1,71 @@
+ const jwt=require("jsonwebtoken");
++const crypto=require("crypto");
++const db=require("../db");
++const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++const TEACHING_ROLES=new Set(["TEACHER","CLASS_TEACHER","SENIOR_TEACHER"]);
+ 
+-function authenticate(req,res,next){
++// A token is only a claim. Every request re-reads the account so that
++// deactivation, role changes, staff deactivation and password resets take
++// effect immediately instead of waiting for the 8-hour token to expire.
++async function authenticate(req,res,next){
+   const h=req.headers.authorization||"";
+   const token=h.startsWith("Bearer ")?h.slice(7):null;
+   if(!token)return res.status(401).json({error:"Authentication required"});
+-  try{req.user=jwt.verify(token,process.env.JWT_SECRET);next();}
++  let claims;
++  try{claims=jwt.verify(token,process.env.JWT_SECRET);}
+   catch{return res.status(401).json({error:"Invalid or expired token"});}
++  if(!UUID_RE.test(String(claims.user_id||"")))return res.status(401).json({error:"Invalid or expired token"});
++  try{
++    const u=(await db.query(`SELECT to_jsonb(u)->>'is_active' AS is_active,COALESCE(to_jsonb(u)->>'password_hash','') AS password_hash FROM users u WHERE u.id=$1`,[claims.user_id])).rows[0];
++    if(!u||String(u.is_active).toLowerCase()==="false")return res.status(401).json({error:"This account is inactive. Please sign in again."});
++    if(claims.pv){
++      const current=crypto.createHash("sha256").update(String(u.password_hash||"")).digest("hex").slice(0,16);
++      if(current!==claims.pv)return res.status(401).json({error:"Your password was changed. Please sign in again."});
++    }
++    const claimSchool=UUID_RE.test(String(claims.school_id||""))?String(claims.school_id):null;
++    const user={...claims,school_id:claimSchool};
++    if(String(claims.role||"").toUpperCase()!=="PLATFORM_OWNER"){
++      let roleRow=null;
++      try{
++        roleRow=(await db.query(
++          `SELECT role,school_id FROM user_school_roles
++           WHERE user_id=$1 AND ($2::uuid IS NULL OR school_id=$2::uuid)
++           ORDER BY (role::text=$3) DESC LIMIT 1`,
++          [claims.user_id,claimSchool,String(claims.role||"").toUpperCase()]
++        )).rows[0];
++      }catch(e){if(e.code!=="42703"&&e.code!=="42P01")throw e;}
++      if(roleRow){
++        user.role=String(roleRow.role).toUpperCase();
++        user.school_id=roleRow.school_id||claimSchool;
++      }else{
++        // Legacy installations may link teachers through teachers.user_id only.
++        let legacy=null;
++        try{
++          legacy=(await db.query(
++            `SELECT t.school_id FROM teachers t
++             WHERE t.user_id=$1 AND ($2::uuid IS NULL OR t.school_id=$2::uuid)
++             LIMIT 1`,
++            [claims.user_id,claimSchool]
++          )).rows[0];
++        }catch(e){if(e.code!=="42703"&&e.code!=="42P01")throw e;}
++        if(!legacy)return res.status(401).json({error:"Your ZELIMU CBC role is no longer active. Please sign in again."});
++        user.role="TEACHER";
++        user.school_id=legacy.school_id;
++      }
++    }
++    // Staff deactivation is recorded on the teacher profile, not on the login.
++    if(TEACHING_ROLES.has(user.role)&&user.school_id){
++      try{
++        const t=(await db.query(`SELECT COALESCE(bool_or((to_jsonb(t)->>'is_active')::boolean),true) AS active FROM teachers t WHERE t.user_id=$1 AND t.school_id=$2`,[claims.user_id,user.school_id])).rows[0];
++        if(t&&t.active===false)return res.status(401).json({error:"Your staff account has been deactivated. Contact your school administrator."});
++      }catch(e){if(e.code!=="42703"&&e.code!=="42P01")throw e;}
++    }
++    req.user=user;
++    next();
++  }catch(e){
++    console.error("Authentication check failed:",e);
++    return res.status(503).json({error:"Unable to verify your account right now. Please try again."});
++  }
+ }
+ function roles(...allowed){return (req,res,next)=>(req.user?.role==='PLATFORM_OWNER'||allowed.includes(req.user?.role))?next():res.status(403).json({error:"Insufficient permission"});}
+ async function schoolBoundary(req,res,next){
+@@ -13,7 +73,6 @@ async function schoolBoundary(req,res,next){
+   if(req.user?.role==='PLATFORM_OWNER')return next();
+   if(!sid||!req.user?.school_id||sid!==req.user.school_id)return res.status(403).json({error:"School access denied"});
+   try{
+-    const db=require('../db');
+     const q=await db.query('SELECT status FROM schools WHERE id=$1',[sid]);
+     if(!q.rows[0])return res.status(404).json({error:"School not found"});
+     if(q.rows[0].status!=='ACTIVE')return res.status(403).json({error:`School is ${String(q.rows[0].status).toLowerCase()}`});
+diff --git a/backend/routes/auth.js b/backend/routes/auth.js
+index 7fe2f21..067afcb 100644
+--- a/backend/routes/auth.js
++++ b/backend/routes/auth.js
+@@ -11,6 +11,54 @@ async function tableColumns(table){
+   return new Set(q.rows.map(r=>r.column_name));
+ }
+ 
++// Password fingerprint carried inside the token. When the stored hash changes
++// (self-service change, administrator reset, recovery email) every older token
++// is rejected immediately by the authenticate middleware.
++function passwordFingerprint(hash){
++  return crypto.createHash('sha256').update(String(hash||'')).digest('hex').slice(0,16);
++}
++
++// Brute-force protection. Failures are tracked per email+IP so a school cannot
++// be locked out by an attacker working from a different network.
++const LOGIN_MAX_FAILURES=10;
++const LOGIN_WINDOW_MS=15*60*1000;
++const LOGIN_LOCK_MS=15*60*1000;
++const loginFailures=new Map();
++function loginKey(req,email){
++  const ip=String(req.headers['x-forwarded-for']||'').split(',')[0].trim()||req.ip||'unknown';
++  return `${ip}|${email}`;
++}
++function loginLockMinutes(key){
++  const r=loginFailures.get(key);
++  if(!r)return 0;
++  const now=Date.now();
++  if(r.blockedUntil&&r.blockedUntil>now)return Math.ceil((r.blockedUntil-now)/60000);
++  if(now-r.first>LOGIN_WINDOW_MS)loginFailures.delete(key);
++  return 0;
++}
++function recordLoginFailure(key){
++  const now=Date.now();
++  let r=loginFailures.get(key);
++  if(!r||now-r.first>LOGIN_WINDOW_MS){r={count:0,first:now,blockedUntil:0};loginFailures.set(key,r);}
++  r.count+=1;
++  if(r.count>=LOGIN_MAX_FAILURES)r.blockedUntil=now+LOGIN_LOCK_MS;
++  if(loginFailures.size>20000){
++    for(const [k,v] of loginFailures)if(now-v.first>LOGIN_WINDOW_MS)loginFailures.delete(k);
++  }
++}
++
++// Recovery-email abuse protection: five requests per address per 15 minutes.
++const resetRequests=new Map();
++const RESET_WINDOW_MS=15*60*1000;
++const RESET_MAX=5;
++function resetRequestBlocked(email){
++  const now=Date.now(),r=resetRequests.get(email);
++  if(!r){resetRequests.set(email,{count:1,first:now});return false;}
++  if(now-r.first>RESET_WINDOW_MS){resetRequests.set(email,{count:1,first:now});return false;}
++  r.count+=1;
++  return r.count>RESET_MAX;
++}
++
+ router.post('/login',async(req,res)=>{
+   try{
+     const email=String(req.body.email||'').trim().toLowerCase();
+@@ -18,6 +66,9 @@ router.post('/login',async(req,res)=>{
+     const requestedRole=String(req.body.role||'').trim().toUpperCase();
+     const requestedSchoolId=String(req.body.school_id||'').trim();
+     if(!email||!password)return res.status(400).json({error:'Email and password are required'});
++    const failKey=loginKey(req,email);
++    const lockedFor=loginLockMinutes(failKey);
++    if(lockedFor)return res.status(429).json({error:`Too many failed sign-in attempts for this account from this device. Try again in ${lockedFor} minute${lockedFor===1?'':'s'}.`});
+ 
+     // IMPORTANT: existing ZELIMU CBC installations are not all on the same schema.
+     // Login must therefore discover optional columns/tables instead of assuming
+@@ -29,10 +80,10 @@ router.post('/login',async(req,res)=>{
+     }
+ 
+     const uq=await db.query(`SELECT id,email,password_hash,${usersCols.has('first_name')?'first_name':'NULL::text AS first_name'},${usersCols.has('last_name')?'last_name':'NULL::text AS last_name'},${usersCols.has('is_active')?'is_active':'true AS is_active'} FROM users WHERE LOWER(email)=$1 LIMIT 1`,[email]);
+-    if(!uq.rows.length)return res.status(401).json({error:'Invalid email or password'});
++    if(!uq.rows.length){recordLoginFailure(failKey);return res.status(401).json({error:'Invalid email or password'});}
+     const base=uq.rows[0];
+     if(base.is_active===false)return res.status(403).json({error:'This account is inactive.'});
+-    if(!base.password_hash || !(await bcrypt.compare(password,base.password_hash)))return res.status(401).json({error:'Invalid email or password'});
++    if(!base.password_hash || !(await bcrypt.compare(password,base.password_hash))){recordLoginFailure(failKey);return res.status(401).json({error:'Invalid email or password'});}
+ 
+     const roleRows=[];
+     const roleCols=await tableColumns('user_school_roles');
+@@ -95,7 +146,8 @@ router.post('/login',async(req,res)=>{
+       role:chosen.role,school_id:chosen.school_id||null,school_name:chosen.school_name||null,
+       mark_entry_enabled:chosen.mark_entry_enabled!==false
+     };
+-    const token=jwt.sign({user_id:base.id,email:base.email,role:chosen.role,school_id:chosen.school_id||null},process.env.JWT_SECRET,{expiresIn:'8h'});
++    loginFailures.delete(failKey);
++    const token=jwt.sign({user_id:base.id,email:base.email,role:chosen.role,school_id:chosen.school_id||null,pv:passwordFingerprint(base.password_hash)},process.env.JWT_SECRET,{expiresIn:'8h'});
+     return res.json({token,user});
+   }catch(e){
+     console.error('LOGIN ERROR:',e && e.stack ? e.stack : e);
+@@ -119,6 +171,7 @@ router.post('/forgot-password',async(req,res)=>{
+     // Generic response prevents account enumeration.
+     const generic={ok:true,message:'If an account exists for that email, password-reset instructions will be sent.'};
+     if(!email||email.length>254||!/^\S+@\S+\.\S+$/.test(email))return res.json(generic);
++    if(resetRequestBlocked(email))return res.status(429).json({error:'Too many password-reset requests for this email. Please try again in 15 minutes.'});
+     const configured=Boolean(process.env.RESEND_API_KEY&&process.env.PASSWORD_RESET_FROM&&process.env.APP_BASE_URL);
+     if(!configured)return res.status(503).json({error:'Self-service password reset is not configured yet. Please contact your school administrator.'});
+     const uq=await db.query('SELECT id,email FROM users WHERE LOWER(email)=$1 LIMIT 1',[email]);
+@@ -161,7 +214,10 @@ router.post('/change-password',authenticate,async(req,res)=>{
+     if(!current || !(await bcrypt.compare(current,q.rows[0].password_hash)))return res.status(401).json({error:'Current password is incorrect.'});
+     const hash=await bcrypt.hash(next,12);
+     await db.query('UPDATE users SET password_hash=$2,updated_at=now() WHERE id=$1',[req.user.user_id,hash]);
+-    res.json({ok:true,message:'Password changed successfully.'});
++    // Every other session is invalidated by the password fingerprint. Issue a
++    // fresh token so the person who made the change stays signed in.
++    const token=jwt.sign({user_id:req.user.user_id,email:req.user.email,role:req.user.role,school_id:req.user.school_id||null,pv:passwordFingerprint(hash)},process.env.JWT_SECRET,{expiresIn:'8h'});
++    res.json({ok:true,token,message:'Password changed successfully. All other sessions have been signed out.'});
+   }catch(e){console.error('CHANGE PASSWORD ERROR:',e);res.status(500).json({error:'Unable to change password.'});}
+ });
+ 
+diff --git a/backend/routes/people.js b/backend/routes/people.js
+index bb8aa35..480775d 100644
+--- a/backend/routes/people.js
++++ b/backend/routes/people.js
+@@ -11,6 +11,12 @@ router.use(authenticate);
+ const clean=v=>String(v??'').trim();
+ const MANAGED_ROLES=['SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER'];
+ const UNIQUE_ROLES=new Set(['SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER']);
++const ADMIN_ROLES=new Set(['SCHOOL_ADMIN','ADMIN']);
++async function hasOtherActiveAdmin(c,sid,excludeUserId){
++  const q=await c.query(`SELECT 1 FROM user_school_roles r JOIN users u ON u.id=r.user_id
++    WHERE r.school_id=$1 AND r.role IN ('SCHOOL_ADMIN','ADMIN') AND COALESCE(u.is_active,true)=true AND r.user_id<>$2 LIMIT 1`,[sid,excludeUserId]);
++  return Boolean(q.rows[0]);
++}
+ 
+ // USER / ROLE CONTROL
+ // School administrators can activate/deactivate accounts, enable/disable Mark Entry,
+@@ -39,8 +45,27 @@ router.patch('/:schoolId/user-roles/:roleId',schoolBoundary,roles('SCHOOL_ADMIN'
+       WHERE r.id=$1 AND r.school_id=$2`,[req.params.roleId,sid])).rows[0];
+     if(!current)return res.status(404).json({error:'User role not found.'});
+ 
++    if(String(current.user_id)===String(req.user.user_id)){
++      if(typeof b.is_active==='boolean'&&b.is_active===false)
++        return res.status(400).json({error:'You cannot deactivate your own account. Ask another administrator.'});
++      if(b.role!==undefined&&String(b.role).toUpperCase()!==String(current.role).toUpperCase())
++        return res.status(400).json({error:'You cannot change your own role. Ask another administrator or the Platform Owner.'});
++    }
++
+     await c.query('BEGIN');
+ 
++    const currentRole=String(current.role).toUpperCase();
++    const willDeactivate=typeof b.is_active==='boolean'&&b.is_active===false;
++    const nextRole=b.role!==undefined?String(b.role||'').toUpperCase():currentRole;
++    // A school must always keep at least one active administrator. Losing the
++    // last one locks every school administrator out of role and staff control.
++    if(ADMIN_ROLES.has(currentRole)&&(willDeactivate||!ADMIN_ROLES.has(nextRole))&&!(await hasOtherActiveAdmin(c,sid,current.user_id)))
++      throw Object.assign(new Error('This is the last active school administrator. Assign another administrator before changing or deactivating this account.'),{status:400});
++    if(willDeactivate){
++      const elsewhere=(await c.query('SELECT 1 FROM user_school_roles WHERE user_id=$1 AND school_id<>$2 LIMIT 1',[current.user_id,sid])).rows[0];
++      if(elsewhere)throw Object.assign(new Error('This account also belongs to another school or the platform. Deactivate it from the Platform Owner console so access is not removed from other schools accidentally.'),{status:400});
++    }
++
+     if(typeof b.is_active==='boolean'){
+       await c.query('UPDATE users SET is_active=$2 WHERE id=$1',[current.user_id,b.is_active]);
+       await c.query('UPDATE teachers SET is_active=$2 WHERE user_id=$1 AND school_id=$3',[current.user_id,b.is_active,sid]);
+@@ -89,6 +114,8 @@ router.delete('/:schoolId/user-roles/:roleId',schoolBoundary,roles('SCHOOL_ADMIN
+       WHERE r.id=$1 AND r.school_id=$2`,[req.params.roleId,sid])).rows[0];
+     if(!r)return res.status(404).json({error:'User role not found.'});
+     if(r.user_id===req.user.user_id) return res.status(400).json({error:'You cannot remove your own active school role. Another administrator must do this.'});
++    if(ADMIN_ROLES.has(String(r.role).toUpperCase())&&!(await hasOtherActiveAdmin(c,sid,r.user_id)))
++      return res.status(400).json({error:'This is the last active school administrator. Assign another administrator before removing this role.'});
+     await c.query('BEGIN');
+     await c.query('DELETE FROM user_school_roles WHERE id=$1 AND school_id=$2',[r.id,sid]);
+     // Removing a school role does not delete the person, teacher profile, marks,
+diff --git a/backend/routes/platform.js b/backend/routes/platform.js
+index 6eee8e9..8bb2eff 100644
+--- a/backend/routes/platform.js
++++ b/backend/routes/platform.js
+@@ -347,19 +347,30 @@ router.post('/schools/import/commit',async(req,res)=>{
+ });
+ router.get('/schools/import/jobs/:jobId',async(req,res)=>{const j=importJobs.get(req.params.jobId);if(!j)return res.status(404).json({error:'Import job was not found. It may have completed before this server restart; check Registered schools.'});res.json(j);if(['COMPLETED','FAILED'].includes(j.status)){setTimeout(()=>importJobs.delete(j.id),10*60*1000);}});
+ router.get("/templates",async(req,res)=>{try{const q=await db.query(`SELECT t.id,t.code,t.name,t.description,COALESCE(json_agg(json_build_object('code',s.code,'name',s.name,'levels',(SELECT COALESCE(json_agg(json_build_object('code',l.code,'name',l.name) ORDER BY l.sort_order),'[]') FROM template_levels l WHERE l.template_section_id=s.id)) ORDER BY s.sort_order) FILTER(WHERE s.id IS NOT NULL),'[]') sections FROM school_templates t LEFT JOIN template_sections s ON s.template_id=t.id GROUP BY t.id ORDER BY t.code`);res.json(q.rows);}catch(e){console.error('Platform templates failed:',e);res.status(500).json({error:'Unable to load school templates.'});}});
+-router.get("/templates",async(req,res)=>{const q=await db.query(`SELECT t.id,t.code,t.name,t.description,COALESCE(json_agg(json_build_object('code',s.code,'name',s.name,'levels',(SELECT COALESCE(json_agg(json_build_object('code',l.code,'name',l.name) ORDER BY l.sort_order),'[]') FROM template_levels l WHERE l.template_section_id=s.id)) ORDER BY s.sort_order) FILTER(WHERE s.id IS NOT NULL),'[]') sections FROM school_templates t LEFT JOIN template_sections s ON s.template_id=t.id GROUP BY t.id ORDER BY t.code`);res.json(q.rows);});
+ router.get("/schools",async(req,res)=>{const q=await db.query(`SELECT s.id,s.code,s.name,s.status,t.code template_code,s.created_at,u.email admin_email FROM schools s JOIN school_templates t ON t.id=s.template_id LEFT JOIN LATERAL (SELECT u.email FROM users u JOIN user_school_roles r ON r.user_id=u.id WHERE r.school_id=s.id AND r.role='SCHOOL_ADMIN' ORDER BY r.created_at LIMIT 1) u ON true ORDER BY s.created_at DESC`);res.json(q.rows);});
+ router.post("/schools",async(req,res)=>{const c=await db.pool.connect();try{const b=req.body;if(!b.code||!b.name||!b.template_code||!b.admin_email||String(b.admin_password||"").length<10)return res.status(400).json({error:"School code, name, template and admin credentials are required"});await c.query("BEGIN");const existingUser=(await c.query(`SELECT u.id,r.role,r.school_id FROM users u JOIN user_school_roles r ON r.user_id=u.id WHERE LOWER(u.email)=LOWER($1) LIMIT 10`,[b.admin_email.trim()])).rows;if(existingUser.some(x=>x.role==='PLATFORM_OWNER'))throw Object.assign(new Error('Platform Owner email cannot be used as a school admin email. Use a separate school-admin email.'),{status:409});if(existingUser.length)throw Object.assign(new Error('That email is already attached to a ZELIMU CBC account. Use a unique school-admin email.'),{status:409});const t=(await c.query("SELECT id FROM school_templates WHERE code=$1 AND is_system=true",[b.template_code])).rows[0];if(!t)throw Error("Invalid master template");const s=(await c.query(`INSERT INTO schools(code,name,template_id) VALUES($1,$2,$3) RETURNING id,code,name,status`,[b.code.trim().toUpperCase(),b.name.trim(),t.id])).rows[0];await c.query(`INSERT INTO school_identity(school_id,motto) VALUES($1,'')`,[s.id]);await c.query(`INSERT INTO school_sections(school_id,template_section_id,code,name,sort_order) SELECT $1,id,code,name,sort_order FROM template_sections WHERE template_id=$2`,[s.id,t.id]);await c.query(`INSERT INTO school_levels(school_section_id,template_level_id,code,name,sort_order) SELECT ss.id,tl.id,tl.code,tl.name,tl.sort_order FROM school_sections ss JOIN template_levels tl ON tl.template_section_id=ss.template_section_id WHERE ss.school_id=$1`,[s.id]);const hash=await bcrypt.hash(b.admin_password,12);const u=(await c.query(`INSERT INTO users(email,password_hash,first_name,last_name) VALUES($1,$2,$3,$4) ON CONFLICT(email) DO UPDATE SET password_hash=EXCLUDED.password_hash,is_active=true RETURNING id`,[b.admin_email.trim().toLowerCase(),hash,b.admin_first_name||"",b.admin_last_name||""])).rows[0];await c.query(`INSERT INTO user_school_roles(user_id,school_id,role) VALUES($1,$2,'SCHOOL_ADMIN') ON CONFLICT DO NOTHING`,[u.id,s.id]);await c.query(`INSERT INTO report_templates(school_id,section_code,name,template_type,primary_color,secondary_color,config) SELECT $1,code,CASE WHEN code='JUNIOR' THEN 'Junior Report' WHEN code='SENIOR' THEN 'Senior Report' ELSE 'Transitional Report' END,CASE WHEN code='JUNIOR' THEN 'JUNIOR_A4' WHEN code='SENIOR' THEN 'SENIOR_A4' ELSE 'TRANSITIONAL_A4' END,$2,$3,'{}'::jsonb FROM school_sections WHERE school_id=$1`,[s.id,'#17365D','#D9A441']);const defaultPlan=(await c.query(`SELECT * FROM billing_plans WHERE code='ANNUAL_STANDARD' AND is_active=true LIMIT 1`)).rows[0];if(defaultPlan){const start=new Date().toISOString().slice(0,10);const due=new Date(Date.UTC(new Date().getUTCFullYear()+1,new Date().getUTCMonth(),new Date().getUTCDate())).toISOString().slice(0,10);await c.query(`INSERT INTO school_subscriptions(school_id,plan_id,plan_name_snapshot,amount,currency,billing_cycle,starts_on,next_due_on,grace_days,status,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'ACTIVE','Auto-created during school creation') ON CONFLICT DO NOTHING`,[s.id,defaultPlan.id,defaultPlan.name,defaultPlan.amount,defaultPlan.currency,defaultPlan.billing_cycle,start,due,defaultPlan.grace_days]);}await c.query("COMMIT");res.status(201).json({school:s});}catch(e){await c.query("ROLLBACK");res.status(400).json({error:e.message});}finally{c.release();}});
+ router.patch("/schools/:schoolId/status",async(req,res)=>{const status=String(req.body.status||"").toUpperCase();if(!["ACTIVE","SUSPENDED","ARCHIVED"].includes(status))return res.status(400).json({error:"Invalid status"});const q=await db.query(`UPDATE schools SET status=$2,updated_at=now() WHERE id=$1 RETURNING id,code,name,status`,[req.params.schoolId,status]);if(!q.rows[0])return res.status(404).json({error:"School not found"});res.json(q.rows[0]);});
+-// Permanent school deletion is deliberately restricted to schools with no operational data.
++// Permanent school deletion. The caller must echo the school code so a stray
++// click can never wipe a live school, and platform audit records are preserved.
+ router.delete('/schools/:schoolId',async(req,res)=>{
+   const sid=req.params.schoolId;
++  const confirmCode=String(req.body?.confirm_code||req.query?.confirm_code||'').trim().toUpperCase();
+   let c;
+   try{
+     c=await db.pool.connect();
+     await c.query('BEGIN');
+     const s=(await c.query('SELECT id,code,name,status FROM schools WHERE id=$1',[sid])).rows[0];
+     if(!s){await c.query('ROLLBACK');return res.status(404).json({error:'School not found'});}
++    if(!confirmCode||confirmCode!==String(s.code||'').toUpperCase()){
++      await c.query('ROLLBACK');
++      return res.status(400).json({error:`Type the school code ${s.code} to confirm permanent deletion.`});
++    }
++
++    // Accounts whose only role belongs to this school are deactivated (never
++    // deleted) so an orphaned login cannot be left behind. Audit history is
++    // detached from the school but kept for the platform owner.
++    const affected=(await c.query('SELECT DISTINCT user_id FROM user_school_roles WHERE school_id=$1',[sid])).rows.map(r=>r.user_id);
++    await c.query('UPDATE audit_log SET school_id=NULL WHERE school_id=$1',[sid]).catch(e=>{if(e.code!=='42P01')throw e;});
+ 
+     // This is a true permanent delete. It is deliberately explicit and
+     // transactional so it cannot leave a half-deleted school behind.
+@@ -369,16 +380,19 @@ router.delete('/schools/:schoolId',async(req,res)=>{
+       'marks','report_comments','report_pathway_guidance','report_document_snapshots','learner_movement_events',
+       'learner_enrollments','communication_messages','class_teacher_assignments',
+       'teacher_subject_assignments','assessment_configurations','assessments','merit_runs',
+-      'report_templates','grading_systems','audit_log','billing_payments','billing_notifications',
++      'report_templates','grading_systems','billing_payments','billing_notifications',
+       'billing_invoices','school_subscriptions','mark_entry_policies','portal_announcements',
+-      'school_announcements','school_document_assets','migration_runs','parent_guardians',
+-      'terms','academic_years','learners','teachers','classes','subjects','school_levels',
+-      'school_sections','school_identity','user_school_roles'
++      'school_announcements','school_document_assets','migration_runs','teacher_account_link_requests',
++      'parent_guardians','terms','academic_years','learners','teachers','classes','subjects',
++      'school_levels','school_sections','school_identity','user_school_roles'
+     ];
+     for(const table of ordered){
+       const exists=(await c.query(`SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 AND column_name='school_id' LIMIT 1`,[table])).rows[0];
+       if(exists)await c.query(`DELETE FROM ${table} WHERE school_id=$1`,[sid]);
+     }
++    if(affected.length){
++      await c.query(`UPDATE users u SET is_active=false,updated_at=now() WHERE u.id=ANY($1::uuid[]) AND u.is_active=true AND NOT EXISTS(SELECT 1 FROM user_school_roles r WHERE r.user_id=u.id)`,[affected]);
++    }
+     await c.query('DELETE FROM schools WHERE id=$1',[sid]);
+     await c.query('COMMIT');
+     return res.json({ok:true,action:'DELETED',school:s});
+diff --git a/public/dashboard.html b/public/dashboard.html
+index abe1d2f..0105f96 100644
+--- a/public/dashboard.html
++++ b/public/dashboard.html
+@@ -886,7 +886,7 @@ function wireNavigation(){
+   if(isTeacher && !isAdmin) openPM24(8); else openPM24(1);
+ }
+ function wireSignOut(){safeOn('signOut','click',()=>{localStorage.removeItem('token');localStorage.removeItem('user');location.replace('/login.html');});}
+-safeOn('passwordForm','submit',async e=>{e.preventDefault();const n=$('newPassword').value,c=$('confirmPassword').value,m=$('passwordMessage');m.style.display='block';if(n!==c){m.textContent='New passwords do not match.';return;}try{const r=await api('/api/auth/change-password',{method:'POST',body:{current_password:$('currentPassword').value,new_password:n}});m.textContent=r.message;$('passwordForm').reset();}catch(x){m.textContent=x.message;}});
++safeOn('passwordForm','submit',async e=>{e.preventDefault();const n=$('newPassword').value,c=$('confirmPassword').value,m=$('passwordMessage');m.style.display='block';if(n!==c){m.textContent='New passwords do not match.';return;}try{const r=await api('/api/auth/change-password',{method:'POST',body:{current_password:$('currentPassword').value,new_password:n}});if(r.token)localStorage.setItem('token',r.token);m.textContent=r.message;$('passwordForm').reset();}catch(x){m.textContent=x.message;}});
+ async function refreshAfterChange(message){if(message)alert(message);await load();}
+ async function loadResults(){
+  const y=$('resYear')?.value,t=$('resTerm')?.value;if(!y||!t)return alert('Select academic year and term first.');
+diff --git a/public/owner.html b/public/owner.html
+index 9244ee2..a556d9f 100644
+--- a/public/owner.html
++++ b/public/owner.html
+@@ -30,7 +30,7 @@ function renderSchools(){
+   adminSchool.innerHTML='<option value="">Select school</option>'+schools.map(s=>`<option value="${s.id}">${esc(s.name)} (${esc(s.code)})</option>`).join('');
+ }
+ async function action(id,status,button){setBusy(button,true,'Saving…');try{await api('/api/platform/schools/'+id+'/status',{method:'PATCH',body:{status}});await load();}catch(e){alert(e.message)}finally{setBusy(button,false);}}
+-async function removeSchool(s,button){if(!confirm(`Permanently delete ${s.name} (${s.code}) and all data belonging to this school? This cannot be undone.`))return;setBusy(button,true,'Deleting…');try{await api('/api/platform/schools/'+s.id,{method:'DELETE'});await load();}catch(e){alert(e.message)}finally{setBusy(button,false);}}
++async function removeSchool(s,button){if(!confirm(`Permanently delete ${s.name} (${s.code}) and all data belonging to this school? This cannot be undone.`))return;const typed=prompt(`Type the school code ${s.code} to confirm permanent deletion:`);if(typed===null)return;if(String(typed).trim().toUpperCase()!==String(s.code).toUpperCase()){alert('The school code did not match. Nothing was deleted.');return;}setBusy(button,true,'Deleting…');try{await api('/api/platform/schools/'+s.id,{method:'DELETE',body:{confirm_code:s.code}});await load();}catch(e){alert(e.message)}finally{setBusy(button,false);}}
+ function selectSchool(id){const s=schools.find(x=>x.id===id);if(!s)return;adminEmail.value=s.admin_email||'';adminFirst.value='';adminLast.value='';adminPassword.value='';adminMessage.textContent=s.admin_email?'Existing admin: '+s.admin_email:'No admin assigned yet.';}
+ list.addEventListener('click',e=>{const b=e.target.closest('button');if(!b||b.disabled)return;const id=b.dataset.id;if(b.dataset.delete){const s=schools.find(x=>String(x.id)===String(b.dataset.delete));if(s)removeSchool(s,b);return;}if(id&&b.dataset.a)action(id,b.dataset.a,b);});
+ adminSchool.addEventListener('change',()=>selectSchool(adminSchool.value));

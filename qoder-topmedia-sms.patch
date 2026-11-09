@@ -1,0 +1,41 @@
+diff --git a/backend/routes/communications.js b/backend/routes/communications.js
+index c3b4843..9320a2f 100644
+--- a/backend/routes/communications.js
++++ b/backend/routes/communications.js
+@@ -52,6 +52,9 @@ function smsDeliveryConfiguration(){
+   }catch{}
+   return {configured:false,provider:'INFOBIP',trial_mode:trial.trialMode,trial_recipient_count:trial.recipients.length};
+  }
++ const topmediaApiKey=process.env.SMS_TOPMEDIA_API_KEY||process.env.TOPMEDIA_API_KEY;
++ if(provider==='TOPMEDIA'&&topmediaApiKey)
++  return {configured:true,provider:'TOPMEDIA'};
+  const username=process.env.SMS_AFRICASTALKING_USERNAME||process.env.SMS_AFRICA_TALKING_USERNAME;
+  const apiKey=process.env.SMS_AFRICA_TALKING_API_KEY||process.env.SMS_AFRICASTALKING_API_KEY;
+  if(provider==='AFRICASTALKING'&&username&&apiKey)
+@@ -61,6 +64,20 @@ function smsDeliveryConfiguration(){
+ }
+ async function deliverSms({phone,message,school_id,learner_id}){
+   const provider=String(process.env.SMS_PROVIDER||'').toUpperCase();
++  if(provider==='TOPMEDIA'){
++   const apiKey=process.env.SMS_TOPMEDIA_API_KEY||process.env.TOPMEDIA_API_KEY;
++   if(!apiKey)throw new Error('TopMediaSMS is not configured. Set SMS_TOPMEDIA_API_KEY on the server.');
++   const base=String(process.env.SMS_TOPMEDIA_BASE_URL||'https://api.topmediasms.com/v1').trim().replace(/\/+$/, '');
++   const payload={to:[normalizedPhone(phone)],message:String(message)};
++   const sender=String(process.env.SMS_TOPMEDIA_SENDER_ID||'').trim();
++   if(sender)payload.sender_id=sender;
++   const response=await fetch(base+'/api-send-sms',{method:'POST',
++     headers:{Accept:'application/json','Content-Type':'application/json',Authorization:'Bearer '+apiKey},
++     body:JSON.stringify(payload)});
++   const data=await response.json().catch(()=>({}));
++   if(!response.ok||data?.success===false)throw new Error(data?.message||data?.error||('TopMediaSMS returned '+response.status));
++   return {status:'SENT',provider:'TOPMEDIA',providerMessageId:data?.message_id||null,response:data};
++  }
+   if(provider==='INFOBIP'){
+     const baseUrl=String(process.env.SMS_INFOBIP_BASE_URL||'').trim().replace(/\/+$/,'');
+     const apiKey=process.env.SMS_INFOBIP_API_KEY;
+@@ -853,4 +870,5 @@ router.get('/:schoolId/analytics',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','H
+   if(analyticsResponseCache.size>80){const oldest=analyticsResponseCache.keys().next().value;analyticsResponseCache.delete(oldest);}
+   res.json(payload);
+  }catch(e){res.status(400).json({error:e.message})}});
++router.get('/:schoolId/sms-balance',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{try{const provider=String(process.env.SMS_PROVIDER||'').toUpperCase();if(provider!=='TOPMEDIA')return res.status(400).json({error:'SMS_PROVIDER must be set to TOPMEDIA to check the TopMediaSMS balance.'});const apiKey=process.env.SMS_TOPMEDIA_API_KEY||process.env.TOPMEDIA_API_KEY;if(!apiKey)return res.status(503).json({error:'Set SMS_TOPMEDIA_API_KEY on the server before checking the balance.'});const base=String(process.env.SMS_TOPMEDIA_BASE_URL||'https://api.topmediasms.com/v1').trim().replace(/\/+$/, '');const rr=await fetch(base+'/api-balance',{headers:{Accept:'application/json',Authorization:'Bearer '+apiKey}});const data=await rr.json().catch(()=>({}));if(!rr.ok)throw new Error(data?.message||('TopMediaSMS returned '+rr.status));res.json({provider:'TOPMEDIA',balance:data?.balance??null,currency:data?.currency||null,sandbox:Boolean(data?.sandbox)})}catch(e){res.status(e.status||502).json({error:e.message})}});
+ module.exports=router;

@@ -1853,3 +1853,253 @@ body main.page .merit-sheet .merit-subject-table td:nth-child(4){color:#111!impo
     border-color:#999!important;
   }
 }
+
+/* ZELIMU CBC — LIVE DASHBOARD THEME & ROTATING LOGO */
+
+/* 1. CONTINUOUS ROTATING DASHBOARD LOGO */
+body .z7-logo.z7-rotating-logo {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 48px !important;
+  height: 48px !important;
+  flex-shrink: 0 !important;
+  animation: z7RotateRound 12s linear infinite !important;
+  transform-origin: center center !important;
+  filter: drop-shadow(0 0 10px rgba(240,196,101,.7)) drop-shadow(0 0 20px rgba(56,189,248,.4)) !important;
+  transition: transform .3s ease !important;
+  cursor: pointer !important;
+}
+body .z7-logo.z7-rotating-logo:hover {
+  animation-duration: 4s !important;
+  filter: drop-shadow(0 0 16px rgba(240,196,101,.95)) drop-shadow(0 0 28px rgba(56,189,248,.65)) !important;
+}
+@keyframes z7RotateRound {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.z7-seal-svg {
+  width: 100% !important;
+  height: 100% !important;
+  display: block !important;
+}
+
+/* 2. DAZZLING PARTICLE BUBBLES OVER THE DASHBOARD */
+body .z7-bubbles {
+  position: fixed !important;
+  inset: 0 !important;
+  left: 255px !important;
+  pointer-events: none !important;
+  z-index: 0 !important;
+  overflow: hidden !important;
+}
+@media (max-width: 900px) {
+  body .z7-bubbles { left: 0 !important; }
+}
+body .z7-bubbles i {
+  position: absolute !important;
+  bottom: -15px !important;
+  left: var(--x) !important;
+  width: var(--s) !important;
+  height: var(--s) !important;
+  border-radius: 50% !important;
+  background: radial-gradient(circle at 30% 30%, #fff 25%, var(--bcolor, #f0c465) 75%, transparent 95%) !important;
+  box-shadow: 0 0 10px var(--bcolor, #f0c465), 0 0 22px rgba(240,196,101,.35) !important;
+  animation: z7BubbleRise var(--dur) linear infinite !important;
+  animation-delay: var(--del) !important;
+  opacity: 0 !important;
+}
+@keyframes z7BubbleRise {
+  0% { transform: translateY(0) scale(0.6); opacity: 0; }
+  12% { opacity: 0.85; }
+  85% { opacity: 0.75; }
+  100% { transform: translateY(-105vh) scale(1.35); opacity: 0; }
+}
+
+body .z7-bubbles i:nth-child(1){--x:5%;--s:3.5px;--dur:8.2s;--del:-1.2s;--bcolor:#f0c465}
+body .z7-bubbles i:nth-child(2){--x:13%;--s:5px;--dur:11.4s;--del:-4.5s;--bcolor:#38bdf8}
+body .z7-bubbles i:nth-child(3){--x:21%;--s:2.5px;--dur:7.8s;--del:-2.3s;--bcolor:#4ade80}
+body .z7-bubbles i:nth-child(4){--x:29%;--s:4.5px;--dur:12.6s;--del:-7.1s;--bcolor:#fb7185}
+body .z7-bubbles i:nth-child(5){--x:37%;--s:3px;--dur:9.1s;--del:-3.4s;--bcolor:#f0c465}
+body .z7-bubbles i:nth-child(6){--x:45%;--s:5.5px;--dur:13.2s;--del:-5.8s;--bcolor:#a78bfa}
+body .z7-bubbles i:nth-child(7){--x:53%;--s:2.5px;--dur:8.5s;--del:-0.8s;--bcolor:#38bdf8}
+body .z7-bubbles i:nth-child(8){--x:61%;--s:4px;--dur:10.7s;--del:-6.2s;--bcolor:#fbbf24}
+body .z7-bubbles i:nth-child(9){--x:69%;--s:3px;--dur:9.8s;--del:-2.9s;--bcolor:#34d399}
+body .z7-bubbles i:nth-child(10){--x:77%;--s:5px;--dur:12.1s;--del:-8.4s;--bcolor:#f472b6}
+body .z7-bubbles i:nth-child(11){--x:84%;--s:2.5px;--dur:7.4s;--del:-1.9s;--bcolor:#38bdf8}
+body .z7-bubbles i:nth-child(12){--x:92%;--s:4px;--dur:10.2s;--del:-4.1s;--bcolor:#f0c465}
+body .z7-bubbles i:nth-child(13){--x:9%;--s:3px;--dur:9.5s;--del:-6.7s;--bcolor:#a78bfa}
+body .z7-bubbles i:nth-child(14){--x:25%;--s:4.5px;--dur:11.8s;--del:-3.1s;--bcolor:#38bdf8}
+body .z7-bubbles i:nth-child(15){--x:41%;--s:2px;--dur:8.1s;--del:-5.2s;--bcolor:#4ade80}
+body .z7-bubbles i:nth-child(16){--x:58%;--s:5px;--dur:12.9s;--del:-1.5s;--bcolor:#fb7185}
+body .z7-bubbles i:nth-child(17){--x:66%;--s:3.5px;--dur:10.5s;--del:-7.8s;--bcolor:#f0c465}
+body .z7-bubbles i:nth-child(18){--x:81%;--s:4px;--dur:9.2s;--del:-3.7s;--bcolor:#2dd4bf}
+body .z7-bubbles i:nth-child(19){--x:17%;--s:2.5px;--dur:8.9s;--del:-5.9s;--bcolor:#fbbf24}
+body .z7-bubbles i:nth-child(20){--x:74%;--s:4.5px;--dur:11.1s;--del:-2.4s;--bcolor:#38bdf8}
+
+/* 3. LIVE MODULE SHORTCUTS WITH GLOWING TILES & MEDALS */
+body .z7-shortcuts {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 16px !important;
+  margin-top: 14px !important;
+}
+@media (min-width: 1400px) {
+  body .z7-shortcuts { grid-template-columns: repeat(8, minmax(0, 1fr)) !important; }
+}
+@media (max-width: 768px) {
+  body .z7-shortcuts { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}
+
+body .z7-shortcut.z7-live-tile {
+  position: relative !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+  gap: 10px !important;
+  padding: 18px 12px 16px !important;
+  min-height: 128px !important;
+  border-radius: 16px !important;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--c, #f0c465) 12%, #0b1c38) 0%, #081226 75%) !important;
+  border: 1px solid color-mix(in srgb, var(--c, #f0c465) 30%, rgba(23,54,93,.6)) !important;
+  box-shadow: 0 10px 28px -12px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.08) !important;
+  transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease !important;
+  overflow: hidden !important;
+  cursor: pointer !important;
+}
+body .z7-shortcut.z7-live-tile::after {
+  content: "" !important;
+  position: absolute !important;
+  inset: 0 !important;
+  border-radius: 16px !important;
+  pointer-events: none !important;
+  background: linear-gradient(120deg, transparent 30%, rgba(255,255,255,.08) 50%, transparent 70%) !important;
+  transform: translateX(-120%) !important;
+  animation: z7Sheen 6s ease-in-out infinite !important;
+  animation-delay: var(--d, 0ms) !important;
+}
+@keyframes z7Sheen {
+  0%, 60% { transform: translateX(-120%); }
+  90%, 100% { transform: translateX(120%); }
+}
+body .z7-shortcut.z7-live-tile:hover {
+  transform: translateY(-4px) scale(1.02) !important;
+  border-color: color-mix(in srgb, var(--c, #f0c465) 80%, #fff) !important;
+  box-shadow: 0 18px 40px -12px color-mix(in srgb, var(--c, #f0c465) 55%, transparent),
+              0 0 0 1px color-mix(in srgb, var(--c, #f0c465) 45%, transparent),
+              inset 0 1px 0 rgba(255,255,255,.18) !important;
+}
+body .z7-shortcut-medal {
+  position: relative !important;
+  width: 48px !important;
+  height: 48px !important;
+  border-radius: 50% !important;
+  display: grid !important;
+  place-items: center !important;
+  background: radial-gradient(circle at 35% 35%, color-mix(in srgb, var(--c, #f0c465) 35%, transparent), #081226 80%) !important;
+  border: 1.5px solid color-mix(in srgb, var(--c, #f0c465) 60%, transparent) !important;
+  box-shadow: 0 0 18px color-mix(in srgb, var(--c, #f0c465) 40%, transparent),
+              inset 0 0 14px color-mix(in srgb, var(--c, #f0c465) 20%, transparent) !important;
+  color: var(--c, #f0c465) !important;
+  transition: transform .25s ease, box-shadow .25s ease !important;
+}
+body .z7-shortcut.z7-live-tile:hover .z7-shortcut-medal {
+  transform: scale(1.1) !important;
+  box-shadow: 0 0 28px color-mix(in srgb, var(--c, #f0c465) 75%, transparent),
+              inset 0 0 20px color-mix(in srgb, var(--c, #f0c465) 40%, transparent) !important;
+}
+body .z7-shortcut-svg {
+  width: 28px !important;
+  height: 28px !important;
+  position: relative !important;
+  z-index: 2 !important;
+}
+body .z7-shortcut-meta strong {
+  display: block !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  color: #f1f5f9 !important;
+  line-height: 1.25 !important;
+  letter-spacing: .2px !important;
+}
+body .z7-shortcut-meta small {
+  display: block !important;
+  font-size: 8.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: 1.4px !important;
+  color: var(--c, #f0c465) !important;
+  margin-top: 2px !important;
+}
+
+/* 4. LIVE KPI METRIC CARDS WITH GLOWING MEDALS */
+body .z7-kpi.z7-live-kpi {
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 14px !important;
+  padding: 16px 18px !important;
+  border-radius: 16px !important;
+  background: linear-gradient(155deg, color-mix(in srgb, var(--c, #f0c465) 10%, #0c1a30) 0%, #071120 80%) !important;
+  border: 1px solid color-mix(in srgb, var(--c, #f0c465) 26%, rgba(255,255,255,.08)) !important;
+  box-shadow: 0 10px 24px rgba(0,0,0,.35) !important;
+  transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease !important;
+  cursor: pointer !important;
+}
+body .z7-kpi.z7-live-kpi:hover {
+  transform: translateY(-3px) !important;
+  border-color: color-mix(in srgb, var(--c, #f0c465) 60%, transparent) !important;
+  box-shadow: 0 16px 36px -10px color-mix(in srgb, var(--c, #f0c465) 40%, transparent) !important;
+}
+body .z7-kpi-medal {
+  position: relative !important;
+  width: 44px !important;
+  height: 44px !important;
+  border-radius: 50% !important;
+  display: grid !important;
+  place-items: center !important;
+  background: radial-gradient(circle at 35% 35%, color-mix(in srgb, var(--c, #f0c465) 30%, transparent), #071120 80%) !important;
+  border: 1.5px solid color-mix(in srgb, var(--c, #f0c465) 50%, transparent) !important;
+  box-shadow: 0 0 16px color-mix(in srgb, var(--c, #f0c465) 35%, transparent) !important;
+  color: var(--c, #f0c465) !important;
+  flex-shrink: 0 !important;
+}
+body .z7-kpi.z7-live-kpi:hover .z7-kpi-medal {
+  transform: scale(1.08) !important;
+}
+body .z7-kpi-svg {
+  width: 24px !important;
+  height: 24px !important;
+}
+body .z7-kpi-number {
+  font-size: 1.55rem !important;
+  font-weight: 800 !important;
+  color: #fff !important;
+  text-shadow: 0 0 12px color-mix(in srgb, var(--c, #f0c465) 35%, transparent) !important;
+}
+
+/* 5. SVG ANIMATIONS (SHARED WITH ASSESSMENT HUB) */
+.ah-bob { animation: ahBob 3.5s ease-in-out infinite alternate; }
+@keyframes ahBob { from { transform: translateY(0); } to { transform: translateY(-3px); } }
+
+.ah-draw { stroke-dasharray: 60; stroke-dashoffset: 60; animation: ahDraw 2.4s ease-out forwards infinite; }
+@keyframes ahDraw { 0% { stroke-dashoffset: 60; } 50%, 100% { stroke-dashoffset: 0; } }
+
+.ah-spin { transform-origin: center; animation: ahSpin 8s linear infinite; }
+@keyframes ahSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+.ah-twinkle { animation: ahTwinkle 2s ease-in-out infinite alternate; }
+@keyframes ahTwinkle { 0% { opacity: 0.3; transform: scale(0.8); } 100% { opacity: 1; transform: scale(1.2); } }
+
+.ah-ring { animation: ahPulse 2s ease-in-out infinite; transform-origin: center; }
+@keyframes ahPulse { 0%, 100% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.1); opacity: 0.4; } }
+
+.ah-write { animation: ahWrite 2.8s ease-in-out infinite; }
+@keyframes ahWrite { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(-2px, -3px); } }
+
+.ah-dash { stroke-dasharray: 4 2; animation: ahDash 1.6s linear infinite; }
+@keyframes ahDash { to { stroke-dashoffset: -12; } }
+
+.ah-grow { animation: ahGrow 3s ease-in-out infinite alternate; transform-origin: bottom; }
+@keyframes ahGrow { 0% { transform: scaleY(0.65); } 100% { transform: scaleY(1); } }

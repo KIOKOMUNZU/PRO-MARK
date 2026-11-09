@@ -1025,10 +1025,187 @@ async function openClassList(classId){window._openClassListId=classId;const c=(s
  const rows=all.filter(x=>x.is_active!==false).sort((a,b)=>nameKey(a).localeCompare(nameKey(b),undefined,{sensitivity:'base',numeric:true}));
  const inactive=all.filter(x=>x.is_active===false).sort((a,b)=>nameKey(a).localeCompare(nameKey(b),undefined,{sensitivity:'base',numeric:true}));
  const inactiveNote=inactive.length?`<div class="notice">${inactive.length} learner(s) are on this class's roster but marked inactive in the database, so they will NOT appear in report cards, merit lists or class counts: <b>${inactive.map(x=>esc([x.first_name,x.middle_name,x.last_name].filter(Boolean).join(' '))).join(', ')}</b>. Contact support if this is unexpected — there is currently no in-app control to reactivate a learner.</div>`:'';
- $('classListLearners').innerHTML=inactiveNote+`<div class="card-subsection learner-bulk-box" style="margin-bottom:12px"><div class="section-title"><h4>ADD LEARNERS FROM EXCEL</h4><span class="pill">Paste rows directly</span></div><p class="muted small">Copy rows from Excel and paste below. Headers such as Learner Name, Admission No, Assessment No, First Name, Middle Name, Last Name, Gender, DOB and Parent Phone are detected automatically. You can also paste a simple list of learner names.</p><textarea id="classBulkLearnerPaste" rows="5" style="width:100%" placeholder="Admission No\tFirst Name\tMiddle Name\tLast Name\tGender\tDOB\tParent Phone"></textarea><div class="actions" style="margin-top:8px"><button type="button" class="btn primary" id="classBulkLearnerImport">IMPORT PASTED LEARNERS</button><button type="button" class="btn secondary" id="classBulkLearnerExport">EXPORT CLASS LEARNERS (CSV)</button><span id="classBulkLearnerMsg" class="muted small"></span></div></div><table class="class-register-table"><thead><tr><th>#</th><th>ADM. NO.</th><th>ASSES. NO.</th><th>Learner (A–Z)</th><th>Status</th></tr></thead><tbody>${rows.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.admission_no||'')}</td><td>${esc(x.assessment_no||'')}</td><td><b>${esc([x.first_name,x.middle_name,x.last_name].filter(Boolean).join(' '))}</b></td><td>${esc(x.status||'ACTIVE')} ${['SCHOOL_ADMIN','ADMIN','CLASS_TEACHER','SENIOR_TEACHER'].includes(user.role)?`<button type="button" class="btn mini secondary class-list-edit-learner" data-learner-id="${x.id}">EDIT</button> <button type="button" class="btn mini danger class-list-remove-learner" data-learner-id="${x.id}">REMOVE</button>`:''}</td></tr>`).join('')||'<tr><td colspan="5">No active learners in this class.</td></tr>'}</tbody></table>`;}catch(e){$('classListLearners').innerHTML=`<div class="notice">${esc(e.message)}</div>`;}}
+ $('classListLearners').innerHTML=inactiveNote+`<div class="card-subsection learner-bulk-box" style="margin-bottom:12px; border: 1px solid rgba(214,166,79,.3); border-radius: 14px; padding: 18px; background: rgba(11,26,48,.65);">
+  <div class="section-title" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+    <h4 style="margin:0; font-size:1.15rem; color:#f0c465;">ADD LEARNERS FROM EXCEL / WORD / CLIPBOARD</h4>
+    <span class="pill" style="background:#0284c7; color:#fff; font-weight:700;">Paste rows or upload Word table</span>
+  </div>
+  <p class="muted small" style="margin-bottom:12px; line-height:1.5;">
+    Copy rows from Excel, Word tables or Google Sheets and paste below. Expected standard column order: <b>Passport Photo URL | Assessment No | Admission No | Full Name | DOB | Gender | CBC Pathway / Track | Parent / Guardian Name | Parent Phone</b>. Headers are auto-detected, or paste directly without headers in this order. You can also upload a Word (.docx) document register with embedded photos.
+  </p>
+  <textarea id="classBulkLearnerPaste" rows="5" style="width:100%; border-radius:8px; font-family:monospace; font-size:12px; padding:10px; background:rgba(6,16,33,.85); color:#f4f6f9; border:1px solid rgba(214,166,79,.25);" placeholder="Passport Photo URL\tAssessment No\tAdmission No\tFull Name\tDOB\tGender\tCBC Pathway\tParent / Guardian Name\tParent Phone"></textarea>
+  <div class="actions" style="margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+    <button type="button" class="btn primary" id="classBulkLearnerImport" style="background:#d6a64f; color:#081322; font-weight:800;">IMPORT PASTED LEARNERS</button>
+    <button type="button" class="btn secondary" id="classBulkWordBtn" style="background:#1e3a8a; color:#fff; border-color:#3b82f6; font-weight:700;">📄 UPLOAD WORD (.DOCX) REGISTER</button>
+    <button type="button" class="btn secondary" id="classBulkLearnerExport">EXPORT CLASS LEARNERS (CSV)</button>
+    <span id="classBulkLearnerMsg" class="muted small" style="margin-left:8px;"></span>
+  </div>
+</div>
+<table class="class-register-table">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Photo</th>
+      <th>ADM. NO.</th>
+      <th>ASSES. NO.</th>
+      <th>Learner (A–Z)</th>
+      <th>Gender</th>
+      <th>DOB</th>
+      <th>CBC Pathway</th>
+      <th>Parent Phone</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${rows.map((x,i)=>`<tr>
+      <td>${i+1}</td>
+      <td><span style="display:inline-flex; width:30px; height:30px; border-radius:50%; overflow:hidden; background:#0f2744; border:1px solid #d6a64f; align-items:center; justify-content:center; font-size:11px; color:#d6a64f;">${x.passport_photo_url ? `<img src="${esc(x.passport_photo_url)}" style="width:100%; height:100%; object-fit:cover;" onerror="this.parentElement.innerHTML='🎓'"/>` : '🎓'}</span></td>
+      <td>${esc(x.admission_no||'')}</td>
+      <td>${esc(x.assessment_no||'')}</td>
+      <td><b>${esc([x.first_name,x.middle_name,x.last_name].filter(Boolean).join(' '))}</b></td>
+      <td>${esc(x.gender||'—')}</td>
+      <td>${esc(x.date_of_birth?String(x.date_of_birth).slice(0,10):'—')}</td>
+      <td><span class="pill mini" style="font-size:10px; background:rgba(214,166,79,.15); color:#e8bf74; border:1px solid rgba(214,166,79,.3);">${esc(x.cbc_pathway||x.selected_pathway||'—')}</span></td>
+      <td>${esc(x.parent_phone||'—')}</td>
+      <td>${esc(x.status||'ACTIVE')} ${['SCHOOL_ADMIN','ADMIN','CLASS_TEACHER','SENIOR_TEACHER'].includes(user.role)?`<button type="button" class="btn mini secondary class-list-edit-learner" data-learner-id="${x.id}">EDIT</button> <button type="button" class="btn mini danger class-list-remove-learner" data-learner-id="${x.id}">REMOVE</button>`:''}</td>
+    </tr>`).join('')||'<tr><td colspan="10">No active learners in this class.</td></tr>'}
+  </tbody>
+</table>`;}catch(e){$('classListLearners').innerHTML=`<div class="notice">${esc(e.message)}</div>`;}}
+$('classListCards')?.addEventListener('click',e=>{const b=e.target.closest('button[data-class-id]');if(!b)return;if(b.classList.contains('class-list-pdf')){openProtectedPdf(`/api/people/${sid}/classes/${b.dataset.classId}/pdf`).catch(x=>alert(x.message));}else openClassList(b.dataset.classId);});
+$('classListBack')?.addEventListener('click',()=>{$('classListDetail').style.display='none';$('classListCards').style.display='grid';});
+$('classListLearners')?.addEventListener('click',async e=>{const edit=e.target.closest('.class-list-edit-learner');if(edit){const l=(state.learners||[]).find(x=>String(x.id)===String(edit.dataset.learnerId));if(!l)return;const v=(label,current='')=>{const x=prompt(label,current??'');return x===null?null:x.trim()};const first=v('First name:',l.first_name);if(first===null)return;const middle=v('Middle name:',l.middle_name||'');if(middle===null)return;const last=v('Last name:',l.last_name);if(last===null)return;const adm=v('Admission number:',l.admission_no||'');if(adm===null)return;const ass=v('Assessment number:',l.assessment_no||'');if(ass===null)return;const gender=v('Gender (Male/Female):',l.gender||'');if(gender===null)return;const dob=v('Date of birth (YYYY-MM-DD):',l.date_of_birth?String(l.date_of_birth).slice(0,10):'');if(dob===null)return;const phone=v('Parent/guardian phone:',l.parent_phone||'');if(phone===null)return;const y=$('learnerFilterYear')?.value||state.years?.[0]?.id;try{await api(`/api/people/${sid}/learners/${l.id}`,{method:'PATCH',body:{first_name:first,middle_name:middle,last_name:last,admission_no:adm,assessment_no:ass,gender,date_of_birth:dob,parent_phone:phone,class_id:l.class_id,academic_year_id:y}});await load();await openClassList(l.class_id);alert('Learner updated successfully.');}catch(x){alert(x.message);}return;}const b=e.target.closest('.class-list-remove-learner');if(!b)return;const l=(state.learners||[]).find(x=>String(x.id)===String(b.dataset.learnerId));const reason=prompt(`Reason for removing ${l?[l.first_name,l.last_name].filter(Boolean).join(' '):'this learner'} from class:`);if(reason===null)return;if(!reason.trim())return alert('A reason is required.');const c=(state.classes||[]).find(x=>String(x.id)===String(l?.class_id));const y=$('learnerFilterYear')?.value||state.years?.[0]?.id;if(!y)return alert('Select the academic year first.');try{await api(`/api/people/${sid}/learners/${b.dataset.learnerId}/remove-from-class`,{method:'POST',body:{academic_year_id:y,reason}});await load();await openClassList(c?.id||'');alert('Learner removed from class. Historical records remain preserved.');}catch(x){alert(x.message);}});
+$('classTeacherAddLearner')?.addEventListener('click',()=>{const title=$('classListTitle').textContent||'';const c=(state.classes||[]).find(x=>title.startsWith(String(x.name)));if(c){showSection('people');if($('learnerClass'))$('learnerClass').value=c.id;$('learnerFirstName')?.focus();}});
+document.addEventListener('click',async e=>{
+  const wb=e.target.closest('#classBulkWordBtn');
+  if(wb){
+    const classId=(window._openClassListId||'');
+    if(typeof window.zelimuOpenDocxImport==='function'){
+      window.zelimuOpenDocxImport(classId);
+    } else {
+      const modal=document.getElementById('docxImportModal');
+      if(modal){
+        const sel=document.getElementById('docxClass');
+        if(sel && classId) sel.value=String(classId);
+        modal.classList.add('open');
+      } else {
+        alert('Word document importer is ready. Please ensure docx-import-modal.js is loaded.');
+      }
+    }
+    return;
+  }
+  const ex=e.target.closest('#classBulkLearnerExport');
+  if(ex){
+    const classId=(window._openClassListId||'');
+    const c=(state.classes||[]).find(x=>String(x.id)===String(classId));
+    const yearId=$('learnerFilterYear')?.value||state.years?.[0]?.id;
+    if(!c||!yearId)return alert('Select the class and academic year first.');
+    const rows=(state.learners||[]).filter(x=>String(x.class_id)===String(c.id)&&x.is_active!==false);
+    const escCsv=v=>{const x=String(v??'');return /[\",\r\n]/.test(x)?`"${x.replace(/\"/g,'\"\"')}"`:x;};
+    const header=['Passport Photo URL','Assessment No','Admission No','First Name','Middle Name','Last Name','Gender','Date of Birth','CBC Pathway','Parent Phone'];
+    const lines=[header.join(',')].concat(rows.map(r=>[r.passport_photo_url||'',r.assessment_no||'',r.admission_no||'',r.first_name||'',r.middle_name||'',r.last_name||'',r.gender||'',r.date_of_birth?String(r.date_of_birth).slice(0,10):'',r.cbc_pathway||r.selected_pathway||'',r.parent_phone||''].map(escCsv).join(',')));
+    const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'});
+    const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;
+    a.download=`ZELIMU-CBC-${String(c.name||'CLASS').replace(/[^a-z0-9_-]/gi,'-')}-LEARNERS.csv`;
+    document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1000);
+    return;
+  }
+  const b=e.target.closest('#classBulkLearnerImport');
+  if(!b)return;
+  const text=$('classBulkLearnerPaste')?.value||'';
+  const msg=$('classBulkLearnerMsg');
+  const classId=(window._openClassListId||'');
+  const c=(state.classes||[]).find(x=>String(x.id)===String(classId));
+  const yearId=$('learnerFilterYear')?.value||state.years?.[0]?.id;
+  if(!text.trim())return alert('Paste learner rows from Excel or Word first.');
+  if(!c||!yearId)return alert('Select the class and academic year first.');
+  const lines=text.trim().split(/\r?\n/).filter(Boolean);
+  const delim=lines[0].includes('\t')?'\t':(lines[0].includes(',')?',':(lines[0].includes(';')?';':'\t'));
+  const norm=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+  const mapHeader=h=>{
+    const n=norm(h);
+    if(n.includes('photo')||n.includes('passport')||n.includes('image')||n.includes('avatar'))return'passport_photo_url';
+    if(n.includes('assessment')||n.includes('assesno')||n==='assno'||n==='assessno'||n==='upi'||n==='nemis')return'assessment_no';
+    if(n.includes('admission')||n==='admno'||n==='admnumber'||n==='admissionnumber'||n==='adm')return'admission_no';
+    if(n.includes('learnername')||n.includes('studentname')||n.includes('fullname')||n==='name'||n==='learner')return'full_name';
+    if(n==='firstname'||n==='fname'||n==='first')return'first_name';
+    if(n==='middlename'||n==='mname'||n==='middle')return'middle_name';
+    if(n==='lastname'||n==='surname'||n==='familyname'||n==='last')return'last_name';
+    if(n.includes('dob')||n.includes('dateofbirth')||n==='birthdate'||n==='birth')return'date_of_birth';
+    if(n==='gender'||n==='sex')return'gender';
+    if(n.includes('pathway')||n.includes('track')||n.includes('specialisation')||n.includes('cbcpathway'))return'cbc_pathway';
+    if(n.includes('parentname')||n.includes('guardianname')||n==='parent'||n==='guardian')return'parent_name';
+    if(n.includes('phone')||n.includes('mobile')||n.includes('guardiancontact')||n.includes('parentcontact')||n.includes('parentphone')||n.includes('guardianphone'))return'parent_phone';
+    if(n==='class'||n==='classname'||n==='grade')return'ignored_class';
+    return null;
+  };
+  const split=line=>line.split(delim).map(x=>x.trim().replace(/^"|"$/g,''));
+  const parseFullName=name=>{
+    const parts=String(name||'').trim().split(/\s+/).filter(Boolean);
+    if(!parts.length)return{};
+    if(parts.length===1)return{first_name:parts[0],last_name:parts[0]};
+    return{first_name:parts[0],last_name:parts[parts.length-1],middle_name:parts.slice(1,-1).join(' ')};
+  };
+  const hs=split(lines[0]);
+  let keys=hs.map(mapHeader);
+  let start=0;
+  let valid=keys.some(Boolean);
+  if(!valid){
+    const cols=split(lines[0]);
+    if(cols.length>=8){
+      if(/^https?:\/\/|^\/uploads\/|\.(png|jpe?g|webp)$/i.test(cols[0])){
+        keys=['passport_photo_url','assessment_no','admission_no','full_name','date_of_birth','gender','cbc_pathway','parent_name','parent_phone'];
+      }else{
+        keys=['assessment_no','admission_no','full_name','date_of_birth','gender','cbc_pathway','parent_name','parent_phone'];
+      }
+    }else if(cols.length===7){
+      keys=['admission_no','full_name','gender','date_of_birth','cbc_pathway','parent_name','parent_phone'];
+    }else{
+      keys=['admission_no','full_name','gender','date_of_birth','parent_phone'];
+    }
+  }else start=1;
+  const rows=lines.slice(start).map(line=>{
+    const cells=split(line),r={};
+    keys.forEach((k,i)=>{if(k&&k!=='ignored_class')r[k]=cells[i]||''});
+    cells.forEach(cell=>{
+      const val=(cell||'').trim();
+      if(!val)return;
+      if(!r.passport_photo_url && /^https?:\/\/|^\/uploads\/|\.(png|jpe?g|webp)$/i.test(val)) r.passport_photo_url=val;
+      else if(!r.parent_phone && /^(07|01|\+?254)\d{7,9}$/.test(val.replace(/[\s-]/g,''))) r.parent_phone=val;
+      else if(!r.gender && /^(male|female|m|f)$/i.test(val)) r.gender=/^m/i.test(val)?'Male':'Female';
+      else if(!r.date_of_birth && (/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(val)||/^\d{1,2}[-/.]\d{1,2}[-/.]\d{4}$/.test(val))) r.date_of_birth=val;
+      else if(!r.cbc_pathway && /^(stem|social\s*sciences?|arts?\s*(?:&|and)\s*sports?|exploratory)/i.test(val)) r.cbc_pathway=val;
+    });
+    if(r.full_name){
+      const n=parseFullName(r.full_name);
+      r.first_name=r.first_name||n.first_name;
+      r.middle_name=r.middle_name||n.middle_name;
+      r.last_name=r.last_name||n.last_name;
+    }
+    if(!r.first_name||!r.last_name){
+      const n=parseFullName(cells.find(v=>v&&v.trim()&&!/^https?:\/\/|^\d+$/.test(v))||'');
+      r.first_name=r.first_name||n.first_name;
+      r.middle_name=r.middle_name||n.middle_name;
+      r.last_name=r.last_name||n.last_name;
+    }
+    return r;
+  }).filter(r=>r.first_name&&r.last_name);
+  if(!rows.length)return alert('No usable learner rows found. Paste learner rows with Assessment No, Admission No, Full Name, DOB, Gender, CBC Pathway, Parent Phone.');
+  try{
+    b.disabled=true;
+    if(msg)msg.textContent=`Importing ${rows.length} learner(s) with CBC details…`;
+    const r=await api(`/api/people/${sid}/learners/bulk`,{method:'POST',body:{academic_year_id:yearId,class_id:c.id,rows}});
+    if(msg)msg.textContent=`Imported: ${r.created} new, ${r.updated} updated, ${r.skipped} skipped.`;
+    $('classBulkLearnerPaste').value='';
+    await load();
+    await openClassList(c.id);
+  }catch(x){
+    if(msg)msg.textContent=x.message;
+    alert(x.message);
+  }finally{
+    b.disabled=false;
+  }
+});
 
-$('classListCards')?.addEventListener('click',e=>{const b=e.target.closest('button[data-class-id]');if(!b)return;if(b.classList.contains('class-list-pdf')){openProtectedPdf(`/api/people/${sid}/classes/${b.dataset.classId}/pdf`).catch(x=>alert(x.message));}else openClassList(b.dataset.classId);});$('classListBack')?.addEventListener('click',()=>{$('classListDetail').style.display='none';$('classListCards').style.display='grid';});$('classListLearners')?.addEventListener('click',async e=>{const edit=e.target.closest('.class-list-edit-learner');if(edit){const l=(state.learners||[]).find(x=>String(x.id)===String(edit.dataset.learnerId));if(!l)return;const v=(label,current='')=>{const x=prompt(label,current??'');return x===null?null:x.trim()};const first=v('First name:',l.first_name);if(first===null)return;const middle=v('Middle name:',l.middle_name||'');if(middle===null)return;const last=v('Last name:',l.last_name);if(last===null)return;const adm=v('Admission number:',l.admission_no||'');if(adm===null)return;const ass=v('Assessment number:',l.assessment_no||'');if(ass===null)return;const gender=v('Gender (Male/Female):',l.gender||'');if(gender===null)return;const dob=v('Date of birth (YYYY-MM-DD):',l.date_of_birth?String(l.date_of_birth).slice(0,10):'');if(dob===null)return;const phone=v('Parent/guardian phone:',l.parent_phone||'');if(phone===null)return;const y=$('learnerFilterYear')?.value||state.years?.[0]?.id;try{await api(`/api/people/${sid}/learners/${l.id}`,{method:'PATCH',body:{first_name:first,middle_name:middle,last_name:last,admission_no:adm,assessment_no:ass,gender,date_of_birth:dob,parent_phone:phone,class_id:l.class_id,academic_year_id:y}});await load();await openClassList(l.class_id);alert('Learner updated successfully.');}catch(x){alert(x.message);}return;}const b=e.target.closest('.class-list-remove-learner');if(!b)return;const l=(state.learners||[]).find(x=>String(x.id)===String(b.dataset.learnerId));const reason=prompt(`Reason for removing ${l?[l.first_name,l.last_name].filter(Boolean).join(' '):'this learner'} from class:`);if(reason===null)return;if(!reason.trim())return alert('A reason is required.');const c=(state.classes||[]).find(x=>String(x.id)===String(l?.class_id));const y=$('learnerFilterYear')?.value||state.years?.[0]?.id;if(!y)return alert('Select the academic year first.');try{await api(`/api/people/${sid}/learners/${b.dataset.learnerId}/remove-from-class`,{method:'POST',body:{academic_year_id:y,reason}});await load();await openClassList(c?.id||'');alert('Learner removed from class. Historical records remain preserved.');}catch(x){alert(x.message);}});$('classTeacherAddLearner')?.addEventListener('click',()=>{const title=$('classListTitle').textContent||'';const c=(state.classes||[]).find(x=>title.startsWith(String(x.name)));if(c){showSection('people');if($('learnerClass'))$('learnerClass').value=c.id;$('learnerFirstName')?.focus();}});
-document.addEventListener('click',async e=>{const ex=e.target.closest('#classBulkLearnerExport');if(ex){const classId=(window._openClassListId||'');const c=(state.classes||[]).find(x=>String(x.id)===String(classId));const yearId=$('learnerFilterYear')?.value||state.years?.[0]?.id;if(!c||!yearId)return alert('Select the class and academic year first.');const rows=(state.learners||[]).filter(x=>String(x.class_id)===String(c.id)&&x.is_active!==false);const escCsv=v=>{const x=String(v??'');return /[",\n]/.test(x)?`"${x.replace(/"/g,'""')}"`:x;};const header=['Admission No','Assessment No','First Name','Middle Name','Last Name','Gender','Date of Birth','Parent Phone'];const lines=[header.join(',')].concat(rows.map(r=>[r.admission_no,r.assessment_no,r.first_name,r.middle_name,r.last_name,r.gender,r.date_of_birth?String(r.date_of_birth).slice(0,10):'',r.parent_phone].map(escCsv).join(',')));const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'});const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=`ZELIMU-CBC-${String(c.name||'CLASS').replace(/[^a-z0-9_-]/gi,'-')}-LEARNERS.csv`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1000);return;}const b=e.target.closest('#classBulkLearnerImport');if(!b)return;const text=$('classBulkLearnerPaste')?.value||'';const msg=$('classBulkLearnerMsg');const classId=(window._openClassListId||'');const c=(state.classes||[]).find(x=>String(x.id)===String(classId));const yearId=$('learnerFilterYear')?.value||state.years?.[0]?.id;if(!text.trim())return alert('Paste learner rows from Excel first.');if(!c||!yearId)return alert('Select the class and academic year first.');const lines=text.trim().split(/\r?\n/).filter(Boolean);const delim=lines[0].includes('\t')?'\t':',';const norm=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');const mapHeader=h=>{const n=norm(h);if(n.includes('admission')||n==='admno'||n==='admnumber'||n==='admissionnumber')return'admission_no';if(n.includes('assessment')||n.includes('assesno')||n==='assno'||n==='assessno')return'assessment_no';if(n.includes('learnername')||n.includes('studentname')||n.includes('fullname')||n==='name')return'full_name';if(n==='firstname'||n==='fname'||n==='first')return'first_name';if(n==='middlename'||n==='mname'||n==='middle')return'middle_name';if(n==='lastname'||n==='surname'||n==='familyname'||n==='last')return'last_name';if(n==='gender'||n==='sex')return'gender';if(n.includes('dob')||n.includes('dateofbirth')||n==='birthdate')return'date_of_birth';if(n.includes('phone')||n.includes('mobile')||n.includes('guardiancontact')||n.includes('parentcontact'))return'parent_phone';if(n==='class'||n==='classname'||n==='grade')return'ignored_class';return null;};const split=line=>line.split(delim).map(x=>x.trim().replace(/^"|"$/g,''));const parseFullName=name=>{const parts=String(name||'').trim().split(/\s+/).filter(Boolean);if(!parts.length)return{};if(parts.length===1)return{first_name:parts[0],last_name:parts[0]};return{first_name:parts[0],last_name:parts[parts.length-1],middle_name:parts.slice(1,-1).join(' ')};};const hs=split(lines[0]);let keys=hs.map(mapHeader);let start=0;let valid=keys.some(Boolean);if(!valid){keys=lines[0].includes(delim)?['admission_no','full_name','gender','date_of_birth','parent_phone']:['full_name'];}else start=1;const rows=lines.slice(start).map(line=>{const cells=split(line),r={};keys.forEach((k,i)=>{if(k&&k!=='ignored_class')r[k]=cells[i]||''});if(r.full_name){const n=parseFullName(r.full_name);r.first_name=r.first_name||n.first_name;r.middle_name=r.middle_name||n.middle_name;r.last_name=r.last_name||n.last_name;}if(!r.first_name||!r.last_name){const n=parseFullName(cells.find(v=>v&&v.trim())||'');r.first_name=r.first_name||n.first_name;r.middle_name=r.middle_name||n.middle_name;r.last_name=r.last_name||n.last_name;}return r}).filter(r=>r.first_name&&r.last_name);if(!rows.length)return alert('No usable learner rows found. Paste learner names or a header row containing Name / Learner Name / First Name / Last Name.');try{b.disabled=true;if(msg)msg.textContent=`Importing ${rows.length} learner(s)…`;const r=await api(`/api/people/${sid}/learners/bulk`,{method:'POST',body:{academic_year_id:yearId,class_id:c.id,rows}});if(msg)msg.textContent=`Imported: ${r.created} new, ${r.updated} updated, ${r.skipped} skipped.`;$('classBulkLearnerPaste').value='';await load();await openClassList(c.id);}catch(x){if(msg)msg.textContent=x.message;alert(x.message);}finally{b.disabled=false;}});
 async function loadClassReportRegister(){
  const c=$('reportClass')?.value,y=$('reportYear')?.value,t=$('reportTerm')?.value;if(!c||!y||!t)return;
  $('reportInfo').textContent='Loading class learners…';

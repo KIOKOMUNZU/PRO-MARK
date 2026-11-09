@@ -655,21 +655,55 @@ router.post('/:schoolId/learners/bulk',schoolBoundary,roles('SCHOOL_ADMIN','ADMI
     learner=exact;
    }
    if(learner){
+    const photo=clean(r.passport_photo_url)||clean(r.photo_url)||clean(r.photo)||null;
+    const pathway=clean(r.cbc_pathway)||clean(r.pathway)||clean(r.track)||null;
     const upd=(await c.query(`UPDATE learners SET admission_no=COALESCE($3,admission_no),assessment_no=COALESCE($4,assessment_no),
       first_name=$5,middle_name=$6,last_name=$7,date_of_birth=COALESCE($8,date_of_birth),gender=COALESCE($9,gender),
-      parent_phone=COALESCE($10,parent_phone),class_id=$11,is_active=true WHERE id=$1 AND school_id=$2 RETURNING *`,
-      [learner.id,sid,adm,ass,first,clean(r.middle_name)||null,last,r.date_of_birth||null,clean(r.gender)||null,clean(r.parent_phone)||null,b.class_id])).rows[0];
+      parent_phone=COALESCE($10,parent_phone),class_id=$11,
+      passport_photo_url=COALESCE($12,passport_photo_url),cbc_pathway=COALESCE($13,cbc_pathway),
+      is_active=true WHERE id=$1 AND school_id=$2 RETURNING *`,
+      [learner.id,sid,adm,ass,first,clean(r.middle_name)||null,last,r.date_of_birth||null,clean(r.gender)||null,clean(r.parent_phone)||null,b.class_id,photo,pathway])).rows[0];
     learner=upd;updated++;
    }else{
-    learner=(await c.query(`INSERT INTO learners(school_id,admission_no,assessment_no,first_name,middle_name,last_name,date_of_birth,gender,class_id,parent_phone)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [sid,adm,ass,first,clean(r.middle_name)||null,last,r.date_of_birth||null,clean(r.gender)||null,b.class_id,clean(r.parent_phone)||null])).rows[0];
+    learner=(await c.query(`INSERT INTO learners(school_id,admission_no,assessment_no,first_name,middle_name,last_name,date_of_birth,gender,class_id,parent_phone,passport_photo_url,cbc_pathway)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [sid,adm,ass,first,clean(r.middle_name)||null,last,r.date_of_birth||null,clean(r.gender)||null,b.class_id,clean(r.parent_phone)||null,photo,pathway])).rows[0];
     created++;
    }
    await c.query(`INSERT INTO learner_enrollments(school_id,learner_id,academic_year_id,class_id,status)
      VALUES($1,$2,$3,$4,'ACTIVE')
      ON CONFLICT(learner_id,academic_year_id) DO UPDATE SET class_id=EXCLUDED.class_id,status='ACTIVE',ended_at=NULL`,
      [sid,learner.id,b.academic_year_id,b.class_id]); enrolled++;
+   const pName = clean(r.parent_name)||clean(r.guardian_name)||null;
+   const pPhone = clean(r.parent_phone)||null;
+   if (pName || pPhone) {
+     try {
+       const pParts = (pName || 'Parent').split(/\s+/).filter(Boolean);
+       const pFirst = pParts[0] || 'Parent', pLast = pParts.slice(1).join(' ') || 'Guardian';
+       let pg = null;
+       if (pPhone) {
+         pg = (await c.query(`SELECT id FROM parent_guardians WHERE school_id=$1 AND phone=$2 LIMIT 1`, [sid, pPhone])).rows[0];
+       }
+       if (!pg) {
+         pg = (await c.query(`INSERT INTO parent_guardians(school_id, first_name, last_name, phone, relationship) VALUES($1, $2, $3, $4, 'Parent/Guardian') RETURNING id`, [sid, pFirst, pLast, pPhone])).rows[0];
+       }
+       if (pg) {
+         await c.query(`INSERT INTO learner_guardians(learner_id, parent_guardian_id, is_primary) VALUES($1, $2, true) ON CONFLICT DO NOTHING`, [learner.id, pg.id]);
+       }
+     } catch(e) {}
+   }
+   if (pathway) {
+     try {
+       await c.query(
+         `INSERT INTO report_pathway_guidance (
+            school_id, learner_id, academic_year_id, selected_pathway, track_specialisation
+          ) VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (school_id, learner_id, academic_year_id)
+          DO UPDATE SET selected_pathway = EXCLUDED.selected_pathway, track_specialisation = EXCLUDED.track_specialisation`,
+         [sid, learner.id, b.academic_year_id, pathway, clean(r.pathway_track) || (pathway === 'STEM' ? 'Pure Sciences' : 'General')]
+       );
+     } catch(e) {}
+   }
   }
   await c.query('COMMIT');
   res.status(201).json({ok:true,created,updated,enrolled,skipped,total:rows.length});

@@ -1,0 +1,1358 @@
+diff --git a/backend/routes/results-centre.js b/backend/routes/results-centre.js
+index ea2b4ec..9714fc5 100644
+--- a/backend/routes/results-centre.js
++++ b/backend/routes/results-centre.js
+@@ -1,7 +1,6 @@
+ 'use strict';
+ 
+ const express = require('express');
+-const PDFDocument = require('pdfkit');
+ const db = require('../db');
+ const { authenticate, roles, schoolBoundary } = require('../middleware/auth');
+ const {
+@@ -11,6 +10,7 @@ const {
+   buildAnalytics,
+   invalidateResultsCaches
+ } = require('../services/results-engine');
++const { buildMeritPdf } = require('../services/merit-pdf');
+ 
+ const router = express.Router();
+ router.use(authenticate);
+@@ -148,228 +148,55 @@ router.get('/:schoolId/merit.csv', schoolBoundary, roles(...ALLOWED), async (req
+   } catch (error) { fail(res, error); }
+ });
+ 
+-function text(value) {
+-  return value == null ? '' : String(value);
+-}
+-
+ router.get('/:schoolId/merit.pdf', schoolBoundary, roles(...ALLOWED), async (req, res) => {
+   try {
+     await enforceScope(req, req.query.class_id);
+     const sid = req.params.schoolId;
+     const merit = await buildMerit(sid, req.query);
+     const meta = (await db.query(
+-      `SELECT s.name school_name,si.logo_url,si.motto,si.address,si.contact_phone,
+-              si.primary_color,si.secondary_color
++      `SELECT s.name school_name,si.logo_url,si.motto,si.address,si.contact_phone,si.contact_email,
++              si.primary_color,si.secondary_color,si.watermark_enabled
+        FROM schools s LEFT JOIN school_identity si ON si.school_id=s.id
+        WHERE s.id=$1`,
+       [sid]
+     )).rows[0] || {};
+ 
+-    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 20, autoFirstPage: false });
+-    const chunks = [];
+-    doc.on('data', chunk => chunks.push(chunk));
+-    const done = new Promise((resolve, reject) => {
+-      doc.on('end', () => resolve(Buffer.concat(chunks)));
+-      doc.on('error', reject);
+-    });
+-    doc.addPage({ size: 'A4', layout: 'landscape', margin: 20 });
+-
+-    const navy = (() => {
+-      const value = String(meta.primary_color || '').toUpperCase();
+-      return value === '#17365D' ? '#17365D' : (meta.primary_color || '#17365D');
+-    })();
+-    const gold = (() => {
+-      const value = String(meta.secondary_color || '').toUpperCase();
+-      return value === '#D9A441' ? '#B8860B' : (meta.secondary_color || '#B8860B');
+-    })();
+-    const ink = '#1B2430';
+-    const muted = '#5B6675';
+-    const pageWidth = doc.page.width;
+-    const pageHeight = doc.page.height;
+-    const margin = 26;
+-    const tableWidth = pageWidth - margin * 2;
+-    const footerTop = pageHeight - 42;
+-    const contentBottom = footerTop - 8;
+-    const subjects = merit.subjects || [];
+-    const context = merit.context || {};
+-
+-    const fixed = [30, 52, 132];
+-    const tail = [42, 44, 34, 40, 42];
+-    const subjectSpace = Math.max(0, tableWidth - fixed.reduce((a, b) => a + b, 0) - tail.reduce((a, b) => a + b, 0));
+-    const subjectWidth = subjects.length ? subjectSpace / subjects.length : 0;
+-    const widths = [...fixed, ...subjects.map(() => subjectWidth), ...tail];
+-    const rowHeight = 20;
+-    const headerHeight = 26;
+-    let y = 0;
+-
+-    const gradeFill = grade => {
+-      const key = String(grade || '').toUpperCase();
+-      if (key === 'A' || key === 'EE') return '#E7F5EC';
+-      if (key === 'B' || key === 'ME') return '#E8F0FA';
+-      if (key === 'C' || key === 'AE') return '#FCF3DC';
+-      if (key === 'D' || key === 'BE') return '#FBE9E7';
+-      return '#F4F6F9';
+-    };
+-
+-    const footer = () => {
+-      doc.strokeColor('#D8DEE6').lineWidth(0.7)
+-        .moveTo(margin, footerTop).lineTo(margin + tableWidth, footerTop).stroke();
+-      doc.fillColor(muted).font('Helvetica').fontSize(6.5)
+-        .text(
+-          `ZELIMU CBC · Generated ${new Date().toISOString().slice(0, 10)} · Page ${doc.page.index + 1}`,
+-          margin, pageHeight - 32, { width: tableWidth, align: 'right' }
+-        );
+-    };
+-
+-    const pageHeader = () => {
+-      doc.fillColor(navy).font('Helvetica-Bold').fontSize(15)
+-        .text(text(meta.school_name || 'School'), margin, 28, { width: tableWidth });
+-      doc.fillColor(gold).font('Helvetica').fontSize(8)
+-        .text(text(meta.motto || 'Results · Merit · Progress'), margin, 47, { width: tableWidth });
+-      doc.fillColor(ink).font('Helvetica-Bold').fontSize(12)
+-        .text('MERIT LIST', margin, 66, { width: tableWidth });
+-      const bits = [
+-        context.year_label,
+-        context.term_name,
+-        context.class_name || 'All classes',
+-        context.year_state === 'HISTORICAL' ? 'HISTORICAL' : null
+-      ].filter(Boolean);
+-      doc.fillColor(muted).font('Helvetica').fontSize(8)
+-        .text(bits.join('   ·   '), margin, 82, { width: tableWidth });
+-      doc.moveTo(margin, 98).lineTo(margin + tableWidth, 98).strokeColor(gold).lineWidth(1.2).stroke();
+-      y = 108;
+-    };
+-
+-    const tableHead = () => {
+-      let x = margin;
+-      doc.fillColor(navy).rect(margin, y, tableWidth, headerHeight).fill();
+-      const heads = [
+-        '#', 'ADM. NO.', 'LEARNER',
+-        ...subjects.map(s => String(s.subject_code || s.subject_name || '').toUpperCase()),
+-        'TOTAL', 'AVERAGE', 'GRADE', 'CLASS POS.', 'OVERALL POS.'
+-      ];
+-      heads.forEach((label, index) => {
+-        doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(index < 3 ? 6.5 : 5.6)
+-          .text(label, x + 2, y + 8, {
+-            width: widths[index] - 4,
+-            align: index < 3 ? 'left' : 'center',
+-            lineBreak: false,
+-            ellipsis: true
+-          });
+-        x += widths[index];
+-      });
+-      y += headerHeight;
+-    };
+-
+-    pageHeader();
+-    tableHead();
+-
+-    merit.rows.forEach((row, index) => {
+-      if (y + rowHeight > contentBottom) {
+-        footer();
+-        doc.addPage({ size: 'A4', layout: 'landscape', margin: 20 });
+-        pageHeader();
+-        tableHead();
+-      }
+-      if (index % 2 === 0) {
+-        doc.fillColor('#FAFBFC').rect(margin, y, tableWidth, rowHeight).fill();
+-      }
+-      const bySubject = new Map(row.subjects.map(s => [String(s.subject_id), s]));
+-      const cells = [
+-        row.overall_rank == null ? '' : String(row.overall_rank),
+-        text(row.admission_no),
+-        text(row.name)
+-      ];
+-      let x = margin;
+-      cells.forEach((value, cellIndex) => {
+-        doc.fillColor(ink).font(cellIndex === 2 ? 'Helvetica-Bold' : 'Helvetica').fontSize(6.6)
+-          .text(value, x + 3, y + 6, {
+-            width: widths[cellIndex] - 6,
+-            lineBreak: false,
+-            ellipsis: true
+-          });
+-        x += widths[cellIndex];
+-      });
+-      subjects.forEach(subject => {
+-        const found = bySubject.get(String(subject.subject_id));
+-        const value = found && found.average != null ? String(Math.round(found.average)) : '—';
+-        doc.fillColor(ink).font('Helvetica').fontSize(6.4)
+-          .text(value, x, y + 6, { width: subjectWidth, align: 'center' });
+-        x += subjectWidth;
+-      });
+-      const tailValues = [
+-        row.total == null ? '—' : String(Math.round(row.total)),
+-        row.average == null ? '—' : String(Math.round(row.average * 10) / 10),
+-        text(row.grade),
+-        row.stream_rank == null ? '—' : String(row.stream_rank),
+-        row.overall_rank == null ? '—' : String(row.overall_rank)
+-      ];
+-      tailValues.forEach((value, index) => {
+-        if (index === 2) {
+-          doc.fillColor(gradeFill(value)).rect(x, y, widths[fixed.length + subjects.length + index], rowHeight).fill();
+-        }
+-        doc.fillColor(ink).font('Helvetica-Bold').fontSize(6.4)
+-          .text(value, x, y + 6, {
+-            width: widths[fixed.length + subjects.length + index],
+-            align: 'center'
+-          });
+-        x += widths[fixed.length + subjects.length + index];
+-      });
+-      y += rowHeight;
+-    });
+-
+-    if (!merit.rows.length) {
+-      doc.fillColor('#991B1B').font('Helvetica-Bold').fontSize(8)
+-        .text('No usable marks were found for this selection.', margin, y + 10, { width: tableWidth });
+-      if (merit.diagnostics) {
+-        doc.fillColor(ink).font('Helvetica').fontSize(7.5)
+-          .text(merit.diagnostics, margin, y + 26, { width: tableWidth });
+-      }
+-      y += 60;
+-    }
+-
+-    if (merit.subject_rankings && merit.subject_rankings.length) {
+-      const summaryHeight = 20 + merit.subject_rankings.length * 14 + 16;
+-      if (y + summaryHeight > contentBottom) {
+-        footer();
+-        doc.addPage({ size: 'A4', layout: 'landscape', margin: 20 });
+-        pageHeader();
++    try {
++      meta.stamp_url = ((await db.query(
++        `SELECT file_url FROM school_document_assets
++         WHERE school_id=$1 AND asset_type='STAMP' AND is_active=true
++           AND (effective_to IS NULL OR effective_to>=CURRENT_DATE)
++         ORDER BY effective_from DESC NULLS LAST,created_at DESC LIMIT 1`,
++        [sid]
++      )).rows[0] || {}).file_url || null;
++    } catch (error) { meta.stamp_url = null; }
++
++    const ctx = merit.context || {};
++    const teacherName = row => row ? [row.first_name, row.last_name].filter(Boolean).join(' ').trim() : '';
++    try {
++      if (ctx.class_id) {
++        const ct = (await db.query(
++          `SELECT tr.first_name,tr.last_name,tr.signature_url
++           FROM class_teacher_assignments cta JOIN teachers tr ON tr.id=cta.teacher_id
++           WHERE cta.school_id=$1 AND cta.class_id=$2 AND cta.academic_year_id=$3
++             AND (cta.term_id=$4 OR cta.term_id IS NULL) AND tr.is_active=true
++           ORDER BY (cta.term_id IS NOT NULL) DESC,cta.created_at DESC LIMIT 1`,
++          [sid, ctx.class_id, ctx.academic_year_id, ctx.term_id]
++        )).rows[0];
++        if (ct) meta.class_teacher = { name: teacherName(ct), signature_url: ct.signature_url };
+       }
+-      y += 12;
+-      doc.fillColor(navy).font('Helvetica-Bold').fontSize(8)
+-        .text('SUBJECT AVERAGES · CLASS RANKING · SUBJECT TEACHERS', margin, y, { width: tableWidth });
+-      y += 14;
+-      const sWidths = [34, 220, 64, 46, 150];
+-      let sx = margin;
+-      doc.fillColor(navy).rect(margin, y, sWidths.reduce((a, b) => a + b, 0), 16).fill();
+-      ['RANK', 'SUBJECT', 'AVERAGE', 'GRADE', 'TEACHER'].forEach((label, index) => {
+-        doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(6)
+-          .text(label, sx + 3, y + 5, { width: sWidths[index] - 6 });
+-        sx += sWidths[index];
+-      });
+-      y += 16;
+-      merit.subject_rankings.forEach((subject, index) => {
+-        let cellX = margin;
+-        const values = [
+-          String(index + 1),
+-          text(subject.subject_name),
+-          subject.average == null ? '—' : String(Math.round(subject.average * 10) / 10),
+-          text(subject.grade),
+-          text(subject.teacher || 'Not assigned')
+-        ];
+-        values.forEach((value, column) => {
+-          doc.fillColor(ink).font(column === 1 ? 'Helvetica-Bold' : 'Helvetica').fontSize(6.2)
+-            .text(value, cellX + 3, y + 3, { width: sWidths[column] - 6, lineBreak: false, ellipsis: true });
+-          cellX += sWidths[column];
+-        });
+-        y += 14;
+-      });
+-    }
+-
+-    footer();
+-    doc.end();
+-    const buffer = await done;
+-    const filename = `merit-${String(context.year_label || 'year').replace(/\W+/g, '-')}-${String(context.term_name || 'term').replace(/\W+/g, '-')}.pdf`;
++      const ht = (await db.query(
++        `SELECT tr.first_name,tr.last_name,tr.signature_url
++         FROM teachers tr LEFT JOIN user_school_roles usr ON usr.user_id=tr.user_id AND usr.school_id=tr.school_id
++         WHERE tr.school_id=$1 AND (usr.role='HEADTEACHER' OR tr.imported_role='HEADTEACHER') AND tr.is_active=true
++         ORDER BY tr.last_name,tr.first_name LIMIT 1`,
++        [sid]
++      )).rows[0];
++      if (ht) meta.head_teacher = { name: teacherName(ht), signature_url: ht.signature_url };
++    } catch (error) { /* certification strip falls back to blank signature lines */ }
++
++    const buffer = await buildMeritPdf(merit, meta);
++    const filename = `merit-${String(ctx.year_label || 'year').replace(/\W+/g, '-')}-${String(ctx.term_name || 'term').replace(/\W+/g, '-')}.pdf`;
+     res.setHeader('Content-Type', 'application/pdf');
+     res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+     res.end(buffer);
+diff --git a/backend/services/merit-pdf.js b/backend/services/merit-pdf.js
+new file mode 100644
+index 0000000..5a64039
+--- /dev/null
++++ b/backend/services/merit-pdf.js
+@@ -0,0 +1,328 @@
++'use strict';
++
++const PDFDocument = require('pdfkit');
++const { source: assetSource } = require('./assets');
++
++const text = value => (value == null ? '' : String(value));
++const hex = (value, fallback) => (/^#[0-9A-F]{6}$/i.test(String(value || '')) ? String(value) : fallback);
++const round1 = value => (value == null || !isFinite(Number(value)) ? '—' : String(Math.round(Number(value) * 10) / 10));
++
++function gradeFill(grade) {
++  const key = String(grade || '').toUpperCase();
++  if (key === 'A' || key === 'EE') return '#E7F5EC';
++  if (key === 'B' || key === 'ME') return '#E8F0FA';
++  if (key === 'C' || key === 'AE') return '#FCF3DC';
++  if (key === 'D' || key === 'BE') return '#FBE9E7';
++  return '#F4F6F9';
++}
++
++function drawImage(doc, url, x, y, fit) {
++  const p = assetSource(url);
++  if (!p) return false;
++  try { doc.image(p, x, y, { fit, align: 'center', valign: 'center' }); return true; } catch (e) { return false; }
++}
++
++/* Official Zeraki-style merit document: branded letterhead, ruled register,
++   subject summary, certification strip (signatures + stamp) and paginated footer. */
++async function buildMeritPdf(merit, meta) {
++  const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 20, autoFirstPage: false, bufferPages: true });
++  const chunks = [];
++  doc.on('data', chunk => chunks.push(chunk));
++  const done = new Promise((resolve, reject) => {
++    doc.on('end', () => resolve(Buffer.concat(chunks)));
++    doc.on('error', reject);
++  });
++  doc.addPage({ size: 'A4', layout: 'landscape', margin: 20 });
++
++  const m = meta || {};
++  const navy = hex(m.primary_color, '#17365D');
++  const gold = String(m.secondary_color || '').toUpperCase() === '#D9A441' ? '#B8860B' : hex(m.secondary_color, '#B8860B');
++  const ink = '#1B2430';
++  const muted = '#5B6675';
++  const grid = '#D8DEE6';
++  const pageWidth = doc.page.width;
++  const pageHeight = doc.page.height;
++  const margin = 28;
++  const tableWidth = pageWidth - margin * 2;
++  const footerTop = pageHeight - 40;
++  const contentBottom = footerTop - 10;
++  const subjects = merit.subjects || [];
++  const rows = merit.rows || [];
++  const stats = merit.stats || {};
++  const context = merit.context || {};
++  const multiClass = !context.class_id;
++  const generated = new Date();
++  const refNo = 'ZC/MERIT/' + generated.getFullYear() + '/' +
++    String(generated.getMonth() + 1).padStart(2, '0') + '-' +
++    String(generated.getDate()).padStart(2, '0') + '/' +
++    generated.getTime().toString(36).toUpperCase().slice(-5);
++
++  const fixed = [26, 46, 148];
++  if (multiClass) fixed.push(64);
++  const tail = [40, 42, 34, 40, 44];
++  const fixedSum = fixed.reduce((a, b) => a + b, 0);
++  const tailSum = tail.reduce((a, b) => a + b, 0);
++  const subjectWidth = subjects.length ? Math.max(24, (tableWidth - fixedSum - tailSum) / subjects.length) : 0;
++  const widths = [...fixed, ...subjects.map(() => subjectWidth), ...tail];
++  const rowHeight = 19;
++  const headerHeight = 24;
++  let y = 0;
++
++  const watermark = () => {
++    if (m.watermark_enabled === false) return;
++    const p = assetSource(m.logo_url);
++    if (p) {
++      try {
++        doc.save().opacity(0.05);
++        doc.image(p, pageWidth / 2 - 110, pageHeight / 2 - 110, { fit: [220, 220], align: 'center', valign: 'center' });
++        doc.restore();
++        return;
++      } catch (e) { try { doc.restore(); } catch (e2) {} }
++    }
++    try {
++      doc.save().opacity(0.04).fillColor('#334155').font('Helvetica-Bold').fontSize(30)
++        .text(text(m.school_name), margin, pageHeight / 2 - 18, { width: tableWidth, align: 'center', lineBreak: false, ellipsis: true });
++      doc.restore();
++    } catch (e) { try { doc.restore(); } catch (e2) {} }
++  };
++
++  const letterhead = continuation => {
++    watermark();
++    const hasLogo = drawImage(doc, m.logo_url, margin, 26, [50, 50]);
++    const tx = margin + (hasLogo ? 60 : 0);
++    const tw = tableWidth - (hasLogo ? 60 : 0) - 190;
++    doc.fillColor(navy).font('Helvetica-Bold').fontSize(15)
++      .text(text(m.school_name || 'School'), tx, 28, { width: tw, lineBreak: false, ellipsis: true });
++    doc.fillColor(gold).font('Helvetica-Oblique').fontSize(8)
++      .text(text(m.motto || 'Discipline · Knowledge · Greater Futures'), tx, 46, { width: tw, lineBreak: false, ellipsis: true });
++    const contact = [m.address, m.contact_phone, m.contact_email].filter(Boolean).join('  ·  ');
++    if (contact) {
++      doc.fillColor(muted).font('Helvetica').fontSize(6.5)
++        .text(contact, tx, 58, { width: tw, lineBreak: false, ellipsis: true });
++    }
++    doc.strokeColor(navy).lineWidth(0.8).roundedRect(margin + tableWidth - 182, 26, 182, 50, 3).stroke();
++    doc.fillColor(navy).font('Helvetica-Bold').fontSize(6.5)
++      .text('OFFICIAL MERIT DOCUMENT', margin + tableWidth - 176, 31, { width: 170, lineBreak: false });
++    doc.fillColor(muted).font('Helvetica').fontSize(6)
++      .text('REF: ' + refNo, margin + tableWidth - 176, 41, { width: 170, lineBreak: false, ellipsis: true })
++      .text('Generated: ' + generated.toISOString().replace('T', ' ').slice(0, 16) + ' UTC', margin + tableWidth - 176, 50, { width: 170, lineBreak: false, ellipsis: true })
++      .text('Basis: ' + text(context.assessment_label || 'All assessments in term score'), margin + tableWidth - 176, 59, { width: 170, lineBreak: false, ellipsis: true });
++    doc.moveTo(margin, 84).lineTo(margin + tableWidth, 84).strokeColor(navy).lineWidth(1.6).stroke();
++    doc.moveTo(margin, 87).lineTo(margin + tableWidth, 87).strokeColor(gold).lineWidth(0.8).stroke();
++    doc.fillColor(navy).font('Helvetica-Bold').fontSize(12)
++      .text(continuation ? 'MERIT LIST · CONTINUED' : 'MERIT LIST', margin, 94, { width: tableWidth / 2 });
++    const bits = [context.year_label, context.term_name, context.class_name || 'All classes',
++      context.year_state === 'HISTORICAL' ? 'HISTORICAL YEAR' : null].filter(Boolean).join('   ·   ');
++    doc.fillColor(muted).font('Helvetica').fontSize(7.5)
++      .text(bits, margin + tableWidth / 2, 97, { width: tableWidth / 2, align: 'right', lineBreak: false, ellipsis: true });
++    y = 112;
++  };
++
++  const tableHead = () => {
++    let x = margin;
++    doc.fillColor(navy).rect(margin, y, tableWidth, headerHeight).fill();
++    const heads = ['#', 'ADM. NO.', 'LEARNER', ...(multiClass ? ['CLASS'] : []),
++      ...subjects.map(s => String(s.subject_code || s.subject_name || '').toUpperCase()),
++      'TOTAL', 'AVERAGE', 'GRADE', 'CLASS POS.', 'OVERALL POS.'];
++    heads.forEach((label, index) => {
++      doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(index < fixed.length ? 6.3 : 5.4)
++        .text(label, x + 2, y + 8, { width: widths[index] - 4, align: index < fixed.length ? 'left' : 'center', lineBreak: false, ellipsis: true });
++      x += widths[index];
++    });
++    y += headerHeight;
++  };
++
++  const ruleRow = (top, height) => {
++    doc.strokeColor(grid).lineWidth(0.5).rect(margin, top, tableWidth, height).stroke();
++    let gx = margin;
++    widths.forEach(w => {
++      gx += w;
++      if (gx < margin + tableWidth - 0.1) doc.moveTo(gx, top).lineTo(gx, top + height).stroke();
++    });
++  };
++
++  letterhead(false);
++  tableHead();
++
++  rows.forEach((row, index) => {
++    if (y + rowHeight > contentBottom) {
++      doc.addPage({ size: 'A4', layout: 'landscape', margin: 20 });
++      letterhead(true);
++      tableHead();
++    }
++    const rank = row.stream_rank != null ? row.stream_rank : (row.average == null ? null : index + 1);
++    const topThree = rank != null && Number(rank) > 0 && Number(rank) <= 3;
++    if (topThree) doc.fillColor('#FFF8E6').rect(margin, y, tableWidth, rowHeight).fill();
++    else if (index % 2 === 0) doc.fillColor('#FAFBFC').rect(margin, y, tableWidth, rowHeight).fill();
++    ruleRow(y, rowHeight);
++    const bySubject = new Map((row.subjects || []).map(s => [String(s.subject_id), s]));
++    const core = [rank == null ? '—' : String(rank), text(row.admission_no || row.assessment_no), text(row.name), ...(multiClass ? [text(row.class_name)] : [])];
++    let x = margin;
++    core.forEach((value, cellIndex) => {
++      const isName = cellIndex === 2;
++      const isRank = cellIndex === 0;
++      doc.fillColor(isRank && topThree ? gold : ink)
++        .font(isName || isRank ? 'Helvetica-Bold' : 'Helvetica').fontSize(6.6)
++        .text(value, x + 3, y + 6, { width: widths[cellIndex] - 6, lineBreak: false, ellipsis: true });
++      x += widths[cellIndex];
++    });
++    subjects.forEach(subject => {
++      const found = bySubject.get(String(subject.subject_id));
++      const value = found && found.average != null ? String(Math.round(found.average)) : '—';
++      doc.fillColor(ink).font('Helvetica').fontSize(6.4)
++        .text(value, x, y + 6, { width: subjectWidth, align: 'center', lineBreak: false });
++      x += subjectWidth;
++    });
++    const tailValues = [
++      row.total == null ? '—' : String(Math.round(row.total)),
++      round1(row.average),
++      text(row.grade),
++      row.stream_rank == null ? '—' : String(row.stream_rank),
++      row.overall_rank == null ? '—' : String(row.overall_rank)
++    ];
++    tailValues.forEach((value, i) => {
++      const w = widths[fixed.length + subjects.length + i];
++      if (i === 2) doc.fillColor(gradeFill(value)).rect(x + 1, y + 2, w - 2, rowHeight - 4).fill();
++      doc.fillColor(ink).font('Helvetica-Bold').fontSize(6.4)
++        .text(value, x, y + 6, { width: w, align: 'center', lineBreak: false });
++      x += w;
++    });
++    y += rowHeight;
++  });
++
++  if (!rows.length) {
++    doc.fillColor('#991B1B').font('Helvetica-Bold').fontSize(8)
++      .text('No usable marks were found for this selection.', margin, y + 10, { width: tableWidth });
++    if (merit.diagnostics) {
++      doc.fillColor(ink).font('Helvetica').fontSize(7.5)
++        .text(merit.diagnostics, margin, y + 26, { width: tableWidth });
++    }
++    y += 60;
++  }
++
++  const statBand = () => {
++    const items = [
++      ['MEAN SCORE', round1(stats.mean)],
++      ['TOP SCORE', round1(stats.top)],
++      ['LOWEST SCORE', round1(stats.lowest)],
++      ['PASS RATE', stats.pass_rate == null ? '—' : Math.round(Number(stats.pass_rate)) + '%'],
++      ['RANKED LEARNERS', String(stats.ranked == null ? rows.length : stats.ranked) + ' / ' + String(stats.learners == null ? rows.length : stats.learners)]
++    ];
++    const h = 30;
++    if (y + h + 14 > contentBottom) {
++      doc.addPage({ size: 'A4', layout: 'landscape', margin: 20 });
++      letterhead(true);
++    }
++    y += 10;
++    const w = tableWidth / items.length;
++    items.forEach((item, i) => {
++      const x = margin + i * w;
++      doc.fillColor('#F4F6F9').rect(x, y, w - 4, h).fill();
++      doc.strokeColor(grid).lineWidth(0.5).rect(x, y, w - 4, h).stroke();
++      doc.fillColor(muted).font('Helvetica-Bold').fontSize(5.6)
++        .text(item[0], x + 6, y + 5, { width: w - 12, lineBreak: false });
++      doc.fillColor(navy).font('Helvetica-Bold').fontSize(10)
++        .text(item[1], x + 6, y + 14, { width: w - 12, lineBreak: false });
++    });
++    y += h + 12;
++  };
++  if (rows.length) statBand();
++
++  if (merit.subject_rankings && merit.subject_rankings.length) {
++    const sWidths = [34, 220, 64, 46, tableWidth - 34 - 220 - 64 - 46];
++    const needed = 30 + merit.subject_rankings.length * 15 + 10;
++    if (y + needed > contentBottom) {
++      doc.addPage({ size: 'A4', layout: 'landscape', margin: 20 });
++      letterhead(true);
++    }
++    doc.fillColor(navy).font('Helvetica-Bold').fontSize(8.5)
++      .text('SUBJECT AVERAGES · CLASS RANKING · SUBJECT TEACHERS', margin, y, { width: tableWidth });
++    y += 14;
++    let sx = margin;
++    doc.fillColor(navy).rect(margin, y, tableWidth, 16).fill();
++    ['RANK', 'SUBJECT / LEARNING AREA', 'AVERAGE', 'GRADE', 'SUBJECT TEACHER'].forEach((label, i) => {
++      doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(6)
++        .text(label, sx + 3, y + 5, { width: sWidths[i] - 6, lineBreak: false });
++      sx += sWidths[i];
++    });
++    y += 16;
++    merit.subject_rankings.forEach((subject, index) => {
++      if (y + 15 > contentBottom) {
++        doc.addPage({ size: 'A4', layout: 'landscape', margin: 20 });
++        letterhead(true);
++        doc.fillColor(navy).font('Helvetica-Bold').fontSize(8)
++          .text('SUBJECT AVERAGES · CONTINUED', margin, y, { width: tableWidth });
++        y += 14;
++      }
++      if (index % 2 === 0) doc.fillColor('#FAFBFC').rect(margin, y, tableWidth, 15).fill();
++      doc.strokeColor(grid).lineWidth(0.5).rect(margin, y, tableWidth, 15).stroke();
++      let gx = margin;
++      sWidths.forEach(w => { gx += w; if (gx < margin + tableWidth - 0.1) doc.moveTo(gx, y).lineTo(gx, y + 15).stroke(); });
++      const values = [String(index + 1), text(subject.subject_name), round1(subject.average), text(subject.grade), text(subject.teacher || subject.teacher_name || 'Not assigned')];
++      let cellX = margin;
++      values.forEach((value, column) => {
++        doc.fillColor(ink).font(column === 1 || column === 4 ? 'Helvetica-Bold' : 'Helvetica').fontSize(6.2)
++          .text(value, cellX + 3, y + 4, { width: sWidths[column] - 6, lineBreak: false, ellipsis: true });
++        cellX += sWidths[column];
++      });
++      y += 15;
++    });
++    y += 8;
++  }
++
++  const certification = () => {
++    const h = 64;
++    if (y + h > contentBottom) {
++      doc.addPage({ size: 'A4', layout: 'landscape', margin: 20 });
++      letterhead(true);
++    }
++    y += 6;
++    const colW = (tableWidth - 150) / 2;
++    const ct = m.class_teacher || {};
++    const ht = m.head_teacher || {};
++    const sig = (url, x) => {
++      const p = assetSource(url);
++      if (p) { try { doc.image(p, x + 12, y + 16, { fit: [110, 24] }); return; } catch (e) {} }
++    };
++    doc.strokeColor(ink).lineWidth(0.7);
++    doc.moveTo(margin + 8, y + 42).lineTo(margin + colW - 8, y + 42).stroke();
++    doc.moveTo(margin + colW + 8, y + 42).lineTo(margin + 2 * colW - 8, y + 42).stroke();
++    sig(ct.signature_url, margin);
++    sig(ht.signature_url, margin + colW);
++    doc.fillColor(ink).font('Helvetica-Bold').fontSize(6.6)
++      .text('CLASS TEACHER: ' + text(ct.name || '____________________'), margin + 8, y + 46, { width: colW - 16, lineBreak: false, ellipsis: true })
++      .text('HEAD TEACHER: ' + text(ht.name || '____________________'), margin + colW + 8, y + 46, { width: colW - 16, lineBreak: false, ellipsis: true });
++    doc.fillColor(muted).font('Helvetica').fontSize(5.8)
++      .text('Signature & date', margin + 8, y + 55, { width: colW - 16 })
++      .text('Signature & date', margin + colW + 8, y + 55, { width: colW - 16 });
++    const sx = margin + 2 * colW;
++    doc.strokeColor(navy).lineWidth(0.8).roundedRect(sx, y, 150, h - 6, 3).stroke();
++    doc.fillColor(muted).font('Helvetica-Bold').fontSize(5.8)
++      .text('OFFICIAL SCHOOL STAMP', sx, y + 4, { width: 150, align: 'center', lineBreak: false });
++    if (!drawImage(doc, m.stamp_url, sx + 45, y + 12, [60, 38])) {
++      doc.fillColor('#9AA5B1').font('Helvetica').fontSize(6)
++        .text('Stamp applied on issue', sx, y + 28, { width: 150, align: 'center', lineBreak: false });
++    }
++    y += h;
++  };
++  certification();
++
++  const range = doc.bufferedPageRange();
++  for (let i = range.start; i < range.start + range.count; i++) {
++    doc.switchToPage(i);
++    doc.strokeColor(grid).lineWidth(0.7).moveTo(margin, footerTop).lineTo(margin + tableWidth, footerTop).stroke();
++    doc.fillColor(muted).font('Helvetica').fontSize(6)
++      .text(text(m.school_name) + ' · ' + text(m.contact_email || 'School contact email') + ' · REF ' + refNo,
++        margin, footerTop + 6, { width: tableWidth * 0.62, lineBreak: false, ellipsis: true });
++    doc.fillColor(muted).font('Helvetica').fontSize(6)
++      .text('Generated by PRO-MARK · ZELIMU CBC — verify against the school register',
++        margin + tableWidth * 0.62, footerTop + 6, { width: tableWidth * 0.24, align: 'center', lineBreak: false, ellipsis: true });
++    doc.fillColor(navy).font('Helvetica-Bold').fontSize(6)
++      .text('Page ' + (i - range.start + 1) + ' of ' + range.count, margin + tableWidth * 0.86, footerTop + 6, { width: tableWidth * 0.14, align: 'right', lineBreak: false });
++  }
++
++  doc.end();
++  return done;
++}
++
++module.exports = { buildMeritPdf };
+\ No newline at end of file
+diff --git a/public/css/results-centre.css b/public/css/results-centre.css
+index 5cbc23e..dc20447 100644
+--- a/public/css/results-centre.css
++++ b/public/css/results-centre.css
+@@ -1,9 +1,10 @@
+-/* ZELIMU Results Command Centre — navy #17365D / gold #B8860B */
++/* ZELIMU Results Command Centre — navy #17365D / gold #B8860B, live glow edition */
+ .zrc{
+   --zrc-navy:#17365d;
+   --zrc-navy-deep:#0f2745;
+   --zrc-navy-soft:#e8edf4;
+   --zrc-gold:#b8860b;
++  --zrc-gold-bright:#f0c465;
+   --zrc-gold-soft:#fbf3dd;
+   --zrc-ink:#1c2430;
+   --zrc-muted:#66707d;
+@@ -31,18 +32,25 @@
+ .zrc-head{
+   display:flex;align-items:flex-end;justify-content:space-between;gap:18px;flex-wrap:wrap;
+   padding:20px 24px 16px;background:linear-gradient(135deg,var(--zrc-navy-deep),var(--zrc-navy) 62%,#1d4570);
+-  color:#fff;border-bottom:3px solid var(--zrc-gold);
++  color:#fff;border-bottom:3px solid var(--zrc-gold);position:relative;overflow:hidden;
++}
++.zrc-head::after{
++  content:"";position:absolute;inset:0;pointer-events:none;
++  background:linear-gradient(105deg,transparent 42%,rgba(240,196,101,.14) 50%,transparent 58%);
++  transform:translateX(-100%);animation:zrc-sheen 6s ease-in-out infinite;
+ }
+ .zrc-head h2{color:#fff;font-size:26px;line-height:1.1}
+-.zrc-head .zrc-eyebrow{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#d7c08a;font-weight:700;margin-bottom:5px}
++.zrc-head .zrc-eyebrow{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#d7c08a;font-weight:700;margin-bottom:5px;display:flex;align-items:center;gap:7px}
++.zrc-live-dot{width:7px;height:7px;border-radius:50%;background:#3ddc97;box-shadow:0 0 8px #3ddc97;animation:zrc-pulse 1.8s ease-in-out infinite}
+ .zrc-head p{margin:4px 0 0;color:#c9d5e6;font-size:12.5px;max-width:62ch}
+-.zrc-head-actions{display:flex;gap:8px;flex-wrap:wrap}
++.zrc-head-actions{display:flex;gap:8px;flex-wrap:wrap;position:relative;z-index:1}
+ 
+ /* Tabs */
+ .zrc-tabs{display:flex;gap:2px;background:#fff;border-bottom:1px solid var(--zrc-line);padding:0 20px;overflow-x:auto}
+ .zrc-tab{
+   appearance:none;border:0;background:transparent;color:var(--zrc-muted);font-weight:700;font-size:13px;
+   padding:13px 16px 11px;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap;font-family:inherit;
++  transition:color .18s ease,border-color .18s ease,background .18s ease;
+ }
+ .zrc-tab:hover{color:var(--zrc-navy)}
+ .zrc-tab.is-active{color:var(--zrc-navy);border-bottom-color:var(--zrc-gold)}
+@@ -59,6 +67,7 @@
+ .zrc-field>span{font-size:10.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--zrc-muted)}
+ .zrc-field select,.zrc-field input{
+   width:100%;border:1px solid #ccd4e0;border-radius:8px;padding:9px 10px;font-size:13px;background:#fff;color:var(--zrc-ink);font-family:inherit;
++  transition:border-color .15s ease,box-shadow .15s ease;
+ }
+ .zrc-field select:focus,.zrc-field input:focus{outline:2px solid rgba(23,54,93,.22);border-color:var(--zrc-navy)}
+ .zrc-field .zrc-select-wrap{position:relative;display:flex;align-items:center;gap:6px}
+@@ -75,35 +84,50 @@
+ .zrc-seg{display:flex;background:#eef1f6;border:1px solid #dbe1ea;border-radius:9px;padding:3px;gap:2px;flex-wrap:wrap}
+ .zrc-seg button{
+   appearance:none;border:0;background:transparent;padding:7px 11px;border-radius:6px;font-size:12px;font-weight:700;
+-  color:var(--zrc-muted);cursor:pointer;font-family:inherit;white-space:nowrap;
++  color:var(--zrc-muted);cursor:pointer;font-family:inherit;white-space:nowrap;transition:all .15s ease;
+ }
+ .zrc-seg button:hover{color:var(--zrc-navy)}
+-.zrc-seg button.is-active{background:var(--zrc-navy);color:#fff;box-shadow:0 1px 4px rgba(16,35,60,.24)}
++.zrc-seg button.is-active{background:var(--zrc-navy);color:#fff;box-shadow:0 1px 4px rgba(16,35,60,.24),0 0 10px rgba(23,54,93,.35)}
+ 
+ /* KPI tiles */
+ .zrc-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px}
+ .zrc-kpi{
+   background:#fff;border:1px solid var(--zrc-line);border-radius:12px;padding:14px 16px;position:relative;
+-  box-shadow:0 1px 2px rgba(16,35,60,.04);
++  box-shadow:0 1px 2px rgba(16,35,60,.04);transition:box-shadow .2s ease,transform .2s ease,border-color .2s ease;
+ }
+-.zrc-kpi::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:3px;border-radius:0 3px 3px 0;background:var(--zrc-gold)}
++.zrc-kpi:hover{transform:translateY(-2px);border-color:#d9c08a;box-shadow:0 6px 18px rgba(16,35,60,.12),0 0 12px rgba(184,134,11,.18)}
++.zrc-kpi::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:3px;border-radius:0 3px 3px 0;background:linear-gradient(180deg,var(--zrc-gold-bright),var(--zrc-gold));box-shadow:0 0 8px rgba(184,134,11,.55)}
+ .zrc-kpi .zrc-kpi-label{font-size:10.5px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--zrc-muted)}
+ .zrc-kpi .zrc-kpi-value{font-family:var(--zrc-serif);font-size:30px;line-height:1.1;color:var(--zrc-navy-deep);margin-top:4px;font-variant-numeric:tabular-nums}
+ .zrc-kpi .zrc-kpi-value small{font-size:14px;color:var(--zrc-muted);font-family:var(--zrc-sans);font-weight:700}
+ .zrc-kpi .zrc-kpi-foot{font-size:11.5px;color:var(--zrc-muted);margin-top:5px;display:flex;align-items:center;gap:6px}
+ .zrc-kpi .bar{height:5px;border-radius:99px;background:#eef1f6;margin-top:9px;overflow:hidden}
+-.zrc-kpi .bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--zrc-navy),#2e5f96)}
+-.zrc-kpi .bar i.warn{background:linear-gradient(90deg,#b4690e,#d99a3d)}
+-.zrc-kpi .bar i.good{background:linear-gradient(90deg,#0f7a52,#3aa87a)}
++.zrc-kpi .bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--zrc-navy),#2e5f96);transform-origin:left center;animation:zrc-growx .9s cubic-bezier(.2,.8,.2,1) both;box-shadow:0 0 8px rgba(46,95,150,.5)}
++.zrc-kpi .bar i.warn{background:linear-gradient(90deg,#b4690e,#d99a3d);box-shadow:0 0 8px rgba(217,154,61,.55)}
++.zrc-kpi .bar i.good{background:linear-gradient(90deg,#0f7a52,#3aa87a);box-shadow:0 0 8px rgba(58,168,122,.55)}
+ 
+ /* Cards */
+-.zrc-card{background:#fff;border:1px solid var(--zrc-line);border-radius:12px;margin-bottom:16px;box-shadow:0 1px 2px rgba(16,35,60,.04);overflow:hidden}
++.zrc-card{background:#fff;border:1px solid var(--zrc-line);border-radius:12px;margin-bottom:16px;box-shadow:0 1px 2px rgba(16,35,60,.04);overflow:hidden;transition:border-color .2s ease,box-shadow .2s ease}
++.zrc-card:hover{border-color:#d4dce8;box-shadow:0 4px 16px rgba(16,35,60,.1)}
+ .zrc-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 16px;border-bottom:1px solid var(--zrc-line);flex-wrap:wrap}
+ .zrc-card-head h3{font-size:15.5px}
+ .zrc-card-head .zrc-sub{font-size:11.5px;color:var(--zrc-muted)}
+ .zrc-card-body{padding:14px 16px}
+ .zrc-card-body.flush{padding:0}
+ 
++/* Official document strip (merit) */
++.zrc-doc-strip{
++  display:flex;align-items:center;gap:14px;background:#fff;border:1px solid var(--zrc-line);border-radius:12px;
++  padding:12px 16px;margin-bottom:14px;border-bottom:3px double var(--zrc-gold);
++}
++.zrc-doc-strip img{width:44px;height:44px;object-fit:contain;border-radius:6px;background:#f4f6f9}
++.zrc-doc-strip .zrc-doc-school{min-width:0;flex:1}
++.zrc-doc-strip .zrc-doc-school b{display:block;font-family:var(--zrc-serif);font-size:16px;color:var(--zrc-navy-deep);letter-spacing:.01em}
++.zrc-doc-strip .zrc-doc-school span{display:block;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--zrc-gold);font-weight:700;margin-top:2px}
++.zrc-doc-strip .zrc-doc-ref{text-align:right}
++.zrc-doc-strip .zrc-doc-ref span{display:block;font-size:9.5px;font-weight:800;letter-spacing:.14em;color:var(--zrc-navy);text-transform:uppercase}
++.zrc-doc-strip .zrc-doc-ref em{display:block;font-style:normal;font-size:11px;color:var(--zrc-muted);margin-top:3px}
++
+ /* Heat matrix */
+ .zrc-matrix-wrap{overflow:auto;max-height:520px}
+ .zrc-matrix{border-collapse:separate;border-spacing:0;width:100%;font-size:12px}
+@@ -119,12 +143,13 @@
+ .zrc-matrix thead th.zrc-sticky{z-index:4;background:#f4f6f9}
+ .zrc-matrix tbody tr:hover td{background:#fafbfd}
+ .zrc-matrix tbody tr:hover td.zrc-sticky{background:#f7f9fc}
+-.zrc-cell{display:inline-flex;align-items:center;justify-content:center;min-width:44px;padding:4px 6px;border-radius:6px;font-weight:700;font-variant-numeric:tabular-nums;font-size:11.5px}
+-.zrc-cell.g0{background:#fdecec;color:#a51f1f}
+-.zrc-cell.g1{background:#fdf0e2;color:#a45a0b}
+-.zrc-cell.g2{background:#fbf6e3;color:#8a6708}
+-.zrc-cell.g3{background:#eaf4e1;color:#3f6d1a}
+-.zrc-cell.g4{background:#dff0e7;color:#0f6b47}
++.zrc-cell{display:inline-flex;align-items:center;justify-content:center;min-width:44px;padding:4px 6px;border-radius:6px;font-weight:700;font-variant-numeric:tabular-nums;font-size:11.5px;transition:transform .12s ease}
++.zrc-cell:hover{transform:scale(1.06)}
++.zrc-cell.g0{background:#e05c5c;color:#fff;box-shadow:0 0 8px rgba(224,92,92,.4)}
++.zrc-cell.g1{background:#f0923b;color:#4d2506;box-shadow:0 0 8px rgba(240,146,59,.35)}
++.zrc-cell.g2{background:#f6c445;color:#5c430a;box-shadow:0 0 8px rgba(246,196,69,.4)}
++.zrc-cell.g3{background:#8bc34a;color:#1b3a0e;box-shadow:0 0 8px rgba(139,195,74,.4)}
++.zrc-cell.g4{background:#43a047;color:#fff;box-shadow:0 0 10px rgba(67,160,71,.45)}
+ .zrc-cell.s0{background:#f4f6f9;color:#8a94a3}
+ .zrc-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--zrc-muted);padding:9px 16px;border-top:1px solid var(--zrc-line);background:#fbfcfd}
+ .zrc-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+@@ -140,13 +165,15 @@
+ .zrc-pipeline{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+ .zrc-step{
+   display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid var(--zrc-line);border-radius:10px;background:#fcfdff;
++  transition:border-color .15s ease,box-shadow .15s ease;
+ }
++.zrc-step:hover{border-color:#d9c08a;box-shadow:0 0 10px rgba(184,134,11,.15)}
+ .zrc-step .dot{
+   flex:0 0 26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+   font-size:12px;font-weight:800;background:#eef1f6;color:#8a94a3;border:1px solid #dbe1ea;
+ }
+-.zrc-step.complete .dot{background:var(--zrc-green);color:#fff;border-color:var(--zrc-green)}
+-.zrc-step.progress .dot{background:var(--zrc-gold);color:#fff;border-color:var(--zrc-gold)}
++.zrc-step.complete .dot{background:var(--zrc-green);color:#fff;border-color:var(--zrc-green);box-shadow:0 0 10px rgba(15,122,82,.45)}
++.zrc-step.progress .dot{background:var(--zrc-gold);color:#fff;border-color:var(--zrc-gold);box-shadow:0 0 10px rgba(184,134,11,.5);animation:zrc-pulse 2s ease-in-out infinite}
+ .zrc-step .txt{min-width:0}
+ .zrc-step b{display:block;font-size:12.5px;color:var(--zrc-navy-deep)}
+ .zrc-step span{font-size:11.5px;color:var(--zrc-muted);line-height:1.35;display:block;margin-top:2px}
+@@ -156,16 +183,18 @@
+ .zrc-btn{
+   appearance:none;border:1px solid #ccd4e0;background:#fff;color:var(--zrc-navy);border-radius:8px;
+   padding:9px 14px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:6px;
++  transition:all .16s ease;
+ }
+-.zrc-btn:hover{background:#f4f7fb;border-color:#b9c4d4}
+-.zrc-btn.primary{background:var(--zrc-navy);border-color:var(--zrc-navy);color:#fff}
+-.zrc-btn.primary:hover{background:var(--zrc-navy-deep)}
+-.zrc-btn.gold{background:var(--zrc-gold);border-color:var(--zrc-gold);color:#fff}
+-.zrc-btn.gold:hover{background:#9c7108}
++.zrc-btn:hover{background:#f4f7fb;border-color:#b9c4d4;transform:translateY(-1px)}
++.zrc-btn:active{transform:translateY(0)}
++.zrc-btn.primary{background:linear-gradient(180deg,#1d4570,var(--zrc-navy));border-color:var(--zrc-navy);color:#fff;box-shadow:0 2px 8px rgba(16,35,60,.28),0 0 10px rgba(23,54,93,.3)}
++.zrc-btn.primary:hover{background:var(--zrc-navy-deep);box-shadow:0 4px 14px rgba(16,35,60,.35),0 0 14px rgba(23,54,93,.45)}
++.zrc-btn.gold{background:linear-gradient(180deg,var(--zrc-gold-bright),var(--zrc-gold));border-color:var(--zrc-gold);color:#fff;box-shadow:0 2px 8px rgba(184,134,11,.35),0 0 14px rgba(184,134,11,.4);text-shadow:0 1px 2px rgba(90,60,0,.35)}
++.zrc-btn.gold:hover{background:var(--zrc-gold);box-shadow:0 4px 16px rgba(184,134,11,.5),0 0 18px rgba(184,134,11,.55)}
+ .zrc-btn.ghost{background:transparent;border-color:rgba(255,255,255,.35);color:#fff}
+ .zrc-btn.ghost:hover{background:rgba(255,255,255,.1)}
+ .zrc-btn.small{padding:6px 10px;font-size:11.5px}
+-.zrc-btn:disabled{opacity:.55;cursor:not-allowed}
++.zrc-btn:disabled{opacity:.55;cursor:not-allowed;transform:none}
+ 
+ /* Notices */
+ .zrc-notice{padding:10px 13px;border-radius:9px;font-size:12.5px;line-height:1.5;border:1px solid #dbe1ea;background:#f6f8fb;color:#415065}
+@@ -188,7 +217,8 @@
+ 
+ /* Stat chips */
+ .zrc-chips{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px}
+-.zrc-chip{background:#fff;border:1px solid var(--zrc-line);border-radius:10px;padding:10px 12px}
++.zrc-chip{background:#fff;border:1px solid var(--zrc-line);border-radius:10px;padding:10px 12px;transition:box-shadow .2s ease,transform .2s ease,border-color .2s ease}
++.zrc-chip:hover{transform:translateY(-2px);border-color:#d9c08a;box-shadow:0 6px 16px rgba(16,35,60,.12),0 0 10px rgba(184,134,11,.16)}
+ .zrc-chip span{display:block;font-size:10px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--zrc-muted)}
+ .zrc-chip strong{display:block;font-family:var(--zrc-serif);font-size:22px;color:var(--zrc-navy-deep);margin-top:3px;font-variant-numeric:tabular-nums}
+ .zrc-chip em{font-style:normal;font-size:11px;color:var(--zrc-muted)}
+@@ -208,6 +238,7 @@
+ .zrc-table .avg{font-weight:800;color:var(--zrc-navy)}
+ .zrc-table tr.top td{background:#fffdf5}
+ .zrc-table tr.top:hover td{background:#fdf9ec}
++.zrc-table tr.top .rank{color:var(--zrc-gold);text-shadow:0 0 8px rgba(184,134,11,.45)}
+ .zrc-grade{display:inline-flex;min-width:26px;justify-content:center;padding:2px 7px;border-radius:5px;font-weight:800;font-size:11px;background:var(--zrc-navy-soft);color:var(--zrc-navy)}
+ .zrc-grade.gA{background:#dff0e7;color:#0f6b47}
+ .zrc-grade.gB{background:#e6f0fa;color:#1b4f86}
+@@ -217,30 +248,47 @@
+ 
+ /* Charts */
+ .zrc-chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:14px}
+-.zrc-chart-card{background:#fff;border:1px solid var(--zrc-line);border-radius:12px;padding:14px 16px;min-width:0}
++.zrc-chart-card{background:#fff;border:1px solid var(--zrc-line);border-radius:12px;padding:14px 16px;min-width:0;transition:border-color .2s ease,box-shadow .2s ease}
++.zrc-chart-card:hover{border-color:#d4dce8;box-shadow:0 4px 16px rgba(16,35,60,.1),0 0 12px rgba(23,54,93,.08)}
+ .zrc-chart-card h3{font-size:14.5px}
+ .zrc-chart-card .zrc-sub{font-size:11.5px;color:var(--zrc-muted);margin:2px 0 12px}
+ .zrc-chart-card .zrc-chart{width:100%;height:auto;display:block;overflow:visible}
++.zrc-chart-scroll{overflow-x:auto;scrollbar-width:thin;scrollbar-color:#17365d #f0f2f6}
++.zrc-chart-scroll>svg{min-width:900px}
++.zrc-chart-scroll::-webkit-scrollbar{height:8px}
++.zrc-chart-scroll::-webkit-scrollbar-track{background:#f0f2f6;border-radius:99px}
++.zrc-chart-scroll::-webkit-scrollbar-thumb{background:#17365d;border-radius:99px}
++.zrc-chart-scroll::-webkit-scrollbar-thumb:hover{background:#b8860b}
+ .zrc-chart-card.wide{grid-column:1/-1}
+ .zrc-axis{stroke:#dfe5ee;stroke-width:1}
+ .zrc-grid-line{stroke:#eef1f6;stroke-width:1}
+ .zrc-axis-label{fill:#7b8695;font-size:10px;font-family:var(--zrc-sans)}
++.zrc-bar-value{fill:#0f2745;font-size:9px;font-weight:700;font-family:var(--zrc-sans);text-anchor:middle}
+ .zrc-bar{fill:var(--zrc-navy)}
++.zrc-bar.v{transform-box:fill-box;transform-origin:50% 100%;animation:zrc-grow .7s cubic-bezier(.2,.8,.2,1) both}
++.zrc-bar.h{transform-box:fill-box;transform-origin:left center;animation:zrc-growx .8s cubic-bezier(.2,.8,.2,1) both}
+ .zrc-bar.prev{fill:#c9d3e2}
+ .zrc-bar.gold{fill:var(--zrc-gold)}
+ .zrc-line{fill:none;stroke:var(--zrc-navy);stroke-width:2.4;stroke-linejoin:round;stroke-linecap:round}
++.zrc-line.main{stroke-dasharray:1;stroke-dashoffset:1;animation:zrc-draw 1.2s .15s ease-out forwards;filter:drop-shadow(0 0 4px rgba(23,54,93,.4))}
+ .zrc-line.prev{stroke:#b9c4d4;stroke-dasharray:5 4}
+-.zrc-dot{fill:#fff;stroke:var(--zrc-navy);stroke-width:2}
+-.zrc-donut-seg{stroke:#fff;stroke-width:2}
++.zrc-band{fill:rgba(23,54,93,.1);stroke:none}
++.zrc-dot{fill:#fff;stroke:var(--zrc-navy);stroke-width:2;filter:drop-shadow(0 0 3px rgba(23,54,93,.45))}
++.zrc-donut-seg{stroke:#fff;stroke-width:2;animation:zrc-fade .6s ease both;transition:opacity .15s ease}
++.zrc-donut-seg:hover{opacity:.85}
++.zrc-donut-pct{fill:#fff;font-size:9px;font-weight:800;font-family:var(--zrc-sans);text-anchor:middle;pointer-events:none}
+ .zrc-legend-row{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:11px;color:#4a5568;margin-top:10px}
+ .zrc-legend-row i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+ .zrc-heat{display:block;width:100%;height:auto}
+ .zrc-heat text{font-size:9.5px;fill:#fff;font-weight:700;font-family:var(--zrc-sans);text-anchor:middle;dominant-baseline:middle}
+ .zrc-heat .row-label{fill:#4a5568;font-weight:700;text-anchor:end;font-size:10px}
+-.zrc-heat .col-label{fill:#7b8695;text-anchor:end;font-size:9.5px;font-weight:700}
++.zrc-heat .col-label{fill:#7b8695;text-anchor:middle;font-size:9.5px;font-weight:700}
++.zrc-heat-scale{margin-top:10px}
++.zrc-heat-scale i{display:block;height:8px;border-radius:99px;background:linear-gradient(90deg,#a83a32,#c2622b,#c98a1e,#b8860b,#3f8f63,#0f7a52);box-shadow:0 0 8px rgba(184,134,11,.25)}
++.zrc-heat-ticks{display:flex;justify-content:space-between;font-size:9.5px;color:#7b8695;margin-top:4px;font-weight:700}
+ .zrc-sparkline{display:block;width:100%;height:34px;margin-top:6px}
+-.zrc-sparkline path{fill:none;stroke:var(--zrc-gold);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+-.zrc-sparkline path.area{fill:rgba(184,134,11,.12);stroke:none}
++.zrc-sparkline path{fill:none;stroke:var(--zrc-gold);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 3px rgba(184,134,11,.5))}
++.zrc-sparkline path.area{fill:rgba(184,134,11,.12);stroke:none;filter:none}
+ 
+ .zrc-analytics-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
+ .zrc-analytics-kpis .zrc-kpi .zrc-kpi-value{font-size:26px}
+@@ -249,6 +297,30 @@
+ .zrc-delta.down{background:#fdecec;color:#a51f1f}
+ .zrc-delta.flat{background:#eef1f6;color:#5a6577}
+ 
++/* Motion */
++@keyframes zrc-sheen{0%,55%{transform:translateX(-100%)}85%,100%{transform:translateX(100%)}}
++@keyframes zrc-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.55;transform:scale(.82)}}
++@keyframes zrc-grow{from{transform:scaleY(0)}to{transform:scaleY(1)}}
++@keyframes zrc-growx{from{transform:scaleX(0)}to{transform:scaleX(1)}}
++@keyframes zrc-draw{to{stroke-dashoffset:0}}
++@keyframes zrc-fade{from{opacity:0}to{opacity:1}}
++@keyframes zrc-rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
++.zrc-panel.is-active>.zrc-context,.zrc-panel.is-active>.zrc-kpis,.zrc-panel.is-active>.zrc-chips,
++.zrc-panel.is-active>.zrc-card,.zrc-panel.is-active>.zrc-chart-grid,.zrc-panel.is-active>.zrc-merit-layout,
++.zrc-panel.is-active>.zrc-doc-strip,.zrc-panel.is-active>.zrc-analytics-kpis,.zrc-panel.is-active>.zrc-notice{animation:zrc-rise .45s ease both}
++.zrc-panel.is-active>.zrc-kpis,.zrc-panel.is-active>.zrc-chips,.zrc-panel.is-active>.zrc-analytics-kpis{animation-delay:.06s}
++.zrc-panel.is-active>.zrc-card,.zrc-panel.is-active>.zrc-merit-layout,.zrc-panel.is-active>.zrc-chart-grid{animation-delay:.12s}
++.zrc-chart-grid>.zrc-chart-card{animation:zrc-rise .5s ease both}
++.zrc-chart-grid>.zrc-chart-card:nth-child(2){animation-delay:.08s}
++.zrc-chart-grid>.zrc-chart-card:nth-child(3){animation-delay:.14s}
++.zrc-chart-grid>.zrc-chart-card:nth-child(4){animation-delay:.2s}
++.zrc-chart-grid>.zrc-chart-card:nth-child(5){animation-delay:.26s}
++.zrc-chart-grid>.zrc-chart-card:nth-child(6){animation-delay:.32s}
++@media (prefers-reduced-motion: reduce){
++  .zrc *,.zrc *::before,.zrc *::after{animation:none!important;transition:none!important}
++  .zrc-line.main{stroke-dasharray:none;stroke-dashoffset:0}
++}
++
+ /* Responsive */
+ @media(max-width:980px){
+   .zrc-merit-layout{grid-template-columns:1fr}
+@@ -260,6 +332,8 @@
+   .zrc-kpis{grid-template-columns:repeat(2,1fr)}
+   .zrc-kpi .zrc-kpi-value{font-size:24px}
+   .zrc-chips{grid-template-columns:repeat(2,1fr)}
++  .zrc-doc-strip{flex-wrap:wrap}
++  .zrc-doc-strip .zrc-doc-ref{text-align:left}
+ }
+ 
+ /* Print */
+@@ -271,71 +345,143 @@
+   .zrc-card{box-shadow:none;break-inside:avoid}
+   .zrc-table-wrap,.zrc-matrix-wrap{max-height:none;overflow:visible}
+   .zrc-table thead th,.zrc-matrix thead th{position:static}
++  .zrc *,.zrc *::before,.zrc *::after{animation:none!important}
++  .zrc-line.main{stroke-dasharray:none;stroke-dashoffset:0}
+ }
+ 
+ /* ------------------------------------------------------------------
+-   Dashboard shell compatibility.
+-   zelimu-gold-command-centre.css loads after this file and forces a dark
+-   .nav-managed-section gradient, cream ink and navy table headers with
+-   !important, plus color:inherit on every div/span/td inside
+-   #zelimuWorkspaceDisplay. Re-assert the light result surfaces at id
+-   specificity so numerals and headings stay readable.
++   Dashboard shell compatibility + live glow field.
++   zelimu-gold-command-centre.css loads after this file and forces cream
++   ink / dark gradients at single-id specificity. Every rule below uses
++   two ids so the Results Centre keeps its own readable, glowing palette.
+    ------------------------------------------------------------------ */
+-#resultsCentre.zrc{
+-  background:#f7f8fa!important;
+-  color:#1c2430!important;
++#zelimuWorkspaceDisplay #resultsCentre.zrc{
++  background:
++    radial-gradient(1100px 480px at 88% -12%,rgba(240,196,101,.14),transparent 60%),
++    radial-gradient(900px 460px at -12% 34%,rgba(46,95,150,.28),transparent 62%),
++    linear-gradient(180deg,#0c1e37,#0a1a30 55%,#0b1c33)!important;
++  color:#eaf1fb!important;
+   border:0!important;
+   box-shadow:none!important;
+   padding:0!important;
++  scrollbar-color:#b8860b #0c1e37;
+ }
+-#resultsCentre .zrc-panel{color:#1c2430!important}
+-#resultsCentre h2,#resultsCentre h3,#resultsCentre h4{color:#0f2745!important}
+-#resultsCentre p{color:#1c2430}
+-#resultsCentre b,#resultsCentre strong{color:inherit}
+-#resultsCentre label{color:#66707d!important}
+-#resultsCentre .zrc-head h2{color:#fff!important}
+-#resultsCentre .zrc-head p{color:#c9d5e6!important}
+-#resultsCentre .zrc-head .zrc-eyebrow{color:#d7c08a!important}
+-#resultsCentre .zrc-head-actions .zrc-btn{color:#fff!important}
+-#resultsCentre .zrc-sub,#resultsCentre .zrc-muted,
+-#resultsCentre .zrc-card-head .zrc-sub,
+-#resultsCentre .zrc-kpi .zrc-kpi-label,
+-#resultsCentre .zrc-kpi .zrc-kpi-foot,
+-#resultsCentre .zrc-kpi .zrc-kpi-value small,
+-#resultsCentre .zrc-field>span,
+-#resultsCentre .zrc-legend{color:#66707d!important}
+-#resultsCentre .zrc-kpi .zrc-kpi-value{color:#0f2745!important}
+-#resultsCentre .zrc-context,
+-#resultsCentre .zrc-kpi,
+-#resultsCentre .zrc-card,
+-#resultsCentre .zrc-chart-card,
+-#resultsCentre .zrc-rail{background:#fff!important;border-color:#e3e7ee!important}
+-#resultsCentre .zrc-field select,
+-#resultsCentre .zrc-field input{background:#fff!important;color:#1c2430!important;border-color:#ccd4e0!important}
+-#resultsCentre .zrc-tabs{background:#fff!important;border-bottom-color:#e3e7ee!important}
+-#resultsCentre .zrc-tab{color:#66707d!important}
+-#resultsCentre .zrc-tab:hover,#resultsCentre .zrc-tab.is-active{color:#17365d!important}
+-#resultsCentre table{color:#1c2430!important}
+-#resultsCentre table th{
+-  background:#f4f6f9!important;color:#66707d!important;
++#zelimuWorkspaceDisplay #resultsCentre::-webkit-scrollbar{width:10px;height:10px}
++#zelimuWorkspaceDisplay #resultsCentre::-webkit-scrollbar-track{background:#0c1e37}
++#zelimuWorkspaceDisplay #resultsCentre::-webkit-scrollbar-thumb{background:linear-gradient(180deg,#d9b45b,#b8860b);border-radius:99px;border:2px solid #0c1e37}
++#zelimuWorkspaceDisplay #resultsCentre::-webkit-scrollbar-thumb:hover{background:#f0c465}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-panel{color:#eaf1fb!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-loading,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-empty{color:#9fb0c6!important}
++#zelimuWorkspaceDisplay #resultsCentre h2,
++#zelimuWorkspaceDisplay #resultsCentre h3,
++#zelimuWorkspaceDisplay #resultsCentre h4{color:#0f2745!important}
++#zelimuWorkspaceDisplay #resultsCentre p{color:#1c2430}
++#zelimuWorkspaceDisplay #resultsCentre b,
++#zelimuWorkspaceDisplay #resultsCentre strong{color:inherit}
++#zelimuWorkspaceDisplay #resultsCentre label{color:#66707d!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-head{box-shadow:0 6px 24px rgba(184,134,11,.28)}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-head h2{color:#fff!important;text-shadow:0 0 18px rgba(240,196,101,.35)}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-head p{color:#c9d5e6!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-head .zrc-eyebrow{color:#d7c08a!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-head-actions .zrc-btn{color:#fff!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-head-actions .zrc-btn.gold{color:#fff!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-sub,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-muted,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-card-head .zrc-sub,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-kpi .zrc-kpi-label,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-kpi .zrc-kpi-foot,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-kpi .zrc-kpi-value small,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-field>span,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-legend{color:#66707d!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-kpi .zrc-kpi-value{color:#0f2745!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-context,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-kpi,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-card,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-chart-card,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-rail,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-chip,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-doc-strip{background:#fff!important;border-color:#e3e7ee!important;color:#1c2430!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-doc-strip{border-bottom:3px double #b8860b!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-doc-strip .zrc-doc-school b{color:#0f2745!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-doc-strip .zrc-doc-school span{color:#b8860b!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-doc-strip .zrc-doc-ref span{color:#17365d!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-doc-strip .zrc-doc-ref em{color:#66707d!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-field select,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-field input{background:#fff!important;color:#1c2430!important;border-color:#ccd4e0!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-tabs{background:rgba(9,21,38,.72)!important;border-bottom:1px solid rgba(240,196,101,.28)!important;backdrop-filter:blur(6px)}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-tab{color:#b9c7dc!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-tab:hover{color:#eaf1fb!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-tab.is-active{color:#ffd98a!important;border-bottom-color:#f0c465!important;background:linear-gradient(180deg,transparent,rgba(184,134,11,.16))!important;text-shadow:0 0 12px rgba(240,196,101,.55)}
++#zelimuWorkspaceDisplay #resultsCentre table{color:#1c2430!important}
++#zelimuWorkspaceDisplay #resultsCentre table th{
++  background:linear-gradient(180deg,#1b3557,#132945)!important;color:#ecd6a4!important;
+   border-color:#e3e7ee!important;font-size:10px!important;
+   letter-spacing:.06em!important;padding:8px 10px!important;
+ }
+-#resultsCentre table td{
++#zelimuWorkspaceDisplay #resultsCentre table td{
+   color:#1c2430!important;background:transparent!important;
+   border-color:#eef1f5!important;padding:8px 10px!important;
+ }
+-#resultsCentre table tbody tr:hover td{background:#fafbfd!important}
+-#resultsCentre .zrc-table .name{color:#0f2745!important}
+-#resultsCentre .zrc-table .rank,#resultsCentre .zrc-table .avg{color:#17365d!important}
+-#resultsCentre .zrc-table .adm{color:#66707d!important}
+-#resultsCentre .zrc-table tr.top td{background:#fffdf5!important}
+-#resultsCentre .zrc-chip strong,
+-#resultsCentre .zrc-step b,
+-#resultsCentre .zrc-pending b{color:#0f2745!important}
+-#resultsCentre .zrc-chip span,
+-#resultsCentre .zrc-chip em,
+-#resultsCentre .zrc-step span{color:#66707d!important}
+-#resultsCentre .zrc-badge.current{color:#0f7a52!important}
+-#resultsCentre .zrc-badge.historical{color:#4a5568!important}
+-#resultsCentre .zrc-badge.upcoming,#resultsCentre .zrc-badge.term-current{color:#8a6408!important}
++#zelimuWorkspaceDisplay #resultsCentre table tbody tr:hover td{background:#fafbfd!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-matrix th.zrc-sticky,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-matrix td.zrc-sticky{background:#fff!important;color:#0f2745!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-matrix thead th.zrc-sticky{background:#132945!important;color:#ecd6a4!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-table .name{color:#0f2745!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-table .rank,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-table .avg{color:#17365d!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-table .adm{color:#66707d!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-table tr.top td{background:#fffdf5!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-table tr.top .rank{color:#b8860b!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-cell.g0{background:#e05c5c!important;color:#fff!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-cell.g1{background:#f0923b!important;color:#4d2506!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-cell.g2{background:#f6c445!important;color:#5c430a!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-cell.g3{background:#8bc34a!important;color:#1b3a0e!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-cell.g4{background:#43a047!important;color:#fff!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-cell.s0{background:#f4f6f9!important;color:#8a94a3!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-grade{background:#e8edf4!important;color:#17365d!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-grade.gA{background:#dff0e7!important;color:#0f6b47!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-grade.gB{background:#e6f0fa!important;color:#1b4f86!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-grade.gC{background:#fbf6e3!important;color:#8a6708!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-grade.gD{background:#fdf0e2!important;color:#a45a0b!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-grade.gE{background:#fdecec!important;color:#a51f1f!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-chip strong,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-step b,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-pending b{color:#0f2745!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-chip span,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-chip em,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-step span{color:#66707d!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-pending li{color:#354051!important;border-color:#e7ebf1!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-pending .pct{color:#a45a0b!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-step{background:#fcfdff!important;border-color:#e3e7ee!important;color:#1c2430!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-legend{background:#fbfcfd!important;border-color:#e3e7ee!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-legend-row{color:#4a5568!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-notice{background:#f6f8fb!important;border-color:#dbe1ea!important;color:#415065!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-notice.ok{background:#e6f4ee!important;border-color:#bfe3d3!important;color:#0d6242!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-notice.warn{background:#fdf5e8!important;border-color:#f0dcb6!important;color:#7c5508!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-notice.error{background:#fdeeee!important;border-color:#f3c9c6!important;color:#8e1f18!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-btn{background:#fff!important;color:#17365d!important;border-color:#ccd4e0!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-btn.primary{background:linear-gradient(180deg,#1d4570,#17365d)!important;color:#fff!important;border-color:#17365d!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-btn.gold{background:linear-gradient(180deg,#f0c465,#b8860b)!important;color:#fff!important;border-color:#b8860b!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-btn.ghost{background:transparent!important;color:#fff!important;border-color:rgba(255,255,255,.35)!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-seg{background:#eef1f6!important;border-color:#dbe1ea!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-seg button{color:#66707d!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-seg button.is-active{background:#17365d!important;color:#fff!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-badge.current{background:#e6f4ee!important;color:#0f7a52!important;border-color:#bfe3d3!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-badge.historical{background:#eef1f6!important;color:#4a5568!important;border-color:#dbe1ea!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-badge.upcoming,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-badge.term-current{background:#fbf3dd!important;color:#8a6408!important;border-color:#efdcae!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-delta.up{background:#e6f4ee!important;color:#0f7a52!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-delta.down{background:#fdecec!important;color:#a51f1f!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-delta.flat{background:#eef1f6!important;color:#5a6577!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-rail .zrc-check{color:#354051!important}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-table-wrap::-webkit-scrollbar,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-matrix-wrap::-webkit-scrollbar{width:10px;height:10px}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-table-wrap::-webkit-scrollbar-track,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-matrix-wrap::-webkit-scrollbar-track{background:#f0f2f6}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-table-wrap::-webkit-scrollbar-thumb,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-matrix-wrap::-webkit-scrollbar-thumb{background:#17365d;border-radius:99px;border:2px solid #f0f2f6}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-table-wrap::-webkit-scrollbar-thumb:hover,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-matrix-wrap::-webkit-scrollbar-thumb:hover{background:#b8860b}
++#zelimuWorkspaceDisplay #resultsCentre .zrc-table-wrap,
++#zelimuWorkspaceDisplay #resultsCentre .zrc-matrix-wrap{scrollbar-color:#17365d #f0f2f6}
+\ No newline at end of file
+diff --git a/public/dashboard.html b/public/dashboard.html
+index f326ec2..883a0db 100644
+--- a/public/dashboard.html
++++ b/public/dashboard.html
+@@ -370,7 +370,7 @@ body, main, .main-content, .dashboard-main {
+ }
+ </style>
+ <link rel="stylesheet" href="/css/zelimu-gold-command-centre.css?v=3">
+-<link rel="stylesheet" href="/css/results-centre.css?v=3">
++<link rel="stylesheet" href="/css/results-centre.css?v=4">
+ <script defer src="/js/zelimu-gold-theme.js?v=3"></script>
+ </head>
+ <body><main class="page">
+@@ -684,7 +684,7 @@ body, main, .main-content, .dashboard-main {
+ <div class="zrc" id="zrcRoot"><div class="zrc-loading">Open the Results Command Centre from the Academic menu.</div></div>
+ </section>
+ </main>
+-<script src="/js/results-centre.js?v=2"></script>
++<script src="/js/results-centre.js?v=3"></script>
+ <script>
+ (function(){'use strict';
+ const token=localStorage.getItem('token'),rawUser=localStorage.getItem('user');if(!token||!rawUser){location.href='/login.html';return;}let user;try{user=JSON.parse(rawUser)}catch{localStorage.clear();location.href='/login.html';return;}
+diff --git a/public/js/results-centre.js b/public/js/results-centre.js
+index 24d9d87..06eb5fb 100644
+--- a/public/js/results-centre.js
++++ b/public/js/results-centre.js
+@@ -19,6 +19,7 @@
+     cmd: null,
+     merit: null,
+     analytics: null,
++    identity: null,
+     busy: false,
+     cmdSel: { year: '', term: '', type: '', class: '' },
+     meritSel: { year: '', term: '', assessment: '', class: '', pass: 50, strict: false },
+@@ -172,7 +173,7 @@
+     root.innerHTML = [
+       '<div class="zrc-head">',
+       '  <div>',
+-      '    <div class="zrc-eyebrow">ACADEMIC OPERATIONS · ONE RESULTS PIPELINE</div>',
++      '    <div class="zrc-eyebrow"><span class="zrc-live-dot" aria-hidden="true"></span>ACADEMIC OPERATIONS · LIVE RESULTS PIPELINE</div>',
+       '    <h2>Results Command Centre</h2>',
+       '    <p>Capture marks, reproduce the exact merit list and read the same analytics — all from one date-aware context. Report cards, merit and publishing use one scoring path.</p>',
+       '  </div>',
+@@ -320,7 +321,7 @@
+           if (!cell) {
+             html.push('<td><span class="zrc-cell s0">—</span></td>');
+           } else {
+-            html.push('<td><span class="zrc-cell ' + cellClass(cell.percent) + '" title="' + cell.entered + ' of ' + cell.expected + ' learners scored">' + cell.percent + '%</span></td>');
++            html.push('<td><span class="zrc-cell ' + cellClass(cell.percent) + '" title="' + (cell.percent == null ? 'No subject configured' : cell.entered + ' of ' + cell.expected + ' learners scored') + '">' + (cell.percent == null ? '—' : cell.percent + '%') + '</span></td>');
+           }
+         });
+         html.push('</tr>');
+@@ -328,7 +329,7 @@
+       html.push('</tbody></table>');
+     }
+     html.push('</div>');
+-    html.push('<div class="zrc-legend"><span><i style="background:#fdecec"></i>Below 25%</span><span><i style="background:#fdf0e2"></i>25–49%</span><span><i style="background:#fbf6e3"></i>50–74%</span><span><i style="background:#eaf4e1"></i>75–94%</span><span><i style="background:#dff0e7"></i>95%+ ready</span><span><i style="background:#f4f6f9"></i>No subject</span></div>');
++    html.push('<div class="zrc-legend"><span><i style="background:#e05c5c"></i>Below 25%</span><span><i style="background:#f0923b"></i>25–49%</span><span><i style="background:#f6c445"></i>50–74%</span><span><i style="background:#8bc34a"></i>75–94%</span><span><i style="background:#43a047"></i>95%+ ready</span><span><i style="background:#f4f6f9"></i>No subject</span></div>');
+     html.push('</div>');
+ 
+     html.push('<div class="zrc-chart-grid">');
+@@ -415,6 +416,18 @@
+     return html.join('');
+   }
+ 
++  function docStrip(context) {
++    var id = state.identity || {};
++    var ctx = context || {};
++    return [
++      '<div class="zrc-doc-strip">',
++      id.logo_url ? '<img src="' + esc(id.logo_url) + '" alt="School logo">' : '',
++      '<div class="zrc-doc-school"><b>' + esc(id.name || 'ZELIMU CBC SCHOOL') + '</b><span>' + esc(id.motto || 'Official merit reproduction') + '</span></div>',
++      '<div class="zrc-doc-ref"><span>Official merit document</span><em>' + esc(ctx.year_label || '') + ' · ' + esc(ctx.term_name || '') + ' · ' + esc(ctx.assessment_label || 'Term score') + '</em></div>',
++      '</div>'
++    ].join('');
++  }
++
+   function renderMerit(data) {
+     state.merit = data;
+     var stats = data.stats || {};
+@@ -425,7 +438,7 @@
+       });
+     }
+     var view = Object.assign({}, data, { rows: rows });
+-    var html = [contextBar(state.meritSel)];
++    var html = [docStrip(data.context), contextBar(state.meritSel)];
+     if (!rows.length) {
+       html.push('<div class="zrc-notice warn">' + esc(data.diagnostics || 'No marks are available for this reproduction.') + '</div>');
+     }
+@@ -473,18 +486,27 @@
+ 
+   /* ---------- SVG chart primitives ---------- */
+ 
++  var chartUid = 0;
++  function uid(prefix) { chartUid += 1; return prefix + chartUid; }
++
++  function grad(id, from, to, horizontal) {
++    return '<defs><linearGradient id="' + id + '" x1="0" y1="0" x2="' + (horizontal ? '1' : '0') + '" y2="' + (horizontal ? '0' : '1') + '">' +
++      '<stop offset="0" stop-color="' + from + '"></stop><stop offset="1" stop-color="' + to + '"></stop></linearGradient></defs>';
++  }
++
+   function svg(width, height, body, label) {
+     return '<svg class="zrc-chart" viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="' + esc(label || 'chart') + '" preserveAspectRatio="xMidYMid meet">' + body + '</svg>';
+   }
+ 
+   function barChart(categories, series, label) {
+-    var W = 560, H = 260, left = 38, right = 12, top = 14, bottom = 56;
++    var W = 1120, H = 300, left = 46, right = 16, top = 26, bottom = 64;
+     var plotW = W - left - right, plotH = H - top - bottom;
+     var max = 100;
+     var groups = Math.max(categories.length, 1);
+     var groupW = plotW / groups;
+-    var barW = Math.min(26, (groupW * 0.62) / Math.max(series.length, 1));
+-    var body = [];
++    var barW = Math.min(56, (groupW * 0.62) / Math.max(series.length, 1));
++    var gid = uid('zrcBarGrad');
++    var body = [grad(gid, '#2e5f96', '#12294a', false)];
+     for (var g = 0; g <= 4; g++) {
+       var y = top + (plotH * g) / 4;
+       var value = Math.round(max - (max * g) / 4);
+@@ -499,16 +521,20 @@
+         if (value == null) return;
+         var height = Math.max(0, (Number(value) / max) * plotH);
+         var x = centre - totalBars / 2 + sIndex * barW;
+-        body.push('<rect class="zrc-bar' + (sIndex > 0 ? ' prev' : '') + '" x="' + x.toFixed(1) + '" y="' + (top + plotH - height).toFixed(1) + '" width="' + (barW - 3).toFixed(1) + '" height="' + height.toFixed(1) + '" rx="2"><title>' + esc(category + ': ' + num(value, 1)) + '</title></rect>');
++        var yTop = top + plotH - height;
++        body.push('<rect class="zrc-bar v' + (sIndex > 0 ? ' prev' : '') + '" style="animation-delay:' + (index * 70 + sIndex * 40) + 'ms" fill="' + (sIndex > 0 ? '#c9d3e2' : 'url(#' + gid + ')') + '" x="' + x.toFixed(1) + '" y="' + yTop.toFixed(1) + '" width="' + (barW - 3).toFixed(1) + '" height="' + height.toFixed(1) + '" rx="2"><title>' + esc(category + ': ' + num(value, 1)) + '</title></rect>');
++        if (sIndex === 0 && height > 0) {
++          body.push('<text class="zrc-bar-value" x="' + (x + (barW - 3) / 2).toFixed(1) + '" y="' + (yTop - 4).toFixed(1) + '">' + num(value, 1) + '</text>');
++        }
+       });
+       body.push('<text class="zrc-axis-label" x="' + centre.toFixed(1) + '" y="' + (top + plotH + 16) + '" text-anchor="middle">' + esc(String(category).slice(0, 14)) + '</text>');
+     });
+     body.push('<line class="zrc-axis" x1="' + left + '" y1="' + (top + plotH) + '" x2="' + (W - right) + '" y2="' + (top + plotH) + '"></line>');
+-    return svg(W, H, body.join(''), label);
++    return '<div class="zrc-chart-scroll">' + svg(W, H, body.join(''), label) + '</div>';
+   }
+ 
+   function lineChart(points, label, secondary) {
+-    var W = 560, H = 240, left = 38, right = 14, top = 16, bottom = 44;
++    var W = 430, H = 230, left = 34, right = 12, top = 16, bottom = 44;
+     var plotW = W - left - right, plotH = H - top - bottom;
+     if (!points.length) return '<div class="zrc-empty">No trend data yet.</div>';
+     var step = points.length > 1 ? plotW / (points.length - 1) : 0;
+@@ -527,13 +553,18 @@
+     }
+     function draw(values, extraClass, dots) {
+       var coords = xy(values);
+-      body.push('<path class="zrc-line ' + (extraClass || '') + '" d="' + coords.map(function (p, i) { return (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' ') + '"></path>');
++      body.push('<path class="zrc-line ' + (extraClass || '') + '"' + (extraClass === 'main' ? ' pathLength="1"' : '') + ' d="' + coords.map(function (p, i) { return (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' ') + '"></path>');
+       if (dots) coords.forEach(function (p, i) {
+         body.push('<circle class="zrc-dot" cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="3.2"><title>' + esc(points[i].label + ': ' + num(values[i], 1)) + '</title></circle>');
+       });
+     }
++    var mainVals = points.map(function (p) { return Number(p.mean) || 0; });
++    var up = xy(mainVals.map(function (v) { return Math.min(100, v + 5); }));
++    var lo = xy(mainVals.map(function (v) { return Math.max(0, v - 5); }));
++    body.push('<path class="zrc-band" d="' + up.map(function (p, i) { return (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' ') + ' ' +
++      lo.slice().reverse().map(function (p) { return 'L' + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' ') + ' Z"></path>');
+     if (secondary && secondary.length === points.length) draw(secondary, 'prev', false);
+-    draw(points.map(function (p) { return p.mean; }), '', true);
++    draw(mainVals, 'main', true);
+     points.forEach(function (p, index) {
+       var x = left + (points.length > 1 ? step * index : plotW / 2);
+       body.push('<text class="zrc-axis-label" x="' + x.toFixed(1) + '" y="' + (H - bottom + 18) + '" text-anchor="middle">' + esc(String(p.label).slice(0, 12)) + '</text>');
+@@ -559,32 +590,39 @@
+       var x2 = cx + r * Math.cos(end), y2 = cy + r * Math.sin(end);
+       var x3 = cx + inner * Math.cos(end), y3 = cy + inner * Math.sin(end);
+       var x4 = cx + inner * Math.cos(angle), y4 = cy + inner * Math.sin(angle);
+-      body.push('<path class="zrc-donut-seg" fill="' + DONUT_COLORS[index % DONUT_COLORS.length] + '" d="M' + x1.toFixed(1) + ' ' + y1.toFixed(1) +
++      body.push('<path class="zrc-donut-seg" style="animation-delay:' + (index * 90) + 'ms" fill="' + DONUT_COLORS[index % DONUT_COLORS.length] + '" d="M' + x1.toFixed(1) + ' ' + y1.toFixed(1) +
+         ' A' + r + ' ' + r + ' 0 ' + large + ' 1 ' + x2.toFixed(1) + ' ' + y2.toFixed(1) +
+         ' L' + x3.toFixed(1) + ' ' + y3.toFixed(1) +
+         ' A' + inner + ' ' + inner + ' 0 ' + large + ' 0 ' + x4.toFixed(1) + ' ' + y4.toFixed(1) + ' Z"><title>' + esc(item.label + ': ' + item.count) + '</title></path>');
++      var frac = Number(item.count) / total;
++      if (frac >= 0.05) {
++        var mid = angle + slice / 2, lr = (r + inner) / 2;
++        body.push('<text class="zrc-donut-pct" x="' + (cx + lr * Math.cos(mid)).toFixed(1) + '" y="' + (cy + lr * Math.sin(mid) + 3).toFixed(1) + '">' + Math.round(frac * 100) + '%</text>');
++      }
+       angle = end;
+     });
+     body.push('<text x="' + cx + '" y="' + (cy - 2) + '" text-anchor="middle" style="font:700 24px Georgia,serif;fill:#0f2745">' + total + '</text>');
+     body.push('<text x="' + cx + '" y="' + (cy + 16) + '" text-anchor="middle" style="font:600 10px Segoe UI,sans-serif;fill:#7b8695;letter-spacing:.08em">LEARNERS</text>');
+     var legend = items.map(function (item, index) {
+-      return '<span><i style="background:' + DONUT_COLORS[index % DONUT_COLORS.length] + '"></i>' + esc(item.label) + ' · <b>' + item.count + '</b></span>';
++      return '<span><i style="background:' + DONUT_COLORS[index % DONUT_COLORS.length] + '"></i>' + esc(item.label) + ' · <b>' + item.count + '</b> (' + Math.round((Number(item.count) / total) * 100) + '%)</span>';
+     }).join('');
+     return svg(W, H, body.join(''), label) + '<div class="zrc-legend-row">' + legend + '</div>';
+   }
+ 
+   function hbars(items, label) {
+     if (!items.length) return '<div class="zrc-empty">No subject data yet.</div>';
+-    var W = 560, rowH = 30, top = 6, left = 150, right = 44;
++    var W = 430, rowH = 26, top = 6, left = 118, right = 40;
+     var H = top + items.length * rowH + 6;
+     var plotW = W - left - right;
+-    var body = [];
++    var gidN = uid('zrcHbN'), gidG = uid('zrcHbG');
++    var body = [grad(gidN, '#2e5f96', '#17365d', true), grad(gidG, '#e3b74e', '#b8860b', true)];
+     items.forEach(function (item, index) {
+       var y = top + index * rowH;
+       var width = Math.max(2, (Math.max(0, Math.min(100, Number(item.mean) || 0)) / 100) * plotW);
+-      body.push('<text class="zrc-axis-label" x="' + (left - 8) + '" y="' + (y + 17) + '" text-anchor="end" style="fill:#354051;font-weight:600">' + esc(String(item.name).slice(0, 22)) + '</text>');
++      var gold = index % 2 === 1;
++      body.push('<text class="zrc-axis-label" x="' + (left - 8) + '" y="' + (y + 17) + '" text-anchor="end" style="fill:#354051;font-weight:600">' + esc(String(item.name).slice(0, 18)) + '</text>');
+       body.push('<rect x="' + left + '" y="' + (y + 6) + '" width="' + plotW + '" height="14" rx="4" fill="#eef1f6"></rect>');
+-      body.push('<rect class="zrc-bar' + (index % 2 ? ' gold' : '') + '" x="' + left + '" y="' + (y + 6) + '" width="' + width.toFixed(1) + '" height="14" rx="4"><title>' + esc(item.name + ': ' + num(item.mean, 1)) + '</title></rect>');
++      body.push('<rect class="zrc-bar h' + (gold ? ' gold' : '') + '" style="animation-delay:' + (index * 70) + 'ms" fill="url(#' + (gold ? gidG : gidN) + ')" x="' + left + '" y="' + (y + 6) + '" width="' + width.toFixed(1) + '" height="14" rx="4"><title>' + esc(item.name + ': ' + num(item.mean, 1)) + '</title></rect>');
+       body.push('<text class="zrc-axis-label" x="' + (W - right + 6) + '" y="' + (y + 17) + '" style="font-weight:700;fill:#0f2745">' + num(item.mean, 1) + '</text>');
+     });
+     return svg(W, H, body.join(''), label);
+@@ -602,7 +640,7 @@
+ 
+   function heatmap(rows, cols, values, label) {
+     if (!rows.length || !cols.length) return '<div class="zrc-empty">No subject mastery data yet.</div>';
+-    var W = 560, left = 118, top = 58, cellH = 26, cellW = Math.max(24, (W - left - 8) / cols.length);
++    var W = 1120, left = 150, top = 64, cellH = 34, cellW = Math.max(24, (W - left - 8) / cols.length);
+     var H = top + rows.length * cellH + 8;
+     var body = [];
+     cols.forEach(function (col, index) {
+@@ -618,7 +656,7 @@
+         if (value != null) body.push('<text x="' + (left + colIndex * cellW + cellW / 2) + '" y="' + (y + cellH / 2) + '">' + num(value, 0) + '</text>');
+       });
+     });
+-    return svg(W, H, body.join(''), label);
++    return '<div class="zrc-chart-scroll"><svg class="zrc-chart zrc-heat" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(label || 'chart') + '" preserveAspectRatio="xMidYMid meet">' + body.join('') + '</svg></div>';
+   }
+ 
+   function sparkline(values) {
+@@ -687,7 +725,7 @@
+ 
+     html.push('<div class="zrc-chart-card wide"><h3>Subject mastery by class</h3><div class="zrc-sub">Mean score per class and subject — darker red is support needed, green is secure.</div>' +
+       heatmap(data.heatmap.rows, data.heatmap.cols, data.heatmap.values, 'Subject mastery by class') +
+-      '<div class="zrc-legend-row"><span><i style="background:#a83a32"></i>Below 40</span><span><i style="background:#c98a1e"></i>40–59</span><span><i style="background:#b8860b"></i>60–69</span><span><i style="background:#3f8f63"></i>70–79</span><span><i style="background:#0f7a52"></i>80+</span></div></div>');
++      '<div class="zrc-heat-scale"><i></i><div class="zrc-heat-ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div></div></div>');
+ 
+     if (data.progression && data.progression.length) {
+       html.push('<div class="zrc-chart-card"><h3>Assessment-type progression</h3><div class="zrc-sub">How the cohort performed in each assessment form this term.</div>' +
+@@ -897,7 +935,11 @@
+     state.booted = true;
+     shell();
+     bind();
+-    bootPromise = loadOptions().then(function (options) {
++    bootPromise = Promise.all([
++      loadOptions(),
++      api('/api/settings/' + sid + '/identity').then(function (id) { state.identity = id || null; }).catch(function () { state.identity = null; })
++    ]).then(function (results) {
++      var options = results[0];
+       var yearId = String(options.current_year_id || (options.years[0] ? options.years[0].id : ''));
+       var termId = String(options.current_term_id || '');
+       if (!termId) {

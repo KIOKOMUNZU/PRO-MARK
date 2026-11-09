@@ -1,0 +1,71 @@
+diff --git a/public/dashboard.html b/public/dashboard.html
+index a32e590..180f755 100644
+--- a/public/dashboard.html
++++ b/public/dashboard.html
+@@ -684,7 +684,7 @@ body, main, .main-content, .dashboard-main {
+ <div class="zrc" id="zrcRoot"><div class="zrc-loading">Open the Results Command Centre from the Academic menu.</div></div>
+ </section>
+ </main>
+-<script src="/js/results-centre.js?v=1"></script>
++<script src="/js/results-centre.js?v=2"></script>
+ <script>
+ (function(){'use strict';
+ const token=localStorage.getItem('token'),rawUser=localStorage.getItem('user');if(!token||!rawUser){location.href='/login.html';return;}let user;try{user=JSON.parse(rawUser)}catch{localStorage.clear();location.href='/login.html';return;}
+@@ -853,6 +853,11 @@ function showSection(id){
+   // the legacy section controller reinterpret pm24_1..pm24_24 as teacherMarking.
+   if(/^pm24_\d+$/.test(String(id))) return;
+   const target=MANAGED_SECTIONS.includes(id)?id:'teacherMarking';
++  if(target==='analytics'||target==='merit'){
++    showSection('resultsCentre');
++    if(window.ZRC)window.ZRC.open(target==='merit'?'merit':'analytics');
++    return;
++  }
+   const selected=$(target);
+   if(target==='biometrics'){fillBiometricPeople();loadBiometrics();}
+   if(!selected || selected.classList.contains('role-hidden')) return;
+@@ -2232,6 +2237,8 @@ async function openPM24(n){
+    zelimuOpenPeopleMode(n===3?'teacher':'learner');
+    return;
+  }
++ if(n===10){showSection('resultsCentre');if(window.ZRC)window.ZRC.open('analytics');return;}
++ if(n===12){showSection('resultsCentre');if(window.ZRC)window.ZRC.open('merit');return;}
+ 
+  const m=PM24[n];if(!m)return;
+  const panel=$('pm24_workspace'),navCard=$('navTabs')?.closest('.pm-workflow-intro');
+diff --git a/public/js/results-centre.js b/public/js/results-centre.js
+index d89f38a..24d9d87 100644
+--- a/public/js/results-centre.js
++++ b/public/js/results-centre.js
+@@ -891,12 +891,13 @@
+     });
+   }
+ 
++  var bootPromise = null;
+   function boot() {
+-    if (state.booted) return Promise.resolve();
++    if (bootPromise) return bootPromise;
+     state.booted = true;
+     shell();
+     bind();
+-    return loadOptions().then(function (options) {
++    bootPromise = loadOptions().then(function (options) {
+       var yearId = String(options.current_year_id || (options.years[0] ? options.years[0].id : ''));
+       var termId = String(options.current_term_id || '');
+       if (!termId) {
+@@ -913,10 +914,16 @@
+     }).catch(function (error) {
+       panel('command').innerHTML = '<div class="zrc-notice error">' + esc(error.message) + '</div>';
+     });
++    return bootPromise;
+   }
+ 
+   window.ZRC = {
+     activate: function () { boot(); },
++    open: function (tab) {
++      return boot().then(function () {
++        if (tab === 'command' || tab === 'merit' || tab === 'analytics') switchTab(tab);
++      });
++    },
+     refresh: function () { return boot().then(function () { state.merit = null; state.analytics = null; return loadTab(state.tab); }); }
+   };
+ 

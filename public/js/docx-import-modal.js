@@ -339,6 +339,16 @@
     injectImportButtons();
   }
 
+  window.zelimuOpenDocxImport = function(classId) {
+    createModal();
+    syncClassOptions();
+    if (classId) {
+      const sel = document.getElementById('docxClass');
+      if (sel) sel.value = String(classId);
+    }
+    document.getElementById('docxImportModal')?.classList.add('open');
+  };
+
   window.addEventListener('load', () => {
     injectImportButtons();
     syncClassOptions();

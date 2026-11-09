@@ -1,0 +1,580 @@
+diff --git a/public/css/zelimu-gold-command-centre.css b/public/css/zelimu-gold-command-centre.css
+index afca856..3f8c007 100644
+--- a/public/css/zelimu-gold-command-centre.css
++++ b/public/css/zelimu-gold-command-centre.css
+@@ -1,3 +1,5 @@
++@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap');
++
+ /* ZELIMU CBC — GOLD COMMAND CENTRE
+    Dark navy glass, warm gold accents and a paper report-card showcase.
+    Loaded last; overrides the light dashboard theme without touching data flows. */
+@@ -1147,6 +1149,538 @@ body #zelimuWorkspaceDisplay .step-number{
+ }
+ body #zelimuWorkspaceDisplay .progress-track{height:8px}
+ 
++/* ---------- Typography and legibility ---------- */
++
++body main.page{
++  font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif!important;
++  font-size:15px;
++  line-height:1.6;
++  color:var(--zg-ink);
++}
++
++body .z7{font-size:12.5px}
++body .z7-heading h1{font-family:'Fraunces',Georgia,'Times New Roman',serif!important;font-weight:600!important}
++body .zelimu-command-v1 .zelimu-command-top h2{font-family:'Fraunces',Georgia,serif!important;font-weight:600!important}
++
++body main.page .nav-managed-section>.section-title h2,
++body main.page .card>.section-title h2{
++  font-family:'Fraunces',Georgia,serif!important;
++  font-weight:600!important;
++  font-size:26px!important;
++  line-height:1.25!important;
++  letter-spacing:-.01em!important;
++  color:#f8eed9!important;
++}
++
++body main.page .section-title h3{
++  font-family:'Plus Jakarta Sans','Inter',sans-serif!important;
++  font-size:16.5px!important;
++  font-weight:800!important;
++  letter-spacing:-.01em!important;
++  color:#f4ecdc!important;
++}
++
++body main.page .card h2,
++body main.page .card h3,
++body main.page .card h4,
++body main.page .nav-managed-section h2,
++body main.page .nav-managed-section h3,
++body main.page .nav-managed-section h4,
++body main.page .modal-card h2,
++body main.page .modal-card h3{color:#f4ecdc!important}
++
++body main.page p{color:#c3d0de}
++body main.page .muted{color:#a9b8c9!important}
++body main.page .small{font-size:12.5px}
++body main.page strong,
++body main.page b{color:#f7f1e5}
++
++body #zelimuWorkspaceDisplay,
++body .nav-managed-section,
++body .pm-dropdown-panel,
++body .modal-card{
++  font-size:14.5px;
++  line-height:1.6;
++}
++
++body main.page label{
++  color:#c8d5e3!important;
++  font-size:12.5px!important;
++  font-weight:700!important;
++  letter-spacing:.01em;
++}
++body main.page label input,
++body main.page label select,
++body main.page label textarea{font-weight:500!important}
++body main.page input,
++body main.page select,
++body main.page textarea{font-size:13.5px!important}
++body main.page input[type="checkbox"],
++body main.page input[type="radio"]{width:16px;height:16px;vertical-align:middle}
++body main.page input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(.82);cursor:pointer}
++body main.page ::selection{background:rgba(214,166,79,.35);color:#fff}
++
++body main.page .z7-table{font-size:11.5px}
++body main.page .z7-kpi-note{font-size:10.5px}
++body main.page .z7-nav button{font-size:12.5px}
++body main.page .z7-panel h2{font-size:15px!important}
++body main.page .z7-actionrow{font-size:12px}
++body main.page .z7-shortcut{font-size:11.5px}
++body main.page .z7-tabs button{font-size:11.5px}
++body main.page .z7-empty{font-size:12px}
++body main.page .z7-chart-context{font-size:11px}
++
++/* ---------- Global module surfaces ---------- */
++
++body main.page .card:not(.modal-card),
++body main.page .nav-managed-section,
++body main.page .nav-managed-section.nav-active{
++  background:linear-gradient(160deg,rgba(19,38,62,.88),rgba(9,21,37,.95))!important;
++  border:1px solid rgba(255,255,255,.075)!important;
++  color:var(--zg-ink)!important;
++  box-shadow:0 16px 40px rgba(0,0,0,.24)!important;
++}
++
++body main.page .card-subsection{
++  background:rgba(255,255,255,.028)!important;
++  border:1px solid rgba(255,255,255,.075)!important;
++  border-radius:14px!important;
++  color:#dbe5f0!important;
++}
++
++body main.page .section-title{
++  border-bottom:1px solid rgba(255,255,255,.07);
++  padding-bottom:12px;
++  margin-bottom:16px;
++}
++body main.page .section-title .pill{margin-left:auto}
++
++body main.page .item,
++body main.page .person-card,
++body main.page .class-card,
++body main.page .assignment-card,
++body main.page .class-list-tile,
++body main.page .teacher-step,
++body main.page .teacher-assignment-card,
++body main.page .teacher-entry-panel,
++body main.page .teacher-class-list-card,
++body main.page .mark-control-card,
++body main.page .analytics-card,
++body main.page .assessment-class-panel,
++body main.page .analytics-kpi,
++body main.page .analytics-panel,
++body main.page .resource-category,
++body main.page .resource-row,
++body main.page .promotion-panel,
++body main.page .school-control-card,
++body main.page .sf-payment-card{
++  background:linear-gradient(155deg,rgba(23,44,70,.8),rgba(11,24,42,.9))!important;
++  border:1px solid rgba(255,255,255,.08)!important;
++  color:#dbe5f0!important;
++  border-radius:13px!important;
++  box-shadow:0 10px 24px rgba(0,0,0,.16)!important;
++}
++
++body main.page .item:hover,
++body main.page .class-card:hover,
++body main.page .assignment-card:hover,
++body main.page .class-list-tile:hover,
++body main.page .teacher-assignment-card:hover,
++body main.page .resource-row:hover{
++  border-color:rgba(214,166,79,.36)!important;
++  box-shadow:0 14px 30px rgba(0,0,0,.24)!important;
++}
++
++body main.page .item b,
++body main.page .class-list-tile h3,
++body main.page .class-list-tile .class-count,
++body main.page .teacher-assignment-card h3,
++body main.page .analytics-kpi strong,
++body main.page .analytics-panel h3{color:#f4ecdc!important}
++
++body main.page .class-card .class-open{color:#e6edf5!important}
++body main.page .theme-swatches i{border:1px solid rgba(255,255,255,.25)}
++body main.page .stamp-preview{background:#fff;border-radius:8px}
++body main.page .deadline-open{color:#7fe3c2!important}
++body main.page .deadline-locked{color:#ffb3b3!important}
++
++/* Tables */
++
++body main.page .table-wrap,
++body main.page .merit-table-wrap{
++  background:rgba(8,18,32,.6)!important;
++  border:1px solid rgba(255,255,255,.08)!important;
++  border-radius:12px!important;
++  color:#dbe5f0;
++  box-shadow:inset 0 1px 0 rgba(255,255,255,.03);
++}
++body main.page table{font-size:13px;color:#dbe5f0}
++body main.page table th{
++  background:linear-gradient(180deg,#1b3557,#132945)!important;
++  color:#ecd6a4!important;
++  border-color:rgba(255,255,255,.09)!important;
++  font-size:11.5px!important;
++  letter-spacing:.05em;
++  text-transform:uppercase;
++  padding:11px 12px!important;
++  vertical-align:middle;
++}
++body main.page table td{
++  color:#d7e2ee!important;
++  border-color:rgba(255,255,255,.065)!important;
++  background:transparent!important;
++  padding:11px 12px!important;
++  vertical-align:middle;
++}
++body main.page table tbody tr:hover td{background:rgba(214,166,79,.05)!important}
++body main.page table.analytics-table th{
++  background:linear-gradient(180deg,#1b3557,#132945)!important;
++  color:#ecd6a4!important;
++  border-color:rgba(255,255,255,.09)!important;
++}
++body main.page table.analytics-table td{
++  border-color:rgba(255,255,255,.065)!important;
++  color:#d7e2ee!important;
++}
++body main.page .table-wrap>p,
++body main.page .table-wrap>div:not(.notice){color:#c3d0de}
++
++/* Inputs inside module widgets that hard-code white backgrounds */
++
++body main.page .za-v5-controls select,
++body main.page .za-v5-controls input,
++body main.page .owner-school-switch{
++  background:#0d1e33!important;
++  border:1px solid rgba(255,255,255,.14)!important;
++  color:#eef3f9!important;
++}
++
++/* Buttons and links */
++
++body main.page .btn{
++  background:linear-gradient(135deg,#e8bf74 0%,#d6a64f 52%,#bd8d39 100%)!important;
++  color:#0a1524!important;
++  border:1px solid rgba(255,255,255,.24)!important;
++  border-radius:10px!important;
++  font-weight:800!important;
++  min-height:40px;
++  box-shadow:0 8px 20px rgba(214,166,79,.2),inset 0 1px 0 rgba(255,255,255,.4)!important;
++}
++body main.page .btn:hover{transform:translateY(-1px);box-shadow:0 12px 26px rgba(214,166,79,.3)!important}
++body main.page .btn.secondary{
++  background:rgba(255,255,255,.055)!important;
++  border:1px solid rgba(214,166,79,.32)!important;
++  color:#f0dfba!important;
++  box-shadow:inset 0 1px 0 rgba(255,255,255,.05)!important;
++}
++body main.page .btn.secondary:hover{background:rgba(214,166,79,.13)!important;border-color:rgba(214,166,79,.5)!important}
++body main.page .btn.danger{
++  background:linear-gradient(135deg,#d05a5a,#9e2f2f)!important;
++  border-color:rgba(255,160,160,.3)!important;
++  color:#fff!important;
++}
++body main.page .btn.mini{
++  min-height:32px;
++  padding:6px 11px!important;
++  font-size:11.5px!important;
++  border-radius:8px!important;
++}
++body main.page .zelimu-owner-link{
++  background:linear-gradient(135deg,rgba(214,166,79,.2),rgba(55,200,182,.12))!important;
++  border:1px solid rgba(214,166,79,.45)!important;
++  color:#f6e7c8!important;
++  border-radius:11px!important;
++  padding:12px 14px!important;
++  font-weight:800!important;
++  text-decoration:none!important;
++}
++
++/* ---------- Module hub ---------- */
++
++body main.page .pm-workflow-intro{color:#dbe5f0}
++body main.page .pm-module-group{
++  background:linear-gradient(160deg,rgba(20,40,65,.85),rgba(10,23,40,.92))!important;
++  border:1px solid rgba(255,255,255,.075)!important;
++  box-shadow:0 10px 26px rgba(0,0,0,.2)!important;
++}
++body main.page .pm-module-group::before{
++  background:linear-gradient(90deg,var(--zg-gold-2),var(--zg-teal))!important;
++}
++body main.page .pm-module-group h3{
++  color:#e8bf74!important;
++  font-size:11px!important;
++  letter-spacing:.12em!important;
++  font-weight:800!important;
++}
++body main.page .pm-admin-menu button,
++body main.page #navTabs .pm-admin-menu button{
++  background:rgba(255,255,255,.04)!important;
++  border:1px solid rgba(255,255,255,.09)!important;
++  color:#e6edf5!important;
++  border-radius:10px!important;
++  box-shadow:none!important;
++  font-weight:700!important;
++}
++body main.page .pm-admin-menu button:hover,
++body main.page .pm-admin-menu button.active,
++body main.page #navTabs .pm-admin-menu button:hover,
++body main.page #navTabs .pm-admin-menu button.active{
++  background:linear-gradient(135deg,rgba(214,166,79,.22),rgba(55,200,182,.12))!important;
++  border-color:rgba(214,166,79,.55)!important;
++  color:#fff8ea!important;
++  box-shadow:0 8px 18px rgba(0,0,0,.24)!important;
++  transform:translateY(-1px);
++}
++body main.page .pm-module-group .pm-icon,
++body main.page .pm-admin-menu .pm-icon{
++  background:rgba(214,166,79,.14)!important;
++  color:#f0cf8f!important;
++  border-radius:8px;
++}
++body main.page #navTabs .pm-module-group{
++  background:rgba(255,255,255,.025)!important;
++  border:1px solid rgba(255,255,255,.06)!important;
++  box-shadow:none!important;
++}
++body main.page .pm-module-group .notice.small{
++  background:rgba(255,255,255,.03)!important;
++  border:1px dashed rgba(214,166,79,.28)!important;
++  color:#b9c8d8!important;
++}
++
++/* ---------- Analytics workspace (za) ---------- */
++
++body main.page #analytics .analytics-toolbar{
++  background:linear-gradient(160deg,rgba(20,40,65,.85),rgba(10,23,40,.92))!important;
++  border:1px solid rgba(255,255,255,.08)!important;
++  border-radius:14px!important;
++}
++body main.page #analytics .za-context-heading span{color:#a9b8c9!important}
++
++body main.page #analytics #zaWorkspace{
++  background:linear-gradient(160deg,rgba(17,35,58,.9),rgba(8,18,32,.96))!important;
++  border:1px solid rgba(255,255,255,.08)!important;
++  box-shadow:0 16px 40px rgba(0,0,0,.28)!important;
++}
++body main.page #analytics #zaWorkspace .za-header{
++  background:linear-gradient(110deg,#123850 0%,#0f4a43 58%,#473916 100%)!important;
++  color:#fdf6e7!important;
++  border-bottom:1px solid rgba(214,166,79,.3)!important;
++}
++body main.page #analytics #zaWorkspace .za-header h3,
++body main.page #analytics #zaWorkspace .za-header p{color:#fdf6e7!important}
++body main.page #analytics #zaWorkspace .za-header>.pill{
++  background:rgba(255,255,255,.1)!important;
++  border:1px solid rgba(232,191,116,.5)!important;
++  color:#f7e8c8!important;
++}
++body main.page #analytics .za-groups .za-group{
++  background:linear-gradient(155deg,rgba(23,44,70,.82),rgba(11,24,42,.9))!important;
++  border:1px solid rgba(255,255,255,.08)!important;
++  border-top:3px solid var(--zg-gold-2)!important;
++  box-shadow:0 8px 22px rgba(0,0,0,.18)!important;
++}
++body main.page #analytics .za-groups .za-group h4{color:#f4ecdc!important}
++body main.page #analytics .za-group-number{
++  background:rgba(214,166,79,.16)!important;
++  color:#f0cf8f!important;
++}
++body main.page #analytics .za-groups .za-tile{
++  background:linear-gradient(135deg,rgba(255,255,255,.045),rgba(255,255,255,.015))!important;
++  border:1px solid rgba(255,255,255,.09)!important;
++  border-left:3px solid rgba(214,166,79,.6)!important;
++  box-shadow:none!important;
++}
++body main.page #analytics .za-groups .za-tile:hover,
++body main.page #analytics .za-groups .za-tile:focus-visible{
++  border-color:rgba(214,166,79,.55)!important;
++  box-shadow:0 10px 22px rgba(0,0,0,.26)!important;
++}
++body main.page #analytics .za-groups .za-tile strong{color:#f6edda!important}
++body main.page #analytics .za-groups .za-tile small{color:#a9b8c9!important}
++body main.page #analytics .za-groups .za-tile[aria-selected="true"]{
++  background:linear-gradient(135deg,rgba(214,166,79,.2),rgba(55,200,182,.1))!important;
++  border:1px solid rgba(232,191,116,.7)!important;
++  border-left:4px solid var(--zg-gold)!important;
++  box-shadow:0 8px 20px rgba(214,166,79,.16)!important;
++}
++body main.page #analytics #zaWorkspaceDetail{
++  background:linear-gradient(160deg,rgba(19,38,62,.9),rgba(9,21,37,.96))!important;
++  border:1px solid rgba(255,255,255,.08)!important;
++  box-shadow:0 10px 26px rgba(0,0,0,.22)!important;
++}
++body main.page #analytics .za-subject-teacher-note{
++  background:rgba(55,200,182,.08)!important;
++  border-left:3px solid var(--zg-teal)!important;
++  color:#cfe9e4!important;
++}
++
++/* za v5 analysis tables and charts */
++
++body main.page .za-v5-btn{
++  background:linear-gradient(135deg,#e8bf74,#b8862f)!important;
++  color:#0a1524!important;
++  border:1px solid rgba(255,255,255,.22)!important;
++  border-radius:9px!important;
++  font-weight:800!important;
++}
++body main.page .za-v5-btn.secondary{
++  background:rgba(255,255,255,.05)!important;
++  color:#f0dfba!important;
++  border:1px solid rgba(214,166,79,.35)!important;
++}
++body main.page .za-v5-kpi{
++  background:linear-gradient(155deg,rgba(23,44,70,.82),rgba(11,24,42,.9))!important;
++  border:1px solid rgba(255,255,255,.08)!important;
++  border-top:2px solid rgba(214,166,79,.55)!important;
++  border-radius:11px!important;
++}
++body main.page .za-v5-kpi small{color:#a9b8c9!important;font-size:11.5px!important}
++body main.page .za-v5-kpi strong{
++  color:#f0cf8f!important;
++  font-family:'Plus Jakarta Sans','Inter',sans-serif!important;
++}
++body main.page .za-v5-table th{
++  background:linear-gradient(180deg,#1b3557,#132945)!important;
++  color:#ecd6a4!important;
++  border-color:rgba(255,255,255,.09)!important;
++  position:sticky;
++  top:0;
++}
++body main.page .za-v5-table td{
++  color:#d7e2ee!important;
++  border-color:rgba(255,255,255,.065)!important;
++}
++body main.page .za-v5-panel{
++  background:rgba(255,255,255,.02)!important;
++  border:1px solid rgba(255,255,255,.08)!important;
++  border-radius:12px!important;
++}
++body main.page .za-v5-panel h4{color:#f4ecdc!important}
++body main.page .za-v5-bar div{background:rgba(255,255,255,.07)!important}
++body main.page .za-v5-bar i{background:linear-gradient(90deg,var(--zg-gold),var(--zg-teal))!important}
++body main.page .za-chart text{fill:#a9b8c9!important}
++body main.page .za-chart .za-chart-grid{stroke:rgba(255,255,255,.09)!important}
++body main.page .za-chart .za-chart-axis{stroke:rgba(255,255,255,.22)!important}
++body main.page .za-chart .za-chart-bar{fill:var(--zg-teal)!important}
++body main.page .za-chart .za-chart-target{stroke:var(--zg-gold)!important}
++body main.page .za-chart .za-chart-point{stroke:#0b1a2e!important}
++body main.page .za-chart-note{color:#a9b8c9!important}
++body main.page .za-chart-legend span{color:#c9d6e4!important}
++
++/* Analytics panels */
++
++body main.page .analytics-kpi{
++  border:1px solid rgba(255,255,255,.08)!important;
++  border-top:2px solid rgba(214,166,79,.55)!important;
++  background:linear-gradient(155deg,rgba(23,44,70,.82),rgba(11,24,42,.9))!important;
++}
++body main.page .analytics-kpi span{color:#b9c8d8!important}
++body main.page .analytics-kpi strong{color:#f0cf8f!important}
++body main.page .analytics-kpi small{color:#a9b8c9!important}
++body main.page .analytics-panel{
++  border:1px solid rgba(255,255,255,.08)!important;
++  background:linear-gradient(155deg,rgba(19,38,62,.85),rgba(9,21,37,.94))!important;
++}
++body main.page .analytics-panel h3{color:#f4ecdc!important}
++body main.page .analytics-bar{
++  background:rgba(255,255,255,.08)!important;
++  border-color:rgba(255,255,255,.12)!important;
++}
++body main.page .analytics-bar i{background:linear-gradient(90deg,#e8bf74,#37c8b6)!important}
++body main.page .analytics-bar-row{color:#c9d6e4}
++body main.page .assessment-chip{
++  background:linear-gradient(90deg,rgba(214,166,79,.07),rgba(255,255,255,.02))!important;
++  border-color:rgba(255,255,255,.1)!important;
++  color:#dbe5f0!important;
++}
++body main.page .deviation-row{border-color:rgba(255,255,255,.08)!important;color:#dbe5f0!important}
++body main.page .deviation-row b.positive{color:#7fe3c2!important}
++body main.page .deviation-row b.negative{color:#ff9d9d!important}
++body main.page .deviation-row small{color:#a9b8c9!important}
++body main.page .teacher-assignment-list>div{border-color:rgba(255,255,255,.08)!important;color:#dbe5f0}
++body main.page .teacher-assignment-list b{color:#e8bf74!important}
++body main.page .analytics-live-pill{
++  background:rgba(55,200,182,.14)!important;
++  border:1px solid rgba(55,200,182,.4)!important;
++  color:#9ff0e4!important;
++}
++body main.page .report-doc-frame{border-color:rgba(214,166,79,.4)!important}
++
++/* Module-specific blocks */
++
++body main.page .lc-chooser{
++  background:linear-gradient(155deg,rgba(23,44,70,.7),rgba(11,24,42,.86))!important;
++  border:1px solid rgba(255,255,255,.08)!important;
++  border-radius:14px!important;
++}
++body main.page .lc-chooser small{color:#a9b8c9!important}
++body main.page .assessment-context{
++  background:rgba(255,255,255,.035)!important;
++  border:1px solid rgba(255,255,255,.09)!important;
++  color:#dbe5f0!important;
++}
++body main.page .preview,
++body main.page .assessment-manual{
++  background:rgba(255,255,255,.03)!important;
++  border:1px dashed rgba(214,166,79,.28)!important;
++  color:#b9c8d8!important;
++  border-radius:12px!important;
++}
++body main.page .stat{color:#dbe5f0!important}
++body main.page .stat b{color:#f0cf8f!important}
++body main.page .teacher-step label{color:#e6edf5!important}
++body main.page .progress-track{background:rgba(255,255,255,.08)!important}
++
++/* KPI grids stay readable everywhere */
++
++body main.page .analytics-kpis,
++body main.page .za-v5-kpis{
++  display:grid!important;
++  grid-template-columns:repeat(auto-fit,minmax(170px,1fr))!important;
++  gap:12px!important;
++}
++body main.page .analytics-kpi,
++body main.page .za-v5-kpi{min-width:0!important}
++
++/* Printed documents must stay light even before the section is mounted */
++
++body main.page .report-preview-shell{
++  background:#eef2f5!important;
++  border:1px solid rgba(214,166,79,.28)!important;
++  border-radius:14px!important;
++  box-shadow:0 18px 40px rgba(0,0,0,.34)!important;
++}
++body main.page .report-preview-head{
++  background:#fff!important;
++  border-bottom:1px solid #dbe3ea!important;
++}
++body main.page .report-preview-head,
++body main.page .report-preview-head *{color:#17365D!important}
++body main.page .report-preview-shell iframe{background:#fff!important}
++body main.page .report-doc-frame{border:2px solid rgba(214,166,79,.4)!important;border-radius:10px!important}
++
++body main.page .merit-sheet-wrap{
++  background:#fff!important;
++  border:1px solid rgba(214,166,79,.3)!important;
++  border-radius:12px!important;
++  padding:4px;
++}
++body main.page .merit-sheet,
++body main.page .merit-sheet th,
++body main.page .merit-sheet td{color:#111!important}
++body main.page .merit-sheet th,
++body main.page .merit-sheet thead th{
++  background:linear-gradient(180deg,#17365D,#122b4d)!important;
++  color:#fff!important;
++  border:1px solid #111!important;
++}
++body main.page .merit-sheet td{background:#fff!important;border:1px solid #111!important}
++body main.page .merit-sheet tbody tr:nth-child(even) td{background:#f8fafc!important}
++body main.page .merit-sheet tbody tr:first-child td{background:#fff8e6!important}
++body main.page .merit-sheet .grade-cell{background:#eef4fb!important;color:#111!important}
++body main.page .merit-sheet .merit-subject-table td:nth-child(4){color:#111!important}
++
+ /* Scroll and motion */
+ 
+ @media (prefers-reduced-motion:reduce){
+@@ -1242,6 +1776,19 @@ body #zelimuWorkspaceDisplay .progress-track{height:8px}
+ @media (max-width:1100px) and (min-width:751px){
+   body .z7-heading{flex-direction:column;align-items:flex-start;gap:14px}
+   body .z7-heading-right{width:100%;justify-content:flex-start}
++  body main.page table{font-size:12px}
++  body main.page table th,
++  body main.page table td{padding:9px 10px!important}
++  body main.page .nav-managed-section>.section-title h2,
++  body main.page .card>.section-title h2{font-size:22px!important}
++}
++
++@media (max-width:750px){
++  body main.page table{font-size:11.5px}
++  body main.page table th,
++  body main.page table td{padding:8px 9px!important}
++  body main.page .nav-managed-section>.section-title h2,
++  body main.page .card>.section-title h2{font-size:20px!important}
+ }
+ 
+ @media (max-width:1200px){
+@@ -1299,4 +1846,10 @@ body #zelimuWorkspaceDisplay .progress-track{height:8px}
+     text-shadow:none!important;
+     border-color:#999!important;
+   }
++  body main.page table th,
++  body main.page table td{
++    background:#fff!important;
++    color:#000!important;
++    border-color:#999!important;
++  }
+ }

@@ -1,0 +1,341 @@
+diff --git a/backend/routes/communications.js b/backend/routes/communications.js
+index 57fced5..f4d482c 100644
+--- a/backend/routes/communications.js
++++ b/backend/routes/communications.js
+@@ -67,6 +67,36 @@ function smsDeliveryConfiguration(){
+  if(process.env.SMS_WEBHOOK_URL)return {configured:true,provider:'WEBHOOK'};
+  return {configured:false,provider:null};
+ }
++async function ensureAssessmentPublishSchema(){
++ const result=await db.query(`
++  SELECT
++   EXISTS(SELECT 1 FROM information_schema.columns
++    WHERE table_schema=ANY(current_schemas(false)) AND table_name='result_publications' AND column_name='assessment_id') publications_column,
++   EXISTS(SELECT 1 FROM information_schema.columns
++    WHERE table_schema=ANY(current_schemas(false)) AND table_name='result_publication_records' AND column_name='assessment_id') records_column
++ `);
++ if(!result.rows[0]?.publications_column||!result.rows[0]?.records_column)
++  throw Object.assign(new Error('Apply database migration 036_publish_per_assessment.sql before publishing per assessment.'),{status:503});
++}
++async function assessmentResultSnapshot(sid,learnerId,yearId,termId,assessmentId){
++ const meta=(await db.query(`
++  SELECT a.id assessment_id,a.name assessment_name,
++    CONCAT_WS(' ',l.first_name,l.middle_name,l.last_name) learner_name,l.admission_no,sc.name school_name
++  FROM assessments a JOIN learners l ON l.id=$2 AND l.school_id=$1 JOIN schools sc ON sc.id=$1
++  WHERE a.id=$5 AND a.school_id=$1 AND a.academic_year_id=$3 AND a.term_id=$4
++ `,[sid,learnerId,yearId,termId,assessmentId])).rows[0];
++ if(!meta)return null;
++ const marks=(await db.query(`
++  SELECT s.id subject_id,s.name subject_name,m.mark,a.max_mark
++  FROM marks m JOIN subjects s ON s.id=m.subject_id JOIN assessments a ON a.id=m.assessment_id
++  WHERE m.school_id=$1 AND m.learner_id=$2 AND m.academic_year_id=$3 AND m.term_id=$4 AND m.assessment_id=$5 AND m.mark IS NOT NULL
++  ORDER BY s.name
++ `,[sid,learnerId,yearId,termId,assessmentId])).rows;
++ if(!marks.length)return null;
++ const subjects=marks.map(x=>({subject_id:x.subject_id,subject_name:x.subject_name,mark:Number(x.mark),max_mark:Number(x.max_mark||100),percent:Number(x.max_mark)>0?Number((Number(x.mark)/Number(x.max_mark)*100).toFixed(2)):null}));
++ const scored=subjects.filter(x=>x.percent!==null);
++ return {assessment_id:meta.assessment_id,assessment_name:meta.assessment_name,school_name:meta.school_name,learner_name:meta.learner_name,admission_no:meta.admission_no,term_id:termId,subjects,overall_average:scored.length?Number((scored.reduce((sum,x)=>sum+x.percent,0)/scored.length).toFixed(2)):null,overall_grade:null};
++}
+ async function deliverSms({phone,message,school_id,learner_id}){
+   const provider=String(process.env.SMS_PROVIDER||'').toUpperCase();
+   if(provider==='TOPMEDIA'){
+@@ -583,7 +613,12 @@ router.post('/:schoolId/result-publications/:publicationId/notifications',school
+    `,[sid,record.learner_id])).rows;
+    if(!guardians.length){skipped++;continue;}
+    const report=record.result_snapshot||{},learnerName=report.learner_name||'Learner';
+-   const message=String(req.body?.message_template||`${report.school_name||'School'}: ${learnerName} ${report.term_name||'term'} results. Average ${report.overall_average==null?'—':Number(report.overall_average).toFixed(2)}, grade ${report.overall_grade||'—'}. Log in to view the full report.`)
++   const assessmentName=report.assessment_name?String(report.assessment_name):'';
++   const marksSummary=assessmentName&&Array.isArray(report.subjects)?report.subjects.map(x=>`${x.subject_name}:${x.percent==null?'—':Number(x.percent).toFixed(1)+'%'}`).join(', '):'';
++   const defaultMessage=assessmentName
++    ?`${report.school_name||'School'}: ${learnerName} ${assessmentName} results. ${marksSummary?('Marks: '+marksSummary+'. '):''}Average ${report.overall_average==null?'—':Number(report.overall_average).toFixed(2)}%.`
++    :`${report.school_name||'School'}: ${learnerName} ${report.term_name||'term'} results. Average ${report.overall_average==null?'—':Number(report.overall_average).toFixed(2)}, grade ${report.overall_grade||'—'}. Log in to view the full report.`;
++   const message=String(req.body?.message_template||defaultMessage)
+     .replaceAll('{learner}',learnerName)
+     .replaceAll('{average}',report.overall_average==null?'—':Number(report.overall_average).toFixed(2))
+     .replaceAll('{grade}',report.overall_grade||'—');
+@@ -620,14 +655,15 @@ router.post('/:schoolId/result-publications/:publicationId/notifications',school
+     if(['SENT','SENDING','QUEUED'].includes(existing?.status)||(retryFailedOnly&&existing?.status!=='FAILED')){skipped++;continue;}
+     let messageId=existing?.id;
+     if(!existing){
++     const pubAssessmentId=publication.assessment_id||null;
+      const inserted=await db.query(`
+       INSERT INTO communication_messages(
+        school_id,learner_id,parent_guardian_id,channel,message_type,body,status,provider,
+-       created_by,academic_year_id,term_id,result_publication_id,result_publication_record_id
+-      ) VALUES($1,$2,$3,'SMS','PUBLISHED_RESULTS',$4,'SENDING',$5,$6,$7,$8,$9,$10)
++       created_by,academic_year_id,term_id,result_publication_id,result_publication_record_id${pubAssessmentId?',assessment_id':''}
++      ) VALUES($1,$2,$3,'SMS','PUBLISHED_RESULTS',$4,'SENDING',$5,$6,$7,$8,$9,$10${pubAssessmentId?',$11':''})
+       ON CONFLICT DO NOTHING RETURNING id
+      `,[sid,record.learner_id,guardian.id,message,process.env.SMS_PROVIDER||'UNCONFIGURED',
+-       req.user.user_id,publication.academic_year_id,publication.term_id,publication.id,record.id]);
++       req.user.user_id,publication.academic_year_id,publication.term_id,publication.id,record.id,...(pubAssessmentId?[pubAssessmentId]:[])]);
+      messageId=inserted.rows[0]?.id;
+      if(!messageId){skipped++;continue;}
+     }else{
+@@ -668,9 +704,33 @@ router.post('/:schoolId/result-publications/:publicationId/notifications',school
+ router.post('/:schoolId/publish-grade-results',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{try{const sid=req.params.schoolId,b=req.body||{};if(!b.academic_year_id||!b.term_id||!b.level_id)return res.status(400).json({error:'Academic year, term and grade are required'});const learners=(await db.query(`SELECT DISTINCT l.id,l.first_name,l.middle_name,l.last_name FROM learner_enrollments e JOIN learners l ON l.id=e.learner_id JOIN classes c ON c.id=e.class_id WHERE e.school_id=$1 AND e.academic_year_id=$2 AND c.school_level_id=$3 AND COALESCE(e.status,'ACTIVE')='ACTIVE'`,[sid,b.academic_year_id,b.level_id])).rows;let queued=0,skipped=0,failed=0;for(const l of learners){const report=await buildTermReport(sid,l.id,b.academic_year_id,b.term_id);if(!report){skipped++;continue}const guardians=(await db.query(`SELECT pg.id,pg.phone FROM parent_guardians pg JOIN learner_guardians lg ON lg.parent_guardian_id=pg.id WHERE pg.school_id=$1 AND lg.learner_id=$2 AND pg.is_active AND pg.sms_enabled AND pg.communication_consent AND COALESCE(trim(pg.phone),'')<>''`,[sid,l.id])).rows;if(!guardians.length){skipped++;continue}const subjectSummary=(report.subjects||[]).map(x=>`${x.subject_code||x.subject_name}:${x.average==null?'—':Number(x.average).toFixed(1)}${x.grade?'/'+x.grade:''}`).join(', ');const body=String(b.message_template||`${report.school_name}: ${report.learner_name} ${report.term_name||'term'} results. Average ${report.overall_average==null?'—':Number(report.overall_average).toFixed(2)}, grade ${report.overall_grade||'—'}. Marks: ${subjectSummary||'See portal for full report.'}`).replaceAll('{learner}',report.learner_name).replaceAll('{average}',report.overall_average==null?'—':Number(report.overall_average).toFixed(2)).replaceAll('{grade}',report.overall_grade||'—').replaceAll('{marks}',subjectSummary);for(const g of guardians){let status='QUEUED',provider=process.env.SMS_PROVIDER||'UNCONFIGURED',reason=null;try{const d=await deliverSms({phone:g.phone,message:body,school_id:sid,learner_id:l.id});status=d.status;provider=d.provider;}catch(e){reason=e.message;status='FAILED';failed++;}await db.query(`INSERT INTO communication_messages(school_id,learner_id,parent_guardian_id,channel,message_type,body,status,provider,failure_reason,created_by,sent_at) VALUES($1,$2,$3,'SMS','PUBLISHED_RESULTS',$4,$5,$6,$7,$8,CASE WHEN $5='SENT' THEN now() ELSE NULL END)`,[sid,l.id,g.id,body,status,provider,reason,req.user.user_id]);if(status==='SENT'||status==='QUEUED')queued++;}}res.status(201).json({learners:learners.length,queued,skipped,failed,message:(String(process.env.SMS_PROVIDER||'').toUpperCase()==='TOPMEDIA'&&process.env.SMS_TOPMEDIA_API_KEY)?'Results sent through TopMediaSMS.':(String(process.env.SMS_PROVIDER||'').toUpperCase()==='AFRICASTALKING'&&process.env.SMS_AFRICA_TALKING_API_KEY)?"Results sent through Africa's Talking SMS.":(process.env.SMS_WEBHOOK_URL?'Results sent through the configured SMS webhook.':'Results queued safely; configure an SMS provider for live delivery.')});}catch(e){res.status(400).json({error:e.message})}});
+ router.get('/:schoolId/publication-class-overview',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{
+  try{
+-  const sid=req.params.schoolId,yearId=String(req.query.academic_year_id||''),termId=String(req.query.term_id||'');
++  const sid=req.params.schoolId,yearId=String(req.query.academic_year_id||''),termId=String(req.query.term_id||''),assessmentId=String(req.query.assessment_id||'');
+   await ensureResultsCentreSchema();
+   await validatePublicationScope(sid,yearId,termId,[],[]);
++  if(assessmentId){
++   await ensureAssessmentPublishSchema();
++   const assessment=(await db.query('SELECT id FROM assessments WHERE id=$1 AND school_id=$2 AND academic_year_id=$3 AND term_id=$4',[assessmentId,sid,yearId,termId])).rows[0];
++   if(!assessment)return res.status(404).json({error:'The selected assessment was not found for this year and term.'});
++   const q=await db.query(`
++    SELECT c.id class_id,c.name class_name,c.stream,lv.name level_name,
++     COUNT(DISTINCT l.id)::int learners,
++     COUNT(DISTINCT m.learner_id)::int learners_with_results,
++     1::int assessments_used,
++     COUNT(DISTINCT pgr.learner_id)::int results_published,
++     COUNT(DISTINCT pg.id)::int eligible_parents
++    FROM classes c
++    LEFT JOIN school_levels lv ON lv.id=c.school_level_id
++    LEFT JOIN learner_enrollments e ON e.class_id=c.id AND e.school_id=c.school_id AND e.academic_year_id=$2 AND COALESCE(e.status,'ACTIVE') IN ('ACTIVE','COMPLETED')
++    LEFT JOIN learners l ON l.id=e.learner_id AND l.school_id=c.school_id AND COALESCE(l.is_active,true)=true
++    LEFT JOIN marks m ON m.learner_id=e.learner_id AND m.school_id=c.school_id AND m.academic_year_id=e.academic_year_id AND m.term_id=$3 AND m.assessment_id=$4 AND m.mark IS NOT NULL
++    LEFT JOIN result_publication_records pgr ON pgr.learner_id=e.learner_id AND pgr.school_id=c.school_id AND pgr.academic_year_id=e.academic_year_id AND pgr.term_id=$3 AND pgr.assessment_id=$4
++    LEFT JOIN learner_guardians lg ON lg.learner_id=e.learner_id
++    LEFT JOIN parent_guardians pg ON pg.id=lg.parent_guardian_id AND pg.school_id=c.school_id AND COALESCE(pg.is_active,false)=true AND COALESCE(pg.sms_enabled,false)=true AND COALESCE(pg.communication_consent,false)=true AND COALESCE(trim(pg.phone),'')<>''
++    WHERE c.school_id=$1 AND COALESCE(c.is_active,true)=true
++    GROUP BY c.id,lv.id,lv.name,lv.sort_order
++    ORDER BY lv.sort_order,c.name,c.stream`,[sid,yearId,termId,assessmentId]);
++   return res.json({academic_year_id:yearId,term_id:termId,assessment_id:assessmentId,classes:q.rows});
++  }
+   const q=await db.query(`
+    SELECT c.id class_id,c.name class_name,c.stream,lv.name level_name,
+     COUNT(DISTINCT l.id)::int learners,
+@@ -693,6 +753,58 @@ router.get('/:schoolId/publication-class-overview',schoolBoundary,roles('SCHOOL_
+   res.json({academic_year_id:yearId,term_id:termId,classes:q.rows});
+  }catch(e){res.status(e.status||400).json({error:e.message})}
+ });
++router.post('/:schoolId/publication-assessment',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN'),async(req,res)=>{
++ let client;
++ try{
++  const sid=req.params.schoolId,b=req.body||{};
++  const yearId=String(b.academic_year_id||''),termId=String(b.term_id||''),assessmentId=String(b.assessment_id||''),classIds=publicationIds(b.class_ids);
++  await ensureResultsCentreSchema();
++  await ensureAssessmentPublishSchema();
++  await validatePublicationScope(sid,yearId,termId,[],classIds);
++  if(!assessmentId)return res.status(400).json({error:'Select an assessment to publish.'});
++  if(!classIds.length)return res.status(400).json({error:'Select at least one class.'});
++  const assessment=(await db.query('SELECT id FROM assessments WHERE id=$1 AND school_id=$2 AND academic_year_id=$3 AND term_id=$4',[assessmentId,sid,yearId,termId])).rows[0];
++  if(!assessment)return res.status(404).json({error:'The selected assessment was not found for this year and term.'});
++  const learners=(await db.query(`
++   SELECT DISTINCT l.id,l.first_name,l.middle_name,l.last_name
++   FROM marks m JOIN learners l ON l.id=m.learner_id AND l.school_id=m.school_id
++   JOIN classes c ON c.id=m.class_id AND c.school_id=m.school_id
++   WHERE m.school_id=$1 AND m.academic_year_id=$2 AND m.term_id=$3 AND m.assessment_id=$4 AND m.mark IS NOT NULL
++    AND c.id=ANY($5::uuid[]) AND COALESCE(l.is_active,true)=true
++   ORDER BY l.last_name,l.first_name`,[sid,yearId,termId,assessmentId,classIds])).rows;
++  const prepared=[],skipped=[];
++  for(const learner of learners){
++   const exists=await db.query('SELECT 1 FROM result_publication_records WHERE school_id=$1 AND learner_id=$2 AND academic_year_id=$3 AND term_id=$4 AND assessment_id=$5 LIMIT 1',[sid,learner.id,yearId,termId,assessmentId]);
++   if(exists.rowCount){skipped.push({learner_id:learner.id,reason:'This assessment was already published for this learner.'});continue;}
++   const snapshot=await assessmentResultSnapshot(sid,learner.id,yearId,termId,assessmentId);
++   if(!snapshot){skipped.push({learner_id:learner.id,reason:'No saved marks for this assessment.'});continue;}
++   prepared.push({learner,snapshot});
++  }
++  if(!prepared.length)return res.status(409).json({error:'Every learner in the selected classes already has this assessment published.',skipped:skipped.length});
++  client=await db.pool.connect();
++  await client.query('BEGIN');
++  const publication=(await client.query(`
++   INSERT INTO result_publications(school_id,academic_year_id,term_id,assessment_id,audience_scope,level_ids,class_ids,learner_count,created_by)
++   VALUES($1,$2,$3,$4,'SELECTED','{}',$5::uuid[],$6,$7)
++   RETURNING id,school_id,academic_year_id,term_id,assessment_id,audience_scope,level_ids,class_ids,status,learner_count,created_at`,[sid,yearId,termId,assessmentId,classIds,prepared.length,req.user.user_id])).rows[0];
++  let published=0;
++  for(const item of prepared){
++   const inserted=await client.query(`
++    INSERT INTO result_publication_records(publication_id,school_id,academic_year_id,term_id,assessment_id,learner_id,result_snapshot)
++    VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)
++    ON CONFLICT DO NOTHING RETURNING id`,[publication.id,sid,yearId,termId,assessmentId,item.learner.id,JSON.stringify(item.snapshot)]);
++   published+=inserted.rowCount;
++  }
++  if(!published){await client.query('ROLLBACK');return res.status(409).json({error:'This assessment was already published for all selected learners.',skipped:skipped.length});}
++  await client.query('UPDATE result_publications SET learner_count=$2 WHERE id=$1',[publication.id,published]);
++  await client.query('COMMIT');
++  res.status(201).json({publication:{...publication,learner_count:published},published,skipped:skipped.length,message:'Assessment results published and saved. Send parent notifications to deliver SMS.'});
++ }catch(e){
++  if(client)try{await client.query('ROLLBACK')}catch(rollbackError){console.error('Failed to roll back assessment publication transaction:',rollbackError);}
++  if(e.code==='42P01'||e.code==='42703')return res.status(503).json({error:'Apply database migration 036_publish_per_assessment.sql before publishing per assessment.'});
++  res.status(e.status||400).json({error:e.message});
++ }finally{client?.release();}
++});
+ // Subject-level descriptive analytics. Official merit and report calculations remain separate.
+ router.get('/:schoolId/analytics/subjects',schoolBoundary,roles('SCHOOL_ADMIN','ADMIN','HEADTEACHER','DEPUTY_HEADTEACHER','SENIOR_TEACHER','CLASS_TEACHER','TEACHER'),async(req,res)=>{
+  let stage='authorization';
+diff --git a/database/036_publish_per_assessment.sql b/database/036_publish_per_assessment.sql
+new file mode 100644
+index 0000000..a9ff348
+--- /dev/null
++++ b/database/036_publish_per_assessment.sql
+@@ -0,0 +1,51 @@
++-- Allow publishing the SAME learner's results once per assessment (e.g. Opener,
++-- Midterm, Endterm) instead of once per term. Term-level publishing keeps working;
++-- its assessment_id stays NULL.
++BEGIN;
++
++ALTER TABLE result_publications
++  ADD COLUMN IF NOT EXISTS assessment_id uuid REFERENCES assessments(id) ON DELETE RESTRICT;
++ALTER TABLE result_publication_records
++  ADD COLUMN IF NOT EXISTS assessment_id uuid REFERENCES assessments(id) ON DELETE RESTRICT;
++ALTER TABLE communication_messages
++  ADD COLUMN IF NOT EXISTS assessment_id uuid REFERENCES assessments(id) ON DELETE RESTRICT;
++
++CREATE INDEX IF NOT EXISTS idx_result_publications_assessment
++  ON result_publications(school_id,assessment_id) WHERE assessment_id IS NOT NULL;
++CREATE INDEX IF NOT EXISTS idx_result_publication_records_assessment
++  ON result_publication_records(school_id,assessment_id) WHERE assessment_id IS NOT NULL;
++
++-- Replace the once-per-term safeguard with once-per-assessment (NULL = whole term).
++DROP INDEX IF EXISTS uq_comm_published_results_once;
++CREATE UNIQUE INDEX IF NOT EXISTS uq_comm_published_results_once
++  ON communication_messages(
++    school_id,learner_id,parent_guardian_id,academic_year_id,term_id,message_type,
++    COALESCE(assessment_id,'00000000-0000-0000-0000-000000000000'::uuid)
++  )
++  WHERE message_type='PUBLISHED_RESULTS'
++    AND academic_year_id IS NOT NULL
++    AND term_id IS NOT NULL;
++
++-- Drop the old unique(learner, year, term) constraint whatever its generated name is.
++DO $$
++DECLARE c record;
++BEGIN
++  FOR c IN
++    SELECT conname FROM pg_constraint
++    WHERE conrelid='result_publication_records'::regclass AND contype='u'
++      AND (SELECT array_agg(a.attname::text ORDER BY k.ord)
++           FROM unnest(conkey) WITH ORDINALITY AS k(attnum,ord)
++           JOIN pg_attribute a ON a.attrelid=conrelid AND a.attnum=k.attnum)
++          = ARRAY['school_id','learner_id','academic_year_id','term_id']
++  LOOP
++    EXECUTE format('ALTER TABLE result_publication_records DROP CONSTRAINT %I',c.conname);
++  END LOOP;
++END $$;
++
++CREATE UNIQUE INDEX IF NOT EXISTS uq_result_publication_records_period
++  ON result_publication_records(
++    school_id,learner_id,academic_year_id,term_id,
++    COALESCE(assessment_id,'00000000-0000-0000-0000-000000000000'::uuid)
++  );
++
++COMMIT;
+diff --git a/public/dashboard.html b/public/dashboard.html
+index 5947d1f..d2097ca 100644
+--- a/public/dashboard.html
++++ b/public/dashboard.html
+@@ -619,7 +619,7 @@ body, main, .main-content, .dashboard-main {
+ <section id="markControl" class="nav-managed-section card admin-only"><div class="section-title"><h2>Mark Entry Control Centre</h2><span class="pill">Deadlines · Reopen</span></div><div class="grid"><label>Academic year<select id="mcYear"></select></label><label>Term<select id="mcTerm"></select></label><label>Class<select id="mcClass"></select></label><label>Assessment<select id="mcAssessment"></select></label><label>Deadline<input id="mcDeadline" type="datetime-local"></label></div><div class="notice"><b>Teacher mark-entry control:</b> choose the class, assessment and deadline, then click <b>Save deadline</b>. The deadline applies across all subjects in that class for the selected assessment type. A blank deadline leaves mark entry open until you close it.</div><div class="actions"><button class="btn" id="saveDeadline" type="button">Save deadline</button><button class="btn secondary" id="closeAssessment" type="button">Close mark entry</button></div><div id="deadlineMsg" class="notice">Set a deadline for each assessment. Teachers are automatically locked after the deadline.</div><div class="actions"><button type="button" class="btn secondary" id="openResultsPublishing">Open Results Publishing &amp; Parent SMS</button></div></section><section id="publishResults" class="nav-managed-section card admin-only"><div class="section-title"><div><h2>Term Results Publishing Centre</h2><p class="muted small">Pick the period, tick the assessed classes, publish and notify parents in one step, then track delivery class by class.</p></div><span class="pill">Classes → Parents</span></div><button type="button" class="btn secondary" id="returnToMarkControl">← Mark Entry Control Centre</button>
+ <div class="card-subsection" aria-label="Choose period">
+  <h3>1 · Choose period</h3>
+- <div class="grid"><label>Academic year<select id="pubYear"></select></label><label>Term<select id="pubTerm"></select></label></div>
++ <div class="grid"><label>Academic year<select id="pubYear"></select></label><label>Term<select id="pubTerm"></select></label><label>Assessment<select id="pubAssessment"></select></label></div>
+  <div id="publicationDeliveryStatus" class="notice" role="status"></div>
+ </div>
+ <div class="card-subsection" aria-label="Assessed classes">
+@@ -1739,7 +1739,7 @@ $('userControlList')?.addEventListener('click',async e=>{
+   }
+  }catch(x){alert(x.message);}
+ });
+-async function setupAnalytics(){try{const year=$('anYear'),previousYear=year?.value;opts(year,state.years,x=>x.year_label);if(year)year.value=state.years.some(x=>String(x.id)===String(previousYear))?previousYear:(state.years[0]?.id||'');if(state.years[0]){await Promise.all(['mcTerm','pubTerm'].map(id=>terms(state.years[0].id,$(id))));await loadControlAssessments();}loadClassOverview();await loadPublicationHistory();}catch(e){console.error('Mark control centre could not be initialized:',e);const msg=$('publishMsg');if(msg){msg.style.display='block';msg.textContent=`Unable to initialize publishing controls: ${e.message}`;}}}
++async function setupAnalytics(){try{const year=$('anYear'),previousYear=year?.value;opts(year,state.years,x=>x.year_label);if(year)year.value=state.years.some(x=>String(x.id)===String(previousYear))?previousYear:(state.years[0]?.id||'');if(state.years[0]){await Promise.all(['mcTerm','pubTerm'].map(id=>terms(state.years[0].id,$(id))));await loadControlAssessments();}loadPublishAssessments();loadClassOverview();await loadPublicationHistory();}catch(e){console.error('Mark control centre could not be initialized:',e);const msg=$('publishMsg');if(msg){msg.style.display='block';msg.textContent=`Unable to initialize publishing controls: ${e.message}`;}}}
+ async function loadControlAssessments(refreshTerm=true){const y=$('mcYear').value;if(!y)return;const previousTerm=$('mcTerm').value;if(refreshTerm)await terms(y,$('mcTerm'));if(previousTerm&&[...$('mcTerm').options].some(o=>o.value===previousTerm))$('mcTerm').value=previousTerm;if(!$('mcTerm').value)return;const classId=String($('mcClass')?.value||'');const qs=classId?`?class_id=${encodeURIComponent(classId)}`:'';const all=await api(`/api/assessments/${sid}/${y}/${$('mcTerm').value}${qs}`);const a=Array.isArray(all)?all:[];const previousAssessment=$('mcAssessment').value;opts($('mcAssessment'),a,x=>`${x.name} · ${x.assessment_type}`,'Select assessment…');const chosen=a.find(v=>String(v.id)===String(previousAssessment))||a[0];if(chosen){$('mcAssessment').value=chosen.id;$('mcDeadline').value=chosen.deadline_at?new Date(chosen.deadline_at).toISOString().slice(0,16):'';}else $('mcDeadline').value='';}
+ let classOverviewSelection=new Set();
+ function classOverviewStatus(c){
+@@ -1755,6 +1755,17 @@ function updatePublishSelectedState(){
+  btn.disabled=!n;
+  btn.textContent=n?('Publish & notify parents ('+n+' class'+(n>1?'es':'')+')'):'Publish & notify parents';
+ }
++async function loadPublishAssessments(){
++ const sel=$('pubAssessment');if(!sel)return;
++ const y=$('pubYear')?.value,t=$('pubTerm')?.value,keep=sel.value;
++ sel.innerHTML='<option value="">All assessments · full term report</option>';
++ if(!y||!t)return;
++ try{
++  const rows=await api('/api/assessments/'+encodeURIComponent(sid)+'/'+encodeURIComponent(y)+'/'+encodeURIComponent(t));
++  sel.innerHTML+=(Array.isArray(rows)?rows:[]).map(a=>'<option value="'+esc(a.id)+'">'+esc(a.name)+'</option>').join('');
++  if(keep&&[...sel.options].some(o=>o.value===keep))sel.value=keep;
++ }catch(e){}
++}
+ async function loadClassOverview(){
+  const yearId=$('pubYear')?.value,termId=$('pubTerm')?.value,holder=$('classOverview');
+  if(!holder)return;
+@@ -1762,7 +1773,10 @@ async function loadClassOverview(){
+  if(!yearId||!termId){holder.innerHTML='<div class="notice">Select an academic year and term to load classes.</div>';return;}
+  holder.innerHTML='<div class="notice">Loading assessed classes…</div>';
+  try{
+-  const r=await api('/api/communications/'+encodeURIComponent(sid)+'/publication-class-overview?academic_year_id='+encodeURIComponent(yearId)+'&term_id='+encodeURIComponent(termId));
++  const assessmentId=$('pubAssessment')?.value||'';
++  let url='/api/communications/'+encodeURIComponent(sid)+'/publication-class-overview?academic_year_id='+encodeURIComponent(yearId)+'&term_id='+encodeURIComponent(termId);
++  if(assessmentId)url+='&assessment_id='+encodeURIComponent(assessmentId);
++  const r=await api(url);
+   renderClassOverview(r.classes||[]);
+  }catch(e){holder.innerHTML='<div class="notice" role="alert">Unable to load classes: '+esc(e.message)+'</div>';}
+ }
+@@ -1770,19 +1784,23 @@ function renderClassOverview(classes){
+  const holder=$('classOverview');
+  if(!classes.length){holder.innerHTML='<div class="notice">No active classes found for this school.</div>';return;}
+  const rows=classes.map(c=>{
+-  const status=classOverviewStatus(c),selectable=c.learners_with_results>0&&c.results_published<c.learners_with_results;
++  const status=classOverviewStatus(c),selectable=c.learners_with_results>0;
+   return '<tr><td><input type="checkbox" class="class-select" data-class-id="'+esc(c.class_id)+'"'+(selectable?'':' disabled')+'></td><td><b>'+esc(c.class_name)+'</b> '+esc(c.stream||'')+'<br><span class="muted small">'+esc(c.level_name||'')+'</span></td><td>'+esc(c.learners||0)+'</td><td>'+esc(c.learners_with_results||0)+'</td><td>'+esc(c.results_published||0)+'</td><td>'+esc(c.eligible_parents||0)+'</td><td>'+esc(c.assessments_used||0)+'</td><td>'+esc(status)+'</td></tr>';
+  }).join('');
+  holder.innerHTML='<table><thead><tr><th></th><th>Class</th><th>Learners</th><th>With results</th><th>Published</th><th>Parents to notify</th><th>Assessments</th><th>Status</th></tr></thead><tbody>'+rows+'</tbody></table>';
+ }
+ async function publishSelectedClasses(){
+- const yearId=$('pubYear')?.value,termId=$('pubTerm')?.value,classIds=[...classOverviewSelection],msg=$('publishMsg');
++ const yearId=$('pubYear')?.value,termId=$('pubTerm')?.value,assessmentId=$('pubAssessment')?.value||'',classIds=[...classOverviewSelection],msg=$('publishMsg');
+  if(!yearId||!termId||!classIds.length)return;
+- if(!confirm('Publish results and notify parents for '+classIds.length+' selected class(es)?'))return;
++ const scopeLabel=assessmentId||'all assessments (full term report)';
++ if(!confirm('Publish results for '+scopeLabel+' and notify parents in '+classIds.length+' selected class(es)?'))return;
+  const btn=$('publishSelectedClasses');btn.disabled=true;btn.textContent='Publishing…';
+  if(msg){msg.style.display='block';msg.textContent='Publishing results…';}
+  try{
+-  const r=await api('/api/communications/'+encodeURIComponent(sid)+'/result-publications',{method:'POST',body:{academic_year_id:yearId,term_id:termId,class_ids:classIds}});
++  const endpoint=assessmentId?'/publication-assessment':'/result-publications';
++  const payload={academic_year_id:yearId,term_id:termId,class_ids:classIds};
++  if(assessmentId)payload.assessment_id=assessmentId;
++  const r=await api('/api/communications/'+encodeURIComponent(sid)+endpoint,{method:'POST',body:payload});
+   if(msg)msg.textContent='Results published and saved for '+r.published+' learner(s); skipped: '+r.skipped+'. Sending parent SMS…';
+   const n=await api('/api/communications/'+encodeURIComponent(sid)+'/result-publications/'+encodeURIComponent(r.publication.id)+'/notifications',{method:'POST',body:{}});
+   if(msg)msg.textContent='Done. Published: '+r.published+' learner(s). SMS — sent: '+n.sent+'; queued: '+n.queued+'; failed: '+n.failed+'; skipped: '+n.skipped+'.';
+@@ -1845,8 +1863,9 @@ function renderEnhancedAcademicAnalytics(r){
+ }
+ function renderAnalytics(r){lastAnalyticsExport={data:r,context:[document.getElementById('anYear')?.selectedOptions[0]?.textContent,document.getElementById('anTerm')?.selectedOptions[0]?.textContent].filter(Boolean).join(' / ')};const box=$('analyticsBox');const o=r.overall||{},completion=o.expected_mark_entries?Math.min(100,Math.round(Number(o.mark_entries||0)/Number(o.expected_mark_entries)*100)):0;const top=(r.learner_averages||[])[0];const best=(r.best_learners_across_classes||[]).slice(0,10);const dev=(r.deviations||[]).filter(x=>x.deviation!=null);const improvers=(r.top_improvers||[]).slice(0,8),decliners=(r.top_decliners||[]).slice(0,8);const prof=r.proficiency_distribution||{};const maxProf=Math.max(1,...Object.values(prof).map(Number));const termBars=(r.term_trends||[]).map(x=>`<div class="analytics-bar-row premium"><span>${esc(x.term_name)}</span><div class="analytics-bar"><i style="width:${Math.min(100,Number(x.average||0))}%"></i></div><b>${x.average==null?'—':fmtMark(x.average)+'%'}</b></div>`).join('')||'<div class="notice">No term trend data.</div>';const subjectTrend=(r.subject_trends||[]);const subjectNames=[...new Set(subjectTrend.map(x=>x.subject_name))];const subjectTrendRows=subjectNames.slice(0,20).map(name=>{const vals=subjectTrend.filter(x=>x.subject_name===name).sort((a,b)=>a.term_no-b.term_no);return `<div class="deviation-row"><span>${esc(name)}</span><b>${vals.length?fmtMark(vals[vals.length-1].average)+'%':'—'}</b><small>${vals.map(v=>`${esc(v.term_name)}: ${v.average==null?'—':fmtMark(v.average)+'%'}`).join(' · ')}</small></div>`}).join('');const classTrend=(r.class_trends||[]);const classNames=[...new Set(classTrend.map(x=>`${x.class_name} ${x.stream||''}`))];const classTrendRows=classNames.slice(0,20).map(name=>{const vals=classTrend.filter(x=>`${x.class_name} ${x.stream||''}`===name).sort((a,b)=>a.term_no-b.term_no);return `<div class="deviation-row"><span>${esc(name)}</span><b>${vals.length?fmtMark(vals[vals.length-1].average)+'%':'—'}</b><small>${vals.map(v=>`${esc(v.term_name)}: ${v.average==null?'—':fmtMark(v.average)+'%'}`).join(' · ')}</small></div>`}).join('');const trajectory=(r.learner_trajectories||[]).slice().sort((a,b)=>(b.change??-999)-(a.change??-999)).slice(0,12);box.innerHTML=`<div class="analytics-kpis"><div class="analytics-kpi"><span>Learners assessed</span><strong>${o.learners??0}</strong></div><div class="analytics-kpi"><span>School / class mean</span><strong>${o.mean_mark??'—'}%</strong></div><div class="analytics-kpi"><span>Median</span><strong>${o.median_mark??'—'}%</strong></div><div class="analytics-kpi"><span>Mark completion</span><strong>${completion}%</strong><small>${o.mark_entries??0} / ${o.expected_mark_entries??0}</small></div><div class="analytics-kpi"><span>Highest learner</span><strong>${top?esc(top.learner_name):'—'}</strong><small>${top?fmtMark(top.average)+'%':'—'}</small></div><div class="analytics-kpi"><span>Lowest subject</span><strong>${(r.subjects||[]).slice().sort((a,b)=>Number(a.average??999)-Number(b.average??999))[0]?esc((r.subjects||[]).slice().sort((a,b)=>Number(a.average??999)-Number(b.average??999))[0].name):'—'}</strong></div></div>${renderEnhancedAcademicAnalytics(r)}${analyticsBars('Subject performance',r.subjects,'name','average')}${analyticsBars('Class / stream comparison',r.streams,'class_name','average')}<div class="analytics-panel"><h3>Term-to-term school / class trend</h3>${termBars}</div>${analyticsLineChart('Subject trend by term',subjectTrend)}${analyticsLineChart('Class / stream trend by term',classTrend)}<div class="analytics-panel"><h3>Assessment comparison</h3>${(r.assessment_comparison||[]).map(a=>`<div class="assessment-chip"><span>${esc(a.name||a.assessment_type)}</span><b>${a.average==null?'—':fmtMark(a.average)+'%'}</b><small>${a.entries||0} entries</small></div>`).join('')||'<div class="notice">No assessments configured for this term.</div>'}</div><div class="analytics-panel"><h3>Target vs actual subject performance</h3>${(r.target_vs_achievement||[]).map(x=>`<div class="deviation-row"><span>${esc(x.subject_name)}</span><b class="${Number(x.variance)>=0?'positive':'negative'}">${x.variance==null?'—':(Number(x.variance)>=0?'+':'')+fmtMark(x.variance)+'%'}</b><small>Target ${x.target_mark==null?'—':fmtMark(x.target_mark)+'%'} · Actual ${x.achievement==null?'—':fmtMark(x.achievement)+'%'}</small></div>`).join('')||'<div class="notice">No subject targets configured.</div>'}</div><div class="analytics-panel"><h3>Performance deviation / improvement</h3>${dev.length?dev.map(x=>`<div class="deviation-row"><span>${esc(x.subject_name)}</span><b class="${Number(x.deviation)>=0?'positive':'negative'}">${Number(x.deviation)>=0?'+':''}${fmtMark(x.deviation)}%</b><small>Current ${fmtMark(x.current_average)}% · Previous ${fmtMark(x.previous_average)}%</small></div>`).join(''):'<div class="notice">No previous-term comparison is available.</div>'}</div><div class="analytics-panel"><h3>Top improvers</h3>${improvers.map(x=>`<div class="deviation-row"><span>${esc(x.learner_name)} · ${esc(x.class_name||'')}</span><b class="positive">+${fmtMark(x.change)}%</b><small>${(x.terms||[]).map(t=>`${esc(t.term_name)} ${t.average==null?'—':fmtMark(t.average)+'%'}`).join(' · ')}</small></div>`).join('')||'<div class="notice">No multi-term learner improvement data.</div>'}</div><div class="analytics-panel"><h3>Top declining learners</h3>${decliners.map(x=>`<div class="deviation-row"><span>${esc(x.learner_name)} · ${esc(x.class_name||'')}</span><b class="negative">${fmtMark(x.change)}%</b><small>${(x.terms||[]).map(t=>`${esc(t.term_name)} ${t.average==null?'—':fmtMark(t.average)+'%'}`).join(' · ')}</small></div>`).join('')||'<div class="notice">No multi-term learner decline data.</div>'}</div><div class="analytics-panel"><h3>Learner trajectories</h3><div class="table-wrap"><table class="analytics-table"><thead><tr><th>Learner</th><th>Class</th><th>T1</th><th>T2</th><th>T3</th><th>Change</th></tr></thead><tbody>${trajectory.map(x=>`<tr><td><b>${esc(x.learner_name)}</b></td><td>${esc(x.class_name||'')} ${esc(x.stream||'')}</td>${[1,2,3].map(n=>`<td>${x.terms.find(t=>Number(t.term_no)===n)?.average==null?'—':fmtMark(x.terms.find(t=>Number(t.term_no)===n).average)+'%'}</td>`).join('')}<td>${x.change==null?'—':(Number(x.change)>=0?'+':'')+fmtMark(x.change)+'%'}</td></tr>`).join('')||'<tr><td colspan="6">No trajectory data.</td></tr>'}</tbody></table></div></div><div class="analytics-panel"><h3>Best learners across classes</h3><div class="table-wrap"><table class="analytics-table"><thead><tr><th>#</th><th>Learner</th><th>Class</th><th>Average</th></tr></thead><tbody>${best.map((x,i)=>`<tr><td>${i+1}</td><td><b>${esc(x.learner_name)}</b></td><td>${esc(x.class_name||'—')} ${esc(x.stream||'')}</td><td><strong>${fmtMark(x.average)}%</strong></td></tr>`).join('')||'<tr><td colspan="4">No learner averages available.</td></tr>'}</tbody></table></div></div><div class="analytics-panel"><h3>Teacher / subject performance</h3><div class="teacher-assignment-list">${(r.teacher_performance||[]).map(x=>`<div><span>${esc(x.teacher_name||'Not assigned')} · ${esc(x.subject_name||'')} · ${esc(x.class_name||'')}</span><b>${x.average==null?'—':fmtMark(x.average)+'%'}${x.target_mark==null?'':` · Target ${fmtMark(x.target_mark)}%`}</b></div>`).join('')||'<div class="notice">No teacher-mapped performance data.</div>'}</div></div><div class="analytics-panel"><h3>Competency distribution</h3>${Object.entries(prof).map(([g,n])=>`<div class="analytics-bar-row premium"><span>${esc(g)}</span><div class="analytics-bar"><i class="grade-bar-${String(g).toLowerCase()}" style="width:${Math.min(100,Number(n)/maxProf*100)}%"></i></div><b>${n}</b></div>`).join('')}</div><div class="analytics-panel"><h3>Gender performance comparison</h3>${(r.gender||[]).map(x=>`<div class="deviation-row"><span>${esc(x.gender)}</span><b>${x.average==null?'—':fmtMark(x.average)+'%'}</b><small>${x.learners||0} learner(s)</small></div>`).join('')||'<div class="notice">No gender data recorded.</div>'}</div>`;}
+ 
+-$('mcYear').addEventListener('change',()=>loadControlAssessments(true));$('mcTerm').addEventListener('change',()=>loadControlAssessments(false));$('mcClass').addEventListener('change',()=>loadControlAssessments(false));$('mcAssessment').addEventListener('change',async()=>{const classId=String($('mcClass').value||'');const qs=classId?`?class_id=${encodeURIComponent(classId)}`:'';const a=await api(`/api/assessments/${sid}/${$('mcYear').value}/${$('mcTerm').value}${qs}`);const x=(Array.isArray(a)?a:[]).find(v=>String(v.id)===String($('mcAssessment').value));$('mcDeadline').value=x?.deadline_at?new Date(x.deadline_at).toISOString().slice(0,16):'';});$('saveDeadline').addEventListener('click',async()=>{if(!$('mcYear').value||!$('mcTerm').value||!$('mcClass').value||!$('mcAssessment').value){$('deadlineMsg').textContent='Select academic year, term, class and assessment first.';return;}const raw=$('mcDeadline').value;if(!raw){$('deadlineMsg').textContent='Choose a date and time before saving the deadline.';return;}const d=new Date(raw);if(Number.isNaN(d.getTime())){$('deadlineMsg').textContent='The selected deadline is invalid. Choose the date and time again.';return;}try{const r=await api(`/api/assessments/${sid}/${$('mcYear').value}/${$('mcTerm').value}/${$('mcAssessment').value}`,{method:'PATCH',body:{deadline_at:d.toISOString(),status:'OPEN',class_id:$('mcClass').value}});$('deadlineMsg').textContent=r.deadline_at?`Deadline saved successfully for ${r.updated_count||1} assessment(s) across the selected class: ${new Date(r.deadline_at).toLocaleString()}. Mark entry is OPEN.`:'Deadline was not saved; please try again.';await loadControlAssessments(false);}catch(e){$('deadlineMsg').textContent=e.message}});$('closeAssessment').addEventListener('click',async()=>{if(!$('mcYear').value||!$('mcTerm').value||!$('mcAssessment').value){$('deadlineMsg').textContent='Select an academic year, term and assessment first.';return;}try{await api(`/api/assessments/${sid}/${$('mcYear').value}/${$('mcTerm').value}/${$('mcAssessment').value}`,{method:'PATCH',body:{status:'CLOSED'}});$('deadlineMsg').textContent='Mark entry closed for this assessment.';}catch(e){$('deadlineMsg').textContent=e.message}});$('pubYear').addEventListener('change',async()=>{try{await terms($('pubYear').value,$('pubTerm'));}catch(e){const m=$('publishMsg');if(m){m.style.display='block';m.textContent=e.message;}}await loadClassOverview();await loadPublicationHistory();});
+-$('pubTerm').addEventListener('change',async()=>{await loadClassOverview();await loadPublicationHistory();});$('refreshClassOverview')?.addEventListener('click',loadClassOverview);
++$('mcYear').addEventListener('change',()=>loadControlAssessments(true));$('mcTerm').addEventListener('change',()=>loadControlAssessments(false));$('mcClass').addEventListener('change',()=>loadControlAssessments(false));$('mcAssessment').addEventListener('change',async()=>{const classId=String($('mcClass').value||'');const qs=classId?`?class_id=${encodeURIComponent(classId)}`:'';const a=await api(`/api/assessments/${sid}/${$('mcYear').value}/${$('mcTerm').value}${qs}`);const x=(Array.isArray(a)?a:[]).find(v=>String(v.id)===String($('mcAssessment').value));$('mcDeadline').value=x?.deadline_at?new Date(x.deadline_at).toISOString().slice(0,16):'';});$('saveDeadline').addEventListener('click',async()=>{if(!$('mcYear').value||!$('mcTerm').value||!$('mcClass').value||!$('mcAssessment').value){$('deadlineMsg').textContent='Select academic year, term, class and assessment first.';return;}const raw=$('mcDeadline').value;if(!raw){$('deadlineMsg').textContent='Choose a date and time before saving the deadline.';return;}const d=new Date(raw);if(Number.isNaN(d.getTime())){$('deadlineMsg').textContent='The selected deadline is invalid. Choose the date and time again.';return;}try{const r=await api(`/api/assessments/${sid}/${$('mcYear').value}/${$('mcTerm').value}/${$('mcAssessment').value}`,{method:'PATCH',body:{deadline_at:d.toISOString(),status:'OPEN',class_id:$('mcClass').value}});$('deadlineMsg').textContent=r.deadline_at?`Deadline saved successfully for ${r.updated_count||1} assessment(s) across the selected class: ${new Date(r.deadline_at).toLocaleString()}. Mark entry is OPEN.`:'Deadline was not saved; please try again.';await loadControlAssessments(false);}catch(e){$('deadlineMsg').textContent=e.message}});$('closeAssessment').addEventListener('click',async()=>{if(!$('mcYear').value||!$('mcTerm').value||!$('mcAssessment').value){$('deadlineMsg').textContent='Select an academic year, term and assessment first.';return;}try{await api(`/api/assessments/${sid}/${$('mcYear').value}/${$('mcTerm').value}/${$('mcAssessment').value}`,{method:'PATCH',body:{status:'CLOSED'}});$('deadlineMsg').textContent='Mark entry closed for this assessment.';}catch(e){$('deadlineMsg').textContent=e.message}});$('pubYear').addEventListener('change',async()=>{try{await terms($('pubYear').value,$('pubTerm'));}catch(e){const m=$('publishMsg');if(m){m.style.display='block';m.textContent=e.message;}}await loadPublishAssessments();await loadClassOverview();await loadPublicationHistory();});
++$('pubTerm').addEventListener('change',async()=>{await loadPublishAssessments();await loadClassOverview();await loadPublicationHistory();});
++$('pubAssessment')&&$('pubAssessment').addEventListener('change',loadClassOverview);$('refreshClassOverview')?.addEventListener('click',loadClassOverview);
+ $('selectReadyClasses')?.addEventListener('click',()=>{document.querySelectorAll('#classOverview input.class-select:not(:disabled)').forEach(cb=>{cb.checked=true;classOverviewSelection.add(cb.dataset.classId);});updatePublishSelectedState();});
+ $('clearClassSelection')?.addEventListener('click',()=>{document.querySelectorAll('#classOverview input.class-select').forEach(cb=>{cb.checked=false;});classOverviewSelection.clear();updatePublishSelectedState();});
+ $('classOverview')?.addEventListener('change',e=>{const cb=e.target.closest('input.class-select');if(!cb)return;if(cb.checked)classOverviewSelection.add(cb.dataset.classId);else classOverviewSelection.delete(cb.dataset.classId);updatePublishSelectedState();});
+@@ -1874,7 +1893,7 @@ safeOn('pm24Data','click',e=>{const b=e.target.closest('.resource-open');if(!b)r
+ safeOn('resourceForm','submit',async e=>{e.preventDefault();try{const fd=new FormData(e.target);const r=await fetch(`/api/resources/${sid}`,{method:'POST',headers:{Authorization:'Bearer '+localStorage.getItem('token')},body:fd});const d=await r.json();if(!r.ok)throw Error(d.error||'Upload failed');e.target.reset();await loadResources();alert('Resource uploaded successfully and catalogued.');}catch(x){alert(x.message)}});['resourceFilterType','resourceFilterSubject','resourceFilterClass','resourceFilterYear'].forEach(id=>safeOn(id,'change',()=>renderResources(state.resources||[])));
+ $('teacherSignatureForm').addEventListener('submit',async e=>{e.preventDefault();try{const f=new FormData(e.target),tid=f.get('teacher_id');f.delete('teacher_id');await api(`/api/documents/${sid}/teacher/${tid}/signature`,{method:'POST',body:f});alert('Teacher signature uploaded.');e.target.reset();}catch(x){alert(x.message)}});
+ $('parentLinkForm').addEventListener('submit',async e=>{e.preventDefault();try{await api(`/api/communications/${sid}/link`,{method:'POST',body:Object.fromEntries(new FormData(e.target))});alert('Parent linked to learner.');}catch(x){alert(x.message)}});
+-const PM24={1:['PLATFORM OWNER & SCHOOL ENROLLMENT','Schools · templates · status','owner'],2:['SCHOOL ADMINISTRATION SETUP','School administrator account','userControl'],3:['STAFF & USER ENROLLMENT','Staff accounts · roles · permissions','people'],4:['LEARNER ENROLLMENT','Learners · classes · movement','classLists'],5:['PARENT & GUARDIAN MANAGEMENT','Guardian records · learner links','parents'],6:['ACADEMIC MANAGEMENT','Years · terms · classes · subjects','academic'],7:['ASSESSMENT MANAGEMENT','Term assessment structure','assess'],8:['MARK ENTRY','School-wide authority + teacher entry','teacherMarking'],9:['MARKS MANAGEMENT','Saved marks · correction · progress','results'],10:['ACADEMIC PERFORMANCE','Performance intelligence','analytics'],11:['REPORT CARDS','Official learner reports','reports'],12:['MERIT & PERFORMANCE ANALYSIS','Merit · subject teachers · rankings','merit'],13:['ATTENDANCE','Daily attendance','attendance'],14:['DISCIPLINE','Cases · actions · follow-up','discipline'],15:['COMMUNICATION','Parent messaging · results publication','announcements'],16:['OFFICIAL SCHOOL ASSETS','School stamp · authorised signatures','documents'],17:['PLATFORM SUBSCRIPTION BILLING','ZELIMU platform plan · invoices · payments','billing'],18:['INVENTORY & ASSETS','Assets · stock · valuation','inventory'],19:['TIMETABLE','Classes · subjects · teachers · rooms','timetable'],20:['EXAMINATION CONTROL','Deadlines · submission · publication','markControl'],21:['SCHOOL ADMINISTRATION','School configuration','identity'],22:['PLATFORM CONTROL CENTRE','Multi-school platform','owner'],23:['IMPORT & EXPORT','Controlled data movement','export'],24:['AUDIT & SECURITY','Traceability · access · events','audit'],25:['TEACHER RESOURCE LIBRARY','Shared teaching resources','resources'],26:['CLASS LISTS','Learner registers by class','classLists'],27:['TEACHER ASSIGNMENT, ACCOUNTS & ROLES','Assignments · accounts · roles','assign'],28:['SCHOOL FEES & RECEIPTS','Fee structures · learner charges · payments · receipts','schoolFinance']};
++const PM24={1:['PLATFORM OWNER & SCHOOL ENROLLMENT','Schools · templates · status','owner'],2:['SCHOOL ADMINISTRATION SETUP','School administrator account','userControl'],3:['STAFF & USER ENROLLMENT','Staff accounts · roles · permissions','people'],4:['LEARNER ENROLLMENT','Learners · classes · movement','classLists'],5:['PARENT & GUARDIAN MANAGEMENT','Guardian records · learner links','parents'],6:['ACADEMIC MANAGEMENT','Years · terms · classes · subjects','academic'],7:['ASSESSMENT MANAGEMENT','Term assessment structure','assess'],8:['MARK ENTRY','School-wide authority + teacher entry','teacherMarking'],9:['MARKS MANAGEMENT','Saved marks · correction · progress','results'],10:['ACADEMIC PERFORMANCE','Performance intelligence','analytics'],11:['REPORT CARDS','Official learner reports','reports'],12:['MERIT & PERFORMANCE ANALYSIS','Merit · subject teachers · rankings','merit'],13:['ATTENDANCE','Daily attendance','attendance'],14:['DISCIPLINE','Cases · actions · follow-up','discipline'],15:['COMMUNICATION','Parent messaging · class SMS','announcements'],16:['OFFICIAL SCHOOL ASSETS','School stamp · authorised signatures','documents'],17:['PLATFORM SUBSCRIPTION BILLING','ZELIMU platform plan · invoices · payments','billing'],18:['INVENTORY & ASSETS','Assets · stock · valuation','inventory'],19:['TIMETABLE','Classes · subjects · teachers · rooms','timetable'],20:['EXAMINATION CONTROL','Deadlines · submission · publication','markControl'],21:['SCHOOL ADMINISTRATION','School configuration','identity'],22:['PLATFORM CONTROL CENTRE','Multi-school platform','owner'],23:['IMPORT & EXPORT','Controlled data movement','export'],24:['AUDIT & SECURITY','Traceability · access · events','audit'],25:['TEACHER RESOURCE LIBRARY','Shared teaching resources','resources'],26:['CLASS LISTS','Learner registers by class','classLists'],27:['TEACHER ASSIGNMENT, ACCOUNTS & ROLES','Assignments · accounts · roles','assign'],28:['SCHOOL FEES & RECEIPTS','Fee structures · learner charges · payments · receipts','schoolFinance']};
+ const PM24DATA={13:'attendance',14:'discipline',18:'inventory',19:'timetable',23:'export',24:'audit'};
+ async function renderQuickResourceWorkspace(){
+  const box=$('pm24Data');
+@@ -1898,13 +1917,12 @@ async function renderTeacherControlWorkspace(){
+  $('qTeacherAssignment').onsubmit=async e=>{e.preventDefault();try{await api(`/api/people/${sid}/assignments`,{method:'POST',body:Object.fromEntries(new FormData(e.target))});await reload();alert('Subject/class assignment saved.');}catch(x){alert(x.message);}};
+  $('qClassTeacher').onsubmit=async e=>{e.preventDefault();try{await api(`/api/people/${sid}/class-teachers`,{method:'POST',body:Object.fromEntries(new FormData(e.target))});await reload();alert('Class Teacher assigned. The existing subject assignments were retained and mark entry was enabled.');}catch(x){alert(x.message);}};await reload();
+ }
+-async function renderCommunicationModule(){const box=$('pm24Data');box.innerHTML=`<div class="analytics-panel"><h3>Parent & School Communication Centre</h3><p class="muted small">Publish a selected term's results to linked parents, send a message to one parent or learner, or send a class-wide message. Duplicate published-result notifications are blocked for the same learner, parent, academic year and term.</p><div class="grid"><label>Academic year<select id="cmYear"></select></label><label>Term<select id="cmTerm"></select></label><label>Class<select id="cmClass"></select></label></div><div class="actions"><button class="btn primary" id="cmPublish">PUBLISH CLASS RESULTS & SEND PARENT SMS</button></div><div id="cmPublishMsg" class="notice">Select academic year, term and class.</div><hr><h3>Other parent / guardian SMS</h3><div class="grid"><label>Recipient<select id="cmRecipient"><option value="class">All linked parents in class</option><option value="learner">Parents of one learner</option><option value="parent">One parent / guardian</option></select></label><label>Class<select id="cmMessageClass"></select></label><label>Learner<select id="cmLearner"></select></label><label>Parent<select id="cmParent"></select></label></div><textarea id="cmMessage" rows="4" placeholder="Type your school message…"></textarea><div class="actions"><button class="btn" id="cmSend">SEND SMS</button></div><div id="cmSendMsg" class="notice"></div><hr><h3>Recent communication history</h3><div id="cmHistory">Loading…</div></div>`;opts($('cmYear'),state.years,x=>x.year_label,'Select academic year');opts($('cmClass'),state.classes,x=>`${x.name} ${x.stream||''}`,'Select class');opts($('cmMessageClass'),state.classes,x=>`${x.name} ${x.stream||''}`,'Select class');opts($('cmLearner'),[],x=>`${x.first_name||''} ${x.last_name||''}`,'Select learner');if(state.years.length){$('cmYear').value=state.years[0].id;}
++async function renderCommunicationModule(){const box=$('pm24Data');box.innerHTML=`<div class="analytics-panel"><h3>Parent & Guardian Messaging Centre</h3><p class="muted small">Send SMS messages to parents and guardians. Results publishing lives in Examination Control → Results Publishing Centre.</p><div class="grid"><label>Academic year<select id="cmYear"></select></label><label>Term<select id="cmTerm"></select></label></div><hr><h3>Send an SMS to parents</h3><div class="grid"><label>Recipient<select id="cmRecipient"><option value="class">All linked parents in class</option><option value="learner">Parents of one learner</option><option value="parent">One parent / guardian</option></select></label><label>Class<select id="cmMessageClass"></select></label><label>Learner<select id="cmLearner"></select></label><label>Parent<select id="cmParent"></select></label></div><textarea id="cmMessage" rows="4" placeholder="Type your school message…"></textarea><div class="actions"><button class="btn" id="cmSend">SEND SMS</button></div><div id="cmSendMsg" class="notice"></div><hr><h3>Recent communication history</h3><div id="cmHistory">Loading…</div></div>`;opts($('cmYear'),state.years,x=>x.year_label,'Select academic year');opts($('cmMessageClass'),state.classes,x=>`${x.name} ${x.stream||''}`,'Select class');opts($('cmLearner'),[],x=>`${x.first_name||''} ${x.last_name||''}`,'Select learner');if(state.years.length){$('cmYear').value=state.years[0].id;}
+  const loadTerms=async()=>{const y=$('cmYear').value;if(!y){opts($('cmTerm'),[],()=>{},'Select term');return;}await terms(y,$('cmTerm'));};
+  const loadParents=async()=>{try{const p=await api(`/api/communications/${sid}/parents`);opts($('cmParent'),p,x=>`${x.first_name||''} ${x.last_name||''} · ${x.phone||'No phone'} · ${x.sms_enabled?'SMS ON':'SMS OFF'} · ${x.communication_consent?'Consent ON':'Consent OFF'}`,'Select parent / guardian');}catch(e){opts($('cmParent'),[],()=>{},'Unable to load parents');}};
+  const loadClassLearners=async()=>{const c=$('cmMessageClass').value,y=$('cmYear').value,t=$('cmTerm').value;if(!c||!y||!t){opts($('cmLearner'),[],()=>{},'Select class and term first');return;}try{const rows=await api(`/api/reports/${sid}/class/${c}/${y}/${t}/learners`);opts($('cmLearner'),rows,x=>`${x.first_name||''} ${x.last_name||''} · ${x.admission_no||''}`,'Select learner');}catch(e){opts($('cmLearner'),state.learners.filter(x=>String(x.class_id)===String(c)),x=>`${x.first_name||''} ${x.last_name||''} · ${x.admission_no||''}`,'Select learner');}};
+  const loadHistory=async()=>{try{const h=await api(`/api/communications/${sid}/history`);$('cmHistory').innerHTML=`<div class="table-wrap"><table><thead><tr><th>Date</th><th>Parent</th><th>Type</th><th>Status</th><th>Message</th></tr></thead><tbody>${h.slice(0,100).map(x=>`<tr><td>${esc(new Date(x.created_at).toLocaleString())}</td><td>${esc((x.parent_first_name||'')+' '+(x.parent_last_name||''))}<br>${esc(x.phone||'')}</td><td>${esc(x.message_type)}</td><td>${esc(x.status)}</td><td>${esc(x.body)}</td></tr>`).join('')||'<tr><td colspan="5">No messages recorded.</td></tr>'}</tbody></table></div>`;}catch(e){$('cmHistory').innerHTML=`<div class="notice">${esc(e.message)}</div>`;}};
+  $('cmYear').onchange=async()=>{await loadTerms();await loadClassLearners();};$('cmMessageClass').onchange=loadClassLearners;
+- $('cmPublish').onclick=async()=>{const y=$('cmYear').value,t=$('cmTerm').value,c=$('cmClass').value;if(!y||!t||!c)return alert('Select academic year, term and class first.');if(!confirm('Publish this class results and send one result SMS to each linked parent? Already published notifications will be skipped.'))return;try{$('cmPublishMsg').textContent='Processing every learner and linked parent…';const r=await api(`/api/communications/${sid}/publish-class-results`,{method:'POST',body:{academic_year_id:y,term_id:t,class_id:c}});$('cmPublishMsg').innerHTML=`Completed: ${r.learners} learners; ${r.sent||0} sent, ${r.queued||0} queued, ${r.skipped||0} skipped, ${r.failed||0} failed.`+(Array.isArray(r.details)&&r.details.length?`<div class=\"table-wrap\"><table><thead><tr><th>Learner</th><th>Parent</th><th>Phone</th><th>Status</th><th>Reason</th></tr></thead><tbody>${r.details.map(x=>`<tr><td>${esc(x.learner||'')}</td><td>${esc(x.parent||'')}</td><td>${esc(x.phone||'')}</td><td>${esc(x.status||'')}</td><td>${esc(x.reason||'')}</td></tr>`).join('')}</tbody></table></div>`:'');await loadHistory();}catch(e){$('cmPublishMsg').textContent=e.message;}};
+  $('cmSend').onclick=async()=>{const type=$('cmRecipient').value,msg=$('cmMessage').value.trim();if(!msg)return alert('Enter a message.');const body={message:msg,message_type:'SCHOOL_MESSAGE'};if(type==='class'){if(!$('cmMessageClass').value)return alert('Select a class.');body.class_id=$('cmMessageClass').value;}else if(type==='learner'){if(!$('cmLearner').value)return alert('Select a learner.');body.learner_id=$('cmLearner').value;}else{if(!$('cmParent').value)return alert('Select a parent / guardian.');body.parent_guardian_ids=[$('cmParent').value];}try{const r=await api(`/api/communications/${sid}/send`,{method:'POST',body});$('cmSendMsg').textContent=`Message processed: ${r.sent||0} sent, ${r.queued||0} queued, ${r.failed||0} failed, ${r.skipped||0} duplicate skipped.`;$('cmMessage').value='';await loadHistory();}catch(e){$('cmSendMsg').textContent=e.message;}};
+  $('cmRecipient').onchange=async()=>{const t=$('cmRecipient').value;$('cmMessageClass').disabled=t!=='class';$('cmLearner').disabled=t!=='learner';$('cmParent').disabled=t!=='parent';if(t==='parent')await loadParents();};$('cmRecipient').dispatchEvent(new Event('change'));await loadTerms();if(!$('cmTerm').value&&$('cmYear').value){const rr=state.terms[$('cmYear').value]||[];if(rr.length)$('cmTerm').value=rr[0].id;}await loadParents();loadHistory();}
+ async function renderSchoolFinanceModule(){
