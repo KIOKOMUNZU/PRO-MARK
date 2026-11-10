@@ -764,6 +764,14 @@
     html.push(analyticsKpi('Mean grade', esc(k.mean_grade || '—'), '', 'Admin-saved grading bands', null));
     html.push(analyticsKpi('Pass rate', pct(k.pass_rate), '', deltaChip(k.pass_delta) + ' <span class="zrc-sub">at ' + num(k.pass_mark, 0) + '%+</span>', null));
     html.push(analyticsKpi('Ranked learners', String(k.learners || 0), '', 'Learners with usable marks', null));
+    if (k.mean_points != null) {
+      html.push(analyticsKpi('Mean Points (GPA)', num(k.mean_points, 2), '', deltaChip(k.points_delta) + ' <span class="zrc-sub">pts movement</span>', null));
+    }
+    if (k.quality_pass_rate != null) {
+      html.push(analyticsKpi('Quality Pass (ME+EE)', pct(k.quality_pass_rate), '', 'Junior School progression standard', null));
+      html.push(analyticsKpi('High Mastery (EE)', pct(k.high_mastery_rate), '', 'Levels 7 & 8 advanced mastery', null));
+      html.push(analyticsKpi('Remedial Support', pct(k.remediation_rate), '', 'Levels 1–4 needing clinic intervention', null));
+    }
     html.push(analyticsKpi('Deviation (σ)', num(k.deviation, 1), '', 'Spread of averages — lower is tighter', null));
     html.push(analyticsKpi('Value addition', k.value_addition == null ? '—' : (Number(k.value_addition) > 0 ? '+' : '') + num(k.value_addition, 2), '', 'Mean movement vs previous term', null));
     html.push('</div>');
@@ -787,6 +795,73 @@
     html.push('<div class="zrc-chart-card wide"><h3>Subject mastery by class</h3><div class="zrc-sub">Mean score per class and subject — darker red is support needed, green is secure.</div>' +
       heatmap(data.heatmap.rows, data.heatmap.cols, data.heatmap.values, 'Subject mastery by class') +
       '<div class="zrc-heat-scale"><i></i><div class="zrc-heat-ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div></div></div>');
+
+    // Zeraki 1: Stream & Class Comparative League Table
+    if ((data.stream_comparison || []).length > 1 || (data.stream_comparison || []).length === 1 && !state.analyticsSel.class) {
+      html.push('<div class="zrc-chart-card wide"><h3>Stream &amp; Class Comparative League</h3><div class="zrc-sub">Inter-stream league table comparing mean percentage, GPA points, trajectory deviation and gender split.</div><div class="zrc-table-wrap"><table class="zrc-table"><thead><tr><th class="center">Rank</th><th>Stream / Class</th><th class="num">Enrolled</th><th class="num">Scored</th><th class="num">Mean</th><th class="num">Mean Pts</th><th class="center">Grade</th><th class="num">Δ prev</th><th class="num">Quality (ME+EE)</th><th class="center">Boys vs Girls</th></tr></thead><tbody>');
+      data.stream_comparison.forEach(function (s) {
+        var bM = s.gender && s.gender.boys && s.gender.boys.mean != null ? num(s.gender.boys.mean, 1) + '%' : '—';
+        var gM = s.gender && s.gender.girls && s.gender.girls.mean != null ? num(s.gender.girls.mean, 1) + '%' : '—';
+        html.push('<tr><td class="center font-bold"><b>#' + (s.rank || '—') + '</b></td><td class="name"><b>' + esc(s.stream_name) + '</b></td><td class="num">' + (s.enrolled || 0) + '</td><td class="num">' + (s.scored || 0) + '</td><td class="num total">' + num(s.mean, 2) + '%</td><td class="num">' + num(s.mean_points, 2) + '</td><td class="center">' + gradeChip(s.grade) + '</td><td class="num">' + deltaChip(s.delta) + '</td><td class="num"><b>' + pct(s.quality_pass_pct) + '</b></td><td class="center"><span class="zrc-sub">B: ' + bM + ' · G: ' + gM + '</span></td></tr>');
+      });
+      html.push('</tbody></table></div></div>');
+    }
+
+    // Zeraki 2: Gender Disaggregated Performance & Learning Area Gap
+    if (data.gender_analysis && data.gender_analysis.summary) {
+      var ga = data.gender_analysis;
+      var sum = ga.summary;
+      html.push('<div class="zrc-chart-card wide"><h3>Gender Disaggregated Performance &amp; Learning Area Gap</h3><div class="zrc-sub">Boys vs Girls parity index across overall performance, GPA, and individual subjects.</div>');
+      html.push('<div class="zrc-analytics-kpis" style="margin-bottom:12px">');
+      html.push(analyticsKpi('Boys Average', sum.boys.mean != null ? num(sum.boys.mean, 2) + '%' : '—', '', (sum.boys.count || 0) + ' boys · ' + num(sum.boys.mean_points, 2) + ' GPA', null));
+      html.push(analyticsKpi('Girls Average', sum.girls.mean != null ? num(sum.girls.mean, 2) + '%' : '—', '', (sum.girls.count || 0) + ' girls · ' + num(sum.girls.mean_points, 2) + ' GPA', null));
+      var gapText = sum.gap == null ? '—' : (Number(sum.gap) > 0 ? '+Boys by ' + num(sum.gap, 2) + '%' : (Number(sum.gap) < 0 ? '+Girls by ' + num(Math.abs(sum.gap), 2) + '%' : 'Parity (0.00%)'));
+      html.push(analyticsKpi('Gender Gap', gapText, '', 'Deviation between boys and girls', null));
+      html.push('</div>');
+
+      if ((ga.subjects || []).length) {
+        html.push('<div class="zrc-table-wrap"><table class="zrc-table"><thead><tr><th>Learning Area</th><th class="num">Boys Scored</th><th class="num">Boys Mean</th><th class="num">Girls Scored</th><th class="num">Girls Mean</th><th class="center">Gender Gap</th></tr></thead><tbody>');
+        ga.subjects.forEach(function (sub) {
+          var bM = sub.boys_mean != null ? num(sub.boys_mean, 1) + '%' : '—';
+          var gM = sub.girls_mean != null ? num(sub.girls_mean, 1) + '%' : '—';
+          var gDiff = sub.gap == null ? '—' : (Number(sub.gap) > 0 ? '<span style="color:#2563eb;font-weight:700">+Boys ' + num(sub.gap, 1) + '%</span>' : (Number(sub.gap) < 0 ? '<span style="color:#db2777;font-weight:700">+Girls ' + num(Math.abs(sub.gap), 1) + '%</span>' : 'Parity'));
+          html.push('<tr><td class="name">' + esc(sub.subject_name) + '</td><td class="num">' + sub.boys_count + '</td><td class="num">' + bM + '</td><td class="num">' + sub.girls_count + '</td><td class="num">' + gM + '</td><td class="center">' + gDiff + '</td></tr>');
+        });
+        html.push('</tbody></table></div>');
+      }
+      html.push('</div>');
+    }
+
+    // Zeraki 3: Learner Remediation & Intervention Quadrants
+    if (data.intervention_quadrants) {
+      var iq = data.intervention_quadrants;
+      var counts = iq.counts || {};
+      html.push('<div class="zrc-chart-card wide"><h3>Academic Intervention &amp; Remediation Command</h3><div class="zrc-sub">Learner segmentation for targeted academic clinics, enrichment, and urgent support.</div>');
+      html.push('<div class="zrc-analytics-kpis" style="margin-bottom:14px">');
+      html.push(analyticsKpi('High Flyers', String(counts.high_flyers || 0), '', 'Exceeding expectations (EE1/EE2)', null));
+      html.push(analyticsKpi('Solid Core', String(counts.solid_core || 0), '', 'Meeting expectations (ME1/ME2)', null));
+      html.push(analyticsKpi('Bottleneck Strugglers', String(counts.bottleneck_strugglers || 0), '', 'Passing overall but failing 1–2 subjects', null));
+      html.push(analyticsKpi('Urgent Intervention', String(counts.urgent_intervention || 0), '', 'At-risk candidates failing 3+ areas', null));
+      html.push('</div>');
+
+      if ((iq.bottleneck_strugglers || []).length) {
+        html.push('<details class="zrc-panel" style="margin-bottom:10px;border:1px solid #f59e0b;border-radius:8px;padding:10px"><summary style="cursor:pointer;font-weight:700;color:#b45309">⚠️ Bottleneck Strugglers (' + (counts.bottleneck_strugglers || 0) + ' learners) — Needs Targeted Subject Clinic</summary><div class="zrc-table-wrap" style="margin-top:10px"><table class="zrc-table"><thead><tr><th>Learner</th><th>Class</th><th class="num">Overall Mean</th><th>Bottleneck Learning Area(s)</th></tr></thead><tbody>');
+        iq.bottleneck_strugglers.forEach(function (l) {
+          var tags = (l.bottlenecks || []).map(function (b) { return '<span class="zrc-chip" style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d;padding:2px 7px;border-radius:4px;margin-right:4px;font-size:11px">' + esc(b.subject_name) + ' (' + num(b.average, 0) + '%)</span>'; }).join('');
+          html.push('<tr><td class="name"><b>' + esc(l.name) + '</b> <span class="zrc-sub">' + esc(l.admission_no || '') + '</span></td><td>' + esc(l.class_name || '—') + '</td><td class="num total">' + num(l.average, 1) + '%</td><td>' + tags + '</td></tr>');
+        });
+        html.push('</tbody></table></div></details>');
+      }
+
+      if ((iq.urgent_intervention || []).length) {
+        html.push('<details class="zrc-panel" style="border:1px solid #ef4444;border-radius:8px;padding:10px"><summary style="cursor:pointer;font-weight:700;color:#b91c1c">🚨 Urgent Academic Intervention List (' + (counts.urgent_intervention || 0) + ' learners)</summary><div class="zrc-table-wrap" style="margin-top:10px"><table class="zrc-table"><thead><tr><th>Learner</th><th>Class</th><th class="num">Average</th><th class="center">Grade</th><th>Failing Subject Count</th></tr></thead><tbody>');
+        iq.urgent_intervention.forEach(function (l) {
+          html.push('<tr><td class="name"><b>' + esc(l.name) + '</b> <span class="zrc-sub">' + esc(l.admission_no || '') + '</span></td><td>' + esc(l.class_name || '—') + '</td><td class="num total" style="color:#dc2626">' + num(l.average, 1) + '%</td><td class="center">' + gradeChip(l.grade) + '</td><td class="center font-bold" style="color:#dc2626">' + (l.failed_subjects_count || (l.failing_subjects || []).length) + ' subject(s) below pass</td></tr>');
+        });
+        html.push('</tbody></table></div></details>');
+      }
+      html.push('</div>');
+    }
 
     if ((data.subject_analysis || []).length) {
       html.push('<div class="zrc-chart-card wide"><h3>Subject performance &amp; teacher analysis</h3><div class="zrc-sub">Mean, grade, spread and movement per subject — grades come from the grading system the admin saved for this scope.</div><div class="zrc-table-wrap"><table class="zrc-table"><thead><tr><th>Subject</th><th>Teacher</th><th class="num">Mean</th><th class="center">Grade</th><th class="num">High</th><th class="num">Low</th><th class="num">Pass %</th><th class="num">σ</th><th class="num">Δ prev</th><th class="num">Scored</th></tr></thead><tbody>');
