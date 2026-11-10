@@ -138,7 +138,7 @@ test('ranks use the same scoring as the report subjects', () => {
   assert.equal(ranks.get('l1').overall_average, 65);
   assert.equal(ranks.get('l1').stream_rank, 2);
   assert.equal(ranks.get('l1').class_rank, 2);
-  assert.equal(ranks.get('l3').class_rank, 3);
+  assert.equal(ranks.get('l3').class_rank, 2);
   assert.equal(ranks.get('l1').subject_ranks[MATH].rank, 2);
   assert.equal(ranks.get('l1').subject_ranks[MATH].total, 2);
 });

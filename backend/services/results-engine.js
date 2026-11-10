@@ -580,6 +580,289 @@ function csvCell(value) {
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
+
+function pointsForBand(labelOrMark, bands) {
+  if (labelOrMark == null || !bands || !bands.length) return null;
+  if (typeof labelOrMark === 'string') {
+    const found = bands.find(b => b.label && b.label.toLowerCase() === labelOrMark.toLowerCase());
+    if (found && found.points != null && isFinite(Number(found.points))) {
+      return Number(found.points);
+    }
+  }
+  const num = Number(labelOrMark);
+  if (isFinite(num)) {
+    const band = bandFor(num, bands);
+    if (band && band.points != null && isFinite(Number(band.points))) {
+      return Number(band.points);
+    }
+  }
+  return null;
+}
+
+function calculateMeanPoints(rows, bands) {
+  const pts = (rows || []).map(r => {
+    if (r.points != null && r.points !== '' && isFinite(Number(r.points))) {
+      return Number(r.points);
+    }
+    return pointsForBand(r.grade || r.average, bands);
+  }).filter(p => p != null && isFinite(p));
+  return pts.length ? round(averageOf(pts), 2) : null;
+}
+
+function isHighMastery(row, bands) {
+  const g = (row.grade || '').toUpperCase();
+  if (g.startsWith('EE') || g === 'A' || g === 'A-') return true;
+  const p = Number(row.points != null && row.points !== '' ? row.points : pointsForBand(row.grade || row.average, bands));
+  return isFinite(p) && p >= 7;
+}
+
+function isCompetencyPass(row, bands, passMark = 50) {
+  const g = (row.grade || '').toUpperCase();
+  if (g.startsWith('EE') || g.startsWith('ME') || ['A', 'A-', 'B+', 'B', 'B-', 'C+'].includes(g)) return true;
+  const p = Number(row.points != null && row.points !== '' ? row.points : pointsForBand(row.grade || row.average, bands));
+  if (isFinite(p) && p >= 5) return true;
+  return row.average != null && row.average >= passMark;
+}
+
+function calculateQualityIndices(rows, bands, passMark = 50) {
+  const valid = (rows || []).filter(r => r.average != null);
+  const total = valid.length;
+  if (!total) {
+    return {
+      high_mastery_count: 0, high_mastery_pct: 0,
+      quality_pass_count: 0, quality_pass_pct: 0,
+      remediation_count: 0, remediation_pct: 0,
+      total_candidates: 0
+    };
+  }
+  let highMastery = 0;
+  let qualityPass = 0;
+  for (const r of valid) {
+    if (isHighMastery(r, bands)) highMastery++;
+    if (isCompetencyPass(r, bands, passMark)) qualityPass++;
+  }
+  const remediation = total - qualityPass;
+  return {
+    high_mastery_count: highMastery,
+    high_mastery_pct: round((highMastery / total) * 100, 1),
+    quality_pass_count: qualityPass,
+    quality_pass_pct: round((qualityPass / total) * 100, 1),
+    remediation_count: remediation,
+    remediation_pct: round((remediation / total) * 100, 1),
+    total_candidates: total
+  };
+}
+
+function normalizeGender(g) {
+  if (!g) return 'other';
+  const val = String(g).trim().toLowerCase();
+  if (val === 'm' || val === 'male' || val === 'boy') return 'male';
+  if (val === 'f' || val === 'female' || val === 'girl') return 'female';
+  return 'other';
+}
+
+function buildStreamComparison(currentRows, previousRows, classList, labels, defaultBands, passMark = 50) {
+  const prevByClass = new Map();
+  for (const r of (previousRows || []).filter(r => r.average != null)) {
+    const k = r.class_name || 'Unassigned';
+    if (!prevByClass.has(k)) prevByClass.set(k, []);
+    prevByClass.get(k).push(r.average);
+  }
+
+  const streams = (classList || []).map(entry => {
+    const cBands = (entry.bands && entry.bands.length) ? entry.bands : defaultBands;
+    const rows = (currentRows || []).filter(r => (r.class_name || 'Unassigned') === entry.name);
+    const graded = rows.filter(r => r.average != null);
+    const mean = averageOf(graded.map(r => r.average));
+    const meanPoints = calculateMeanPoints(graded, cBands);
+    const band = mean == null ? null : bandFor(mean, cBands);
+    const prevAverages = prevByClass.get(entry.name);
+    const priorMean = prevAverages && prevAverages.length ? averageOf(prevAverages) : null;
+    const quality = calculateQualityIndices(graded, cBands, passMark);
+
+    const boys = graded.filter(r => normalizeGender(r.gender) === 'male');
+    const girls = graded.filter(r => normalizeGender(r.gender) === 'female');
+
+    const topLearners = [...graded]
+      .sort((a, b) => b.average - a.average)
+      .slice(0, 3)
+      .map(r => ({ name: r.name, admission_no: r.admission_no, average: r.average, grade: r.grade }));
+
+    const atRiskLearners = [...graded]
+      .filter(r => r.average < (passMark || 50))
+      .sort((a, b) => a.average - b.average)
+      .slice(0, 3)
+      .map(r => ({ name: r.name, admission_no: r.admission_no, average: r.average, grade: r.grade }));
+
+    return {
+      stream_name: entry.name,
+      enrolled: rows.length,
+      scored: graded.length,
+      mean: round(mean, 2),
+      mean_points: meanPoints,
+      grade: band ? band.label : '',
+      delta: priorMean == null || mean == null ? null : round(mean - priorMean, 2),
+      deviation: round(deviationOf(graded.map(r => r.average)), 1),
+      counts: countBands(graded.map(r => r.grade), labels),
+      quality_pass_pct: quality.quality_pass_pct,
+      high_mastery_pct: quality.high_mastery_pct,
+      remediation_pct: quality.remediation_pct,
+      gender: {
+        boys: {
+          count: boys.length,
+          mean: boys.length ? round(averageOf(boys.map(r => r.average)), 2) : null,
+          mean_points: calculateMeanPoints(boys, cBands)
+        },
+        girls: {
+          count: girls.length,
+          mean: girls.length ? round(averageOf(girls.map(r => r.average)), 2) : null,
+          mean_points: calculateMeanPoints(girls, cBands)
+        }
+      },
+      top_learners: topLearners,
+      at_risk: atRiskLearners
+    };
+  }).filter(s => s.scored > 0 || s.enrolled > 0);
+
+  return streams
+    .sort((a, b) => (b.mean ?? -Infinity) - (a.mean ?? -Infinity) || a.stream_name.localeCompare(b.stream_name))
+    .map((s, index) => ({ rank: index + 1, ...s }));
+}
+
+function buildGenderAnalysis(currentRows, labels, bands, passMark = 50) {
+  const graded = (currentRows || []).filter(r => r.average != null);
+  const boys = graded.filter(r => normalizeGender(r.gender) === 'male');
+  const girls = graded.filter(r => normalizeGender(r.gender) === 'female');
+
+  const boysMean = boys.length ? round(averageOf(boys.map(r => r.average)), 2) : null;
+  const girlsMean = girls.length ? round(averageOf(girls.map(r => r.average)), 2) : null;
+  const boysPoints = calculateMeanPoints(boys, bands);
+  const girlsPoints = calculateMeanPoints(girls, bands);
+  const boysQuality = calculateQualityIndices(boys, bands, passMark);
+  const girlsQuality = calculateQualityIndices(girls, bands, passMark);
+
+  const boysGrades = countBands(boys.map(r => r.grade), labels);
+  const girlsGrades = countBands(girls.map(r => r.grade), labels);
+  const bandDistribution = (labels || []).map(label => ({
+    label,
+    boys: boysGrades[label] || 0,
+    girls: girlsGrades[label] || 0,
+    total: (boysGrades[label] || 0) + (girlsGrades[label] || 0)
+  }));
+
+  const subjectMap = new Map();
+  for (const row of currentRows || []) {
+    const g = normalizeGender(row.gender);
+    for (const s of row.subjects || []) {
+      if (s.average == null) continue;
+      const key = String(s.subject_id);
+      if (!subjectMap.has(key)) {
+        subjectMap.set(key, {
+          subject_id: s.subject_id,
+          subject_code: s.subject_code || '',
+          subject_name: s.subject_name || 'Subject',
+          boys: [],
+          girls: []
+        });
+      }
+      const item = subjectMap.get(key);
+      if (g === 'male') item.boys.push(Number(s.average));
+      else if (g === 'female') item.girls.push(Number(s.average));
+    }
+  }
+
+  const subjects = [...subjectMap.values()].map(s => {
+    const bMean = s.boys.length ? round(averageOf(s.boys), 2) : null;
+    const gMean = s.girls.length ? round(averageOf(s.girls), 2) : null;
+    const gap = bMean != null && gMean != null ? round(bMean - gMean, 2) : null;
+    return {
+      subject_id: s.subject_id,
+      subject_code: s.subject_code,
+      subject_name: s.subject_name,
+      boys_count: s.boys.length,
+      boys_mean: bMean,
+      girls_count: s.girls.length,
+      girls_mean: gMean,
+      gap
+    };
+  }).sort((a, b) => a.subject_name.localeCompare(b.subject_name));
+
+  return {
+    summary: {
+      boys: {
+        count: boys.length,
+        mean: boysMean,
+        mean_points: boysPoints,
+        quality_pass_pct: boysQuality.quality_pass_pct,
+        high_mastery_pct: boysQuality.high_mastery_pct
+      },
+      girls: {
+        count: girls.length,
+        mean: girlsMean,
+        mean_points: girlsPoints,
+        quality_pass_pct: girlsQuality.quality_pass_pct,
+        high_mastery_pct: girlsQuality.high_mastery_pct
+      },
+      gap: boysMean != null && girlsMean != null ? round(boysMean - girlsMean, 2) : null,
+      points_gap: boysPoints != null && girlsPoints != null ? round(boysPoints - girlsPoints, 2) : null
+    },
+    bands: bandDistribution,
+    subjects
+  };
+}
+
+function buildInterventionQuadrants(currentRows, bands, passMark = 50) {
+  const pm = passMark ?? 50;
+  const highFlyers = [];
+  const solidCore = [];
+  const bottleneckStrugglers = [];
+  const urgentIntervention = [];
+
+  for (const r of (currentRows || [])) {
+    if (r.average == null) continue;
+    const subjects = (r.subjects || []).filter(s => s.average != null);
+    const failedSubjects = subjects.filter(s => s.average < pm).map(s => ({
+      subject_id: s.subject_id,
+      subject_name: s.subject_name || s.subject_code,
+      average: s.average,
+      grade: s.grade
+    }));
+
+    const item = {
+      learner_id: r.learner_id,
+      name: r.name,
+      admission_no: r.admission_no,
+      class_name: r.class_name,
+      average: r.average,
+      grade: r.grade,
+      failed_subjects_count: failedSubjects.length
+    };
+
+    if (isHighMastery(r, bands) && failedSubjects.length === 0) {
+      highFlyers.push(item);
+    } else if (r.average < 40 || failedSubjects.length >= 3) {
+      urgentIntervention.push({ ...item, failing_subjects: failedSubjects });
+    } else if (r.average >= pm && failedSubjects.length > 0) {
+      bottleneckStrugglers.push({ ...item, bottlenecks: failedSubjects });
+    } else {
+      solidCore.push(item);
+    }
+  }
+
+  return {
+    counts: {
+      high_flyers: highFlyers.length,
+      solid_core: solidCore.length,
+      bottleneck_strugglers: bottleneckStrugglers.length,
+      urgent_intervention: urgentIntervention.length
+    },
+    high_flyers: highFlyers.sort((a, b) => b.average - a.average).slice(0, 15),
+    solid_core: solidCore.sort((a, b) => b.average - a.average).slice(0, 15),
+    bottleneck_strugglers: bottleneckStrugglers.sort((a, b) => b.average - a.average).slice(0, 15),
+    urgent_intervention: urgentIntervention.sort((a, b) => a.average - b.average).slice(0, 15)
+  };
+}
+
 function buildAnalysisCsv(analytics) {
   const a = analytics || {};
   const k = a.kpis || {};
@@ -1395,6 +1678,20 @@ async function buildAnalytics(schoolId, query = {}) {
     });
   const classBands = buildClassBands(currentStats.rows, classList, bandLabels);
 
+  const currentPoints = calculateMeanPoints(currentStats.rows, scopeBands);
+  const previousPoints = previousStats ? calculateMeanPoints(previousStats.rows, scopeBands) : null;
+  const qualityIndices = calculateQualityIndices(currentStats.rows, scopeBands, currentStats.passMark);
+  const streamComparison = buildStreamComparison(
+    currentStats.rows, previousStats ? previousStats.rows : [],
+    classList, bandLabels, scopeBands, currentStats.passMark
+  );
+  const genderAnalysis = buildGenderAnalysis(
+    currentStats.rows, bandLabels, scopeBands, currentStats.passMark
+  );
+  const interventionQuadrants = buildInterventionQuadrants(
+    currentStats.rows, scopeBands, currentStats.passMark
+  );
+
   const delta = (curr, prev) =>
     curr == null || prev == null ? null : round(curr - prev, 2);
 
@@ -1403,6 +1700,12 @@ async function buildAnalytics(schoolId, query = {}) {
     kpis: {
       mean: currentStats.mean,
       mean_grade: currentStats.meanGrade,
+      mean_points: currentPoints,
+      previous_mean_points: previousPoints,
+      points_delta: delta(currentPoints, previousPoints),
+      quality_pass_rate: qualityIndices.quality_pass_pct,
+      high_mastery_rate: qualityIndices.high_mastery_pct,
+      remediation_rate: qualityIndices.remediation_pct,
       pass_rate: currentStats.passRate,
       pass_mark: currentStats.passMark,
       learners: currentStats.learners,
@@ -1436,6 +1739,10 @@ async function buildAnalytics(schoolId, query = {}) {
     band_labels: bandLabels,
     subject_analysis: subjectAnalysis,
     class_bands: classBands,
+    quality_indices: qualityIndices,
+    stream_comparison: streamComparison,
+    gender_analysis: genderAnalysis,
+    intervention_quadrants: interventionQuadrants,
     subject_toppers: buildSubjectToppers(current.rows),
     teachers: buildTeacherRows(subjectAnalysis),
     top_performers: currentStats.rows.slice(0, 5).map(row => ({
@@ -1535,6 +1842,12 @@ async function getOptions(schoolId, query = {}) {
 }
 
 module.exports = {
+  pointsForBand,
+  calculateMeanPoints,
+  calculateQualityIndices,
+  buildStreamComparison,
+  buildGenderAnalysis,
+  buildInterventionQuadrants,
   getOptions,
   buildMerit,
   buildCompleteness,
